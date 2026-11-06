@@ -290,6 +290,8 @@ Design response:
 2. **Stop outside hours:** agents get `closed` when their hours end instead of polling overnight. The user rejoins them the next day, which fits the manual joining decision.
 3. **Fewer idle agents:** the user joins agents only to rooms in active use.
 
+4. **Breaks:** **Take a break** tells agents to stop with a `closed` status, so they use no allowance. Agents cannot be woken again, so the user pastes each join prompt, and the first agent to rejoin ends the break. **Pause** differs because agents keep waiting, which uses allowance, and they continue automatically on Resume.
+
 If idle cost is still too high after Phase 0, the fallback is to add `idle_stop_minutes`. An agent would end its loop after a period of no activity, and the user would rejoin it when needed.
 
 ### Agent status on the page

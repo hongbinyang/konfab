@@ -329,6 +329,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { ok: true };
   });
 
+  app.post("/api/rooms/:id/break", async (request) => {
+    service.takeBreak(idParams.parse(request.params).id);
+    return { ok: true };
+  });
+
+  app.post("/api/break-all", async () => {
+    service.takeBreakAll();
+    return { ok: true };
+  });
+
   app.post("/api/pause-all", async (request) => {
     service.setAllPaused(pauseBody.parse(request.body).paused);
     return { ok: true };

@@ -52,26 +52,35 @@ Use a separate app conversation for each room. Agents stop when their hours end,
 
 Record the results in the table below.
 
-| Check              | How to run it                                                                                                                              | Result |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| **T1 Connection**  | Post `Hello`. Both agents should reply in order.                                                                                           |        |
-| **Mentions**       | Post `@codex say something`. Only Codex should reply.                                                                                      |        |
-| **Agent to agent** | Post `@claude ask @codex one question`. Both should take a turn.                                                                           |        |
-| **Streak limit**   | Ask both to keep mentioning each other. The room should stop after 5 agent messages.                                                       |        |
-| **Code review**    | Ask both agents to review `average.py` and discuss what they find.                                                                         |        |
-| **Two rooms**      | Join a second room with new conversations. Each room should stay separate.                                                                 |        |
-| **Pause**          | Pause a room, then post. No agent should start a turn until you resume.                                                                    |        |
-| **T2 Waiting**     | Leave both agents idle for at least one hour. Note how long each keeps waiting, and when each stops.                                       |        |
-| **T2 Cost**        | Note each agent's allowance before and after one idle hour, plus **Calls per hour** under **Activity**.                                    |        |
-| **T3 Prompts**     | With full access on, note any approval prompts during the test.                                                                            |        |
-| **T4 Rules**       | After at least 20 turns, check whether the agent still returns to the loop without being told.                                             |        |
-| **T5 Allowance**   | Ask each agent whether it can see its remaining allowance.                                                                                 |        |
-| **Permission**     | Ask an agent to prepare a push to a repo that isn't pre-approved. A request should appear on the page, and it should wait for your answer. |        |
-| **Hours**          | Set an agent's end time a few minutes ahead in `~/.konfab/config.yaml`, then restart Konfab. The agent should stop at that time.           |        |
-| **Recovery**       | Stop and restart `npm start` while an agent is waiting. It should reconnect without duplicate messages.                                    |        |
-| **Rejoin**         | Paste the join prompt into a new conversation. The old one should stop, and the new one should continue.                                   |        |
+| Check              | How to run it                                                                                                                                           | Result |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| **T1 Connection**  | Post `Hello`. Both agents should reply in order.                                                                                                        |        |
+| **Mentions**       | Post `@codex say something`. Only Codex should reply.                                                                                                   |        |
+| **Agent to agent** | Post `@claude ask @codex one question`. Both should take a turn.                                                                                        |        |
+| **Streak limit**   | Ask both to keep mentioning each other. The room should stop after 5 agent messages.                                                                    |        |
+| **Code review**    | Ask both agents to review `average.py` and discuss what they find.                                                                                      |        |
+| **Two rooms**      | Join a second room with new conversations. Each room should stay separate.                                                                              |        |
+| **Pause**          | Pause a room, then post. No agent should start a turn until you resume.                                                                                 |        |
+| **T2 Waiting**     | Leave both agents idle for at least one hour. Note how long each keeps waiting, and when each stops.                                                    |        |
+| **T2 Cost**        | Note each agent's allowance before and after one idle hour, plus **Calls per hour** under **Activity**.                                                 |        |
+| **T3 Prompts**     | With full access on, note any approval prompts during the test.                                                                                         |        |
+| **T4 Rules**       | After at least 20 turns, check whether the agent still returns to the loop without being told.                                                          |        |
+| **T5 Allowance**   | Ask each agent whether it can see its remaining allowance.                                                                                              |        |
+| **Permission**     | Ask an agent to prepare a push to a repo that isn't pre-approved. A request should appear on the page, and it should wait for your answer.              |        |
+| **Hours**          | Set an agent's end time a few minutes ahead in `~/.konfab/config.yaml`, then restart Konfab. The agent should stop at that time.                        |        |
+| **Break**          | Select **Take a break**. Both agents should stop calling tools. Post a message, then paste a join prompt. The agent should rejoin and see your message. |        |
+| **Recovery**       | Stop and restart `npm start` while an agent is waiting. It should reconnect without duplicate messages.                                                 |        |
+| **Rejoin**         | Paste the join prompt into a new conversation. The old one should stop, and the new one should continue.                                                |        |
 
-## 7. Test longer waits
+## 7. Save allowance with a break
+
+**Pause** stops new turns, but agents keep waiting and using allowance. To save allowance, select **Take a break** for one room, or **Break for all rooms**. Agents stop as soon as they next check in, usually within about a minute, and a turn in progress can finish.
+
+Messages you post during a break wait for the agents. To bring an agent back, select **Copy join prompt** and paste it into its app. The first agent to rejoin ends the break for that room.
+
+Check that it worked by watching **Wait calls** under **Activity**, which should stop increasing. If an agent keeps calling tools, press stop in its app.
+
+## 8. Test longer waits
 
 Longer waits reduce allowance use. Change `wait_timeout_seconds` in `~/.konfab/config.yaml`, then restart Konfab. Try 50, then 300, then 1800.
 
@@ -80,7 +89,7 @@ An app may stop a wait early because of its own tool timeout. The settings below
 - **Codex:** raise `tool_timeout_sec` in the entry in `~/.codex/config.toml`.
 - **Claude:** try setting the `MCP_TOOL_TIMEOUT` environment variable, in milliseconds.
 
-## 8. Pre-approve actions
+## 9. Pre-approve actions
 
 To let agents push to a GitHub repo without asking each time, add it to `~/.konfab/config.yaml`, then restart Konfab:
 
@@ -91,6 +100,11 @@ pre_approvals:
 ```
 
 Agents still use `request_permission` for these actions, so each one is logged.
+
+## Stop Konfab
+
+1. Select **Take a break** or press stop in each app, so agents don't keep retrying.
+2. Press **Ctrl+C** in the terminal running `npm start`.
 
 ## Clean up
 

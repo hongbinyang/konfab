@@ -229,6 +229,23 @@ describe("page API", () => {
     });
   });
 
+  it("starts a break for one room or all rooms", async () => {
+    const one = service.createRoom("one", "", ["claude"]);
+    const two = service.createRoom("two", "", ["codex"]);
+    const single = await call("POST", `/api/rooms/${one.id}/break`);
+    expect(single.statusCode).toBe(200);
+    expect(service.roomState(one.id).room.on_break).toBe(true);
+    expect(service.roomState(two.id).room.on_break).toBe(false);
+
+    const all = await call("POST", "/api/break-all");
+    expect(all.statusCode).toBe(200);
+    expect(service.roomState(two.id).room.on_break).toBe(true);
+    const overview = (await call("GET", "/api/overview")).json();
+    expect(overview.rooms.every((r: { on_break: boolean }) => r.on_break)).toBe(
+      true,
+    );
+  });
+
   it("searches and exports a room", async () => {
     const { id } = service.createRoom("notes", "A topic", ["claude"]);
     service.postUserMessage(id, "Find this 100%");

@@ -286,6 +286,17 @@ a.button {
   margin-bottom: 14px;
 }
 
+.pass {
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.pass .time {
+  font-style: normal;
+}
+
 .hint,
 .muted {
   color: var(--muted);

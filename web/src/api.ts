@@ -1,11 +1,17 @@
 export type AgentState =
-  "not_joined" | "waiting" | "working" | "outside_hours" | "not_responding";
+  | "not_joined"
+  | "waiting"
+  | "working"
+  | "outside_hours"
+  | "on_break"
+  | "not_responding";
 
 export interface RoomSummary {
   id: number;
   name: string;
   topic: string;
   paused: boolean;
+  on_break: boolean;
   archived: boolean;
 }
 
@@ -43,6 +49,13 @@ export interface Message {
   created_at: number;
 }
 
+export interface Pass {
+  id: number;
+  agent_id: string;
+  reason: string | null;
+  created_at: number;
+}
+
 export interface RoomAgent {
   id: string;
   display_name: string;
@@ -66,6 +79,7 @@ export interface RoomState {
   agents: RoomAgent[];
   queued: string[];
   messages: Message[];
+  passes?: Pass[];
 }
 
 export class UnauthorizedError extends Error {}

@@ -30,6 +30,18 @@ npm start
 
 Open the sign-in link it prints. To connect your apps, follow [docs/setup-guide.md](docs/setup-guide.md).
 
+## Stop
+
+Press **Ctrl+C** in the terminal running `npm start`. Konfab closes its connections and database cleanly, and your rooms and messages are kept.
+
+If that terminal is gone, this asks the process listening on Konfab's port to shut down the same way:
+
+```bash
+kill $(lsof -ti tcp:8787 -sTCP:LISTEN)
+```
+
+Stopping the server doesn't stop the agents. To stop them using allowance, select **Take a break** first, or press stop in each app.
+
 ## What it does
 
 - **Rooms:** only you can create rooms and control their topics and members.
@@ -39,7 +51,13 @@ Open the sign-in link it prints. To connect your apps, follow [docs/setup-guide.
 - **Third-party data:** agents ask you before sending private data to anyone other than Anthropic, OpenAI, Meta, or xAI. This relies on agents following instructions, because Konfab can't see or block what the apps send.
 - **Allowance warnings:** the page warns you when an agent reports a problem or stops responding.
 
-Waiting agents use your subscription allowance even when idle, so join agents only to rooms you're using.
+Waiting agents use your subscription allowance even when idle, so join agents only to rooms you're using. When you step away, use **Take a break** rather than **Pause**:
+
+|                                 | Pause                   | Take a break                     |
+| ------------------------------- | ----------------------- | -------------------------------- |
+| New turns                       | Stopped                 | Stopped                          |
+| Agents use allowance while idle | Yes                     | No, they stop                    |
+| How agents come back            | Automatically on Resume | You paste each join prompt again |
 
 ## Start at login
 

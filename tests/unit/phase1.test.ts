@@ -263,6 +263,157 @@ describe("Phase 1 behavior", () => {
     });
   });
 
+  describe("breaks", () => {
+    it("tells a waiting agent to stop, with instructions", () => {
+      service.takeBreak(ROOM);
+      const result = service.poll("claude", claude, true);
+      expect(result).toMatchObject({ status: "closed", reason: "on_break" });
+      expect(JSON.stringify(result)).toContain("Do not call");
+    });
+
+    it("keeps telling a stopped agent to stay stopped", () => {
+      service.takeBreak(ROOM);
+      service.poll("claude", claude, true);
+      expect(service.poll("claude", claude, true)).toMatchObject({
+        status: "closed",
+        reason: "on_break",
+      });
+    });
+
+    it("shows agents as on break, not as a false warning", () => {
+      service.takeBreak(ROOM);
+      now += 10 * 60_000;
+      const state = service.roomState(ROOM);
+      expect(state.room.on_break).toBe(true);
+      expect(state.agents.map((agent) => agent.state)).toEqual([
+        "on_break",
+        "on_break",
+      ]);
+    });
+
+    it("lets a turn in progress finish, then stops that agent", () => {
+      service.postUserMessage(ROOM, "@claude hi");
+      const turn = expectTurn(service.poll("claude", claude, true));
+      service.takeBreak(ROOM);
+      expect(service.roomState(ROOM).agents[0]?.state).toBe("working");
+      expect(service.poll("claude", claude, true).status).toBe("turn");
+
+      service.postAgentMessage("claude", claude, turn.turn_id, "Finished");
+      expect(service.roomState(ROOM).messages).toHaveLength(2);
+      expect(service.poll("claude", claude, true)).toMatchObject({
+        status: "closed",
+        reason: "on_break",
+      });
+    });
+
+    it("queues messages during a break and delivers them after rejoining", () => {
+      service.takeBreak(ROOM);
+      service.postUserMessage(ROOM, "While you were away");
+      expect(service.roomState(ROOM).queued).toEqual(["claude", "codex"]);
+
+      const rejoined = service.join("claude", ROOM).session_id;
+      const turn = expectTurn(service.poll("claude", rejoined, true));
+      expect(turn.messages.map((message) => message.body)).toEqual([
+        "While you were away",
+      ]);
+    });
+
+    it("ends the break when an agent rejoins", () => {
+      service.takeBreak(ROOM);
+      const rejoined = service.join("claude", ROOM).session_id;
+      const state = service.roomState(ROOM);
+      expect(state.room.on_break).toBe(false);
+      expect(state.agents[0]?.state).toBe("waiting");
+      expect(state.agents[1]?.state).toBe("not_joined");
+      expect(service.poll("claude", rejoined, true).status).toBe("idle");
+    });
+
+    it("keeps the old conversation stopped after the break ends", () => {
+      service.takeBreak(ROOM);
+      service.join("claude", ROOM);
+      expect(service.poll("claude", claude, true).status).toBe("closed");
+    });
+
+    it("affects only the chosen room", () => {
+      service.createRoom("other", "", ["codex"]);
+      const other = service.join("codex", "other").session_id;
+      service.takeBreak(ROOM);
+      expect(service.poll("codex", other, true).status).toBe("idle");
+    });
+
+    it("can include every open room", () => {
+      service.createRoom("other", "", ["codex"]);
+      const other = service.join("codex", "other").session_id;
+      service.createRoom("old", "", []);
+      service.archiveRoom("old");
+      service.takeBreakAll();
+      expect(service.poll("claude", claude, true).status).toBe("closed");
+      expect(service.poll("codex", other, true).status).toBe("closed");
+      expect(service.roomState("old").room.on_break).toBe(false);
+    });
+
+    it("rejects a break for an archived room", () => {
+      service.archiveRoom(ROOM);
+      expect(() => service.takeBreak(ROOM)).toThrow("archived");
+    });
+
+    it("stops counting model calls during a break", () => {
+      service.takeBreak(ROOM);
+      service.poll("claude", claude, true);
+      const calls = service.roomState(ROOM).agents[0]?.stats.model_wait_calls;
+      expect(calls).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe("passed turns", () => {
+    const passClaude = (reason?: string) => {
+      service.postUserMessage(ROOM, "@claude hi");
+      const turn = expectTurn(service.poll("claude", claude, true));
+      service.passTurn("claude", claude, turn.turn_id, reason);
+    };
+
+    it("shows a pass and its reason in the room state", () => {
+      passClaude("Nothing to add");
+      expect(service.roomState(ROOM).passes).toMatchObject([
+        { agent_id: "claude", reason: "Nothing to add" },
+      ]);
+    });
+
+    it("shows a pass with no reason", () => {
+      passClaude();
+      expect(service.roomState(ROOM).passes[0]?.reason).toBeNull();
+    });
+
+    it("limits long reasons", () => {
+      passClaude("x".repeat(600));
+      expect(service.roomState(ROOM).passes[0]?.reason).toHaveLength(500);
+    });
+
+    it("keeps passes separate between rooms", () => {
+      service.createRoom("other", "", []);
+      passClaude("Nothing to add");
+      expect(service.roomState("other").passes).toEqual([]);
+    });
+
+    it("does not send passes to other agents or count them in the streak", () => {
+      passClaude("Nothing to add");
+      service.postUserMessage(ROOM, "@codex hi");
+      const turn = expectTurn(service.poll("codex", codex, true));
+      expect(turn.messages.map((message) => message.body)).toEqual([
+        "@claude hi",
+        "@codex hi",
+      ]);
+      expect(service.roomState(ROOM).room.agent_streak).toBe(0);
+    });
+
+    it("includes passes in the export", () => {
+      passClaude("Nothing to add");
+      expect(service.exportRoom(ROOM).markdown).toContain(
+        "Claude passed: Nothing to add",
+      );
+    });
+  });
+
   describe("search and export", () => {
     it("finds text and treats wildcards literally", () => {
       service.postUserMessage(ROOM, "100% done");
@@ -493,7 +644,10 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(2);
+      expect(db.pragma("user_version", { simple: true })).toBe(3);
+      expect(db.prepare("SELECT on_break FROM rooms").get()).toEqual({
+        on_break: 0,
+      });
       expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
       expect(db.pragma("foreign_key_check")).toEqual([]);
       expect(

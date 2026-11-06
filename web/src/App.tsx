@@ -21,6 +21,7 @@ const STATE_LABELS: Record<AgentState, string> = {
   waiting: "Waiting",
   working: "Working",
   outside_hours: "Outside hours",
+  on_break: "On break",
   not_responding: "Not responding",
 };
 
@@ -37,6 +38,10 @@ function formatTime(timestamp: number): string {
   });
 }
 
+const BREAK_CONFIRMATION =
+  "Agents will stop and use no more allowance. To bring one back, paste its join prompt into its app. Start the break?";
+const BREAK_HELP =
+  "Agents stop and use no allowance until you paste their join prompts";
 const CLOSING_SOON_MS = 15 * 60_000;
 const EXTEND_OFFER_MS = 60 * 60_000;
 
@@ -222,7 +227,11 @@ function Sidebar({
         onClick={() => onSelect(room.id)}
       >
         # {room.name}
-        {room.paused && <span className="tag">Paused</span>}
+        {room.on_break ? (
+          <span className="tag">On break</span>
+        ) : (
+          room.paused && <span className="tag">Paused</span>
+        )}
       </button>
     </li>
   );
@@ -266,6 +275,18 @@ function Sidebar({
       >
         {overview.paused_all ? "Resume all rooms" : "Pause all rooms"}
       </button>
+      <button
+        type="button"
+        className="secondary"
+        title={BREAK_HELP}
+        onClick={() => {
+          if (window.confirm(BREAK_CONFIRMATION)) {
+            void act(() => request("/api/break-all", { method: "POST" }));
+          }
+        }}
+      >
+        Break for all rooms
+      </button>
       {archived.length > 0 && (
         <details>
           <summary>Archived ({archived.length})</summary>
@@ -278,20 +299,26 @@ function Sidebar({
 
 function Room({ state, act }: { state: RoomState; act: Act }) {
   const { room, messages, agents } = state;
+  const passes = state.passes ?? [];
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic);
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
-  const lastMessageId = messages.at(-1)?.id;
+  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}`;
+  // On a time tie, a message comes first, because a pass follows what it answers.
+  const timeline = [
+    ...messages.map((message) => ({ kind: "message" as const, ...message })),
+    ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
+  ].sort((a, b) => a.created_at - b.created_at);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RoomState["messages"] | null>(null);
 
   useEffect(() => {
     const list = listRef.current;
     if (list && atBottom.current) list.scrollTop = list.scrollHeight;
-  }, [lastMessageId]);
+  }, [timelineKey]);
 
   const send = () => {
     if (!body.trim()) return;
@@ -392,6 +419,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
                 <button
                   type="button"
                   className="secondary"
+                  title="Stops new turns. Waiting agents still use allowance."
                   onClick={() =>
                     void act(() =>
                       request(`/api/rooms/${room.id}/pause`, {
@@ -403,6 +431,24 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
                 >
                   {room.paused ? "Resume" : "Pause"}
                 </button>
+                {!room.on_break && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    title={BREAK_HELP}
+                    onClick={() => {
+                      if (window.confirm(BREAK_CONFIRMATION)) {
+                        void act(() =>
+                          request(`/api/rooms/${room.id}/break`, {
+                            method: "POST",
+                          }),
+                        );
+                      }
+                    }}
+                  >
+                    Take a break
+                  </button>
+                )}
                 <button
                   type="button"
                   className="secondary"
@@ -487,21 +533,36 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             @mentions to choose who responds.
           </li>
         )}
-        {messages.map((message) => (
-          <li key={message.id}>
-            <span className="sender">
-              {message.sender_type === "user"
-                ? "You"
-                : displayName(message.sender_id)}
-            </span>
-            <span className="time">{formatTime(message.created_at)}</span>
-            <div className="body">
-              <Markdown>{message.body}</Markdown>
-            </div>
-          </li>
-        ))}
+        {timeline.map((item) =>
+          item.kind === "pass" ? (
+            <li key={`pass-${item.id}`} className="pass">
+              {displayName(item.agent_id)} passed
+              {item.reason ? `: ${item.reason}` : ""}
+              <span className="time">{formatTime(item.created_at)}</span>
+            </li>
+          ) : (
+            <li key={`message-${item.id}`}>
+              <span className="sender">
+                {item.sender_type === "user"
+                  ? "You"
+                  : displayName(item.sender_id)}
+              </span>
+              <span className="time">{formatTime(item.created_at)}</span>
+              <div className="body">
+                <Markdown>{item.body}</Markdown>
+              </div>
+            </li>
+          ),
+        )}
       </ol>
 
+      {room.on_break && (
+        <p className="banner">
+          Agents in this room are on break and aren&apos;t using allowance.
+          Messages you post will wait for them. To bring an agent back, copy its
+          join prompt and paste it into its app.
+        </p>
+      )}
       {limited && (
         <p className="banner">
           Agents have posted {room.agent_streak} messages in a row. Post a

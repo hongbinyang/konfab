@@ -140,6 +140,9 @@ const MIGRATIONS: readonly string[] = [
     expires_at INTEGER NOT NULL
   );
   `,
+  `
+  ALTER TABLE rooms ADD COLUMN on_break INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

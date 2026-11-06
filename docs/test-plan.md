@@ -56,7 +56,7 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 | Rejoining without duplicates                             | A4                | Unit, smoke                        | Pass                                              |
 | Turn order, mentions, and streak limit                   | A5 to A11         | Unit, smoke                        | Pass                                              |
 | Agent rules                                              | A12, P1           | Unit                               | Pass                                              |
-| Daily hours                                              | M1 to M3          | Unit                               | Pass                                              |
+| Daily hours and breaks                                   | M1 to M3, M5      | Unit, integration, smoke           | Pass, not yet confirmed with real apps            |
 | Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                              |
 | Repo writer rule                                         | F3                | Unit                               | Pass, relies on agents following it               |
 | Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it               |
@@ -93,11 +93,11 @@ Results from 2026-11-06 on `phase-0-connection-test`:
 
 | Measure                                          | Result                                                                                                       |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Unit and integration tests                       | 103 passed                                                                                                   |
-| Smoke tests                                      | 4 passed                                                                                                     |
+| Unit and integration tests                       | 121 passed                                                                                                   |
+| Smoke tests                                      | 5 passed                                                                                                     |
 | Runtime package vulnerabilities                  | 0                                                                                                            |
 | Development tool vulnerabilities                 | 10 moderate, in the linting tools                                                                            |
-| Line coverage, unit and integration only         | 94.52% overall, 98.08% in `service.ts`, 100% in `hours.ts`                                                   |
+| Line coverage, unit and integration only         | 94.8% overall, 98.22% in `service.ts`, 100% in `hours.ts`                                                    |
 | Upgrade of a copy of the real version 1 database | Passed                                                                                                       |
 | Manual browser check                             | Passed in dark mode, light mode, and at phone width. Search, export, and closing time checked in light mode. |
 
@@ -112,13 +112,15 @@ Results from 2026-11-06 on `phase-0-connection-test`:
 
 Bugs found by testing and review:
 
-| Bug                                                                | Found by             | Covered by                                                           |
-| ------------------------------------------------------------------ | -------------------- | -------------------------------------------------------------------- |
-| A second agent's wait could fail while another agent held the turn | Scripted stdio run   | Unit: "keeps other agents idle while one agent has the active turn"  |
-| The first wait ignored a shorter configured wait length            | Integration test     | Integration: "returns idle when the wait ends with nothing to do"    |
-| The bridge could fail on a stale connection after a server restart | Integration test     | Integration and smoke restart tests                                  |
-| The bridge's wait loop never ended if the server was down          | Code review          | Integration: "ends a wait as idle when the server cannot be reached" |
-| The permission wait ignored the configured wait length             | Slow test run        | Integration: "waits for a permission answer and reports the result"  |
-| HTML in messages disappeared instead of showing as text            | Manual browser check | Manual only until browser tests exist                                |
-| The join prompt did not state the third-party rule                 | Requirement review   | Unit: "states the data rule in the join prompt and on each turn"     |
-| "Open for 1 hour" appeared even when it would change nothing       | Manual browser check | Manual only until browser tests exist                                |
+| Bug                                                                | Found by                                | Covered by                                                           |
+| ------------------------------------------------------------------ | --------------------------------------- | -------------------------------------------------------------------- |
+| A second agent's wait could fail while another agent held the turn | Scripted stdio run                      | Unit: "keeps other agents idle while one agent has the active turn"  |
+| The first wait ignored a shorter configured wait length            | Integration test                        | Integration: "returns idle when the wait ends with nothing to do"    |
+| The bridge could fail on a stale connection after a server restart | Integration test                        | Integration and smoke restart tests                                  |
+| The bridge's wait loop never ended if the server was down          | Code review                             | Integration: "ends a wait as idle when the server cannot be reached" |
+| The permission wait ignored the configured wait length             | Slow test run                           | Integration: "waits for a permission answer and reports the result"  |
+| HTML in messages disappeared instead of showing as text            | Manual browser check                    | Manual only until browser tests exist                                |
+| The join prompt did not state the third-party rule                 | Requirement review                      | Unit: "states the data rule in the join prompt and on each turn"     |
+| "Open for 1 hour" appeared even when it would change nothing       | Manual browser check                    | Manual only until browser tests exist                                |
+| A deliberate pass looked like an agent ignoring the user           | End-to-end test with real apps          | Unit: "passed turns" tests                                           |
+| Pause looked like it saved allowance, but agents kept waiting      | User question during end-to-end testing | Unit, integration, and smoke: "breaks" tests                         |

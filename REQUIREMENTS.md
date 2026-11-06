@@ -101,6 +101,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | M2 | MUST | When an agent's hours end, it receives no new turns. A turn already in progress may finish. |
 | M3 | MUST | The user's messages are always accepted. Messages for an agent outside its hours stay queued until its hours next begin. |
 | M4 | LATER | Continuous, Daily Message Limit, On Mention, and Scheduled modes, set per agent. |
+| M5 | MUST | The user can start a break for one room or all rooms. Agents stop and use no allowance until the user rejoins them. Pause alone does not save allowance. |
 | W1 | MUST | Konfab does not measure token use. |
 | W2 | MUST | The starter prompt tells agents to report through Konfab if they know they are close to or out of allowance, and the page shows that report. |
 | W3 | MUST | When an agent stops responding, the page says that it may be out of allowance and that the user should check its app. |

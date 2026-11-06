@@ -274,6 +274,27 @@ describe("built app over real processes", () => {
     expect((await pending).state).toBe("approved");
   });
 
+  it("stops a waiting agent for a break, and rejoining ends it", async () => {
+    const claude = await connect(tokens[0] ?? "");
+    const first = (await tool(claude, "join_room", { room: ROOM })).session_id;
+    const waiting = tool(claude, "wait_for_turn", { session_id: first });
+    const started = await page(`/api/rooms/${roomId}/break`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(started.status).toBe(200);
+    expect(await waiting).toMatchObject({
+      status: "closed",
+      reason: "on_break",
+    });
+
+    await userPost("While you were away");
+    const second = (await tool(claude, "join_room", { room: ROOM })).session_id;
+    const turn = await tool(claude, "wait_for_turn", { session_id: second });
+    expect(turn.status).toBe("turn");
+    expect(turn.messages.at(-1).body).toBe("While you were away");
+  });
+
   it("protects the app and serves the built page", async () => {
     const signedOut = await fetch(`${url}/api/overview`);
     expect(signedOut.status).toBe(401);
