@@ -51,7 +51,7 @@ describe("KonfabService", () => {
     service = createService();
     service.ensureAgent("claude", "Claude");
     service.ensureAgent("codex", "Codex");
-    service.ensureRoom(ROOM, "Topic", ["claude", "codex"]);
+    service.createRoom(ROOM, "Topic", ["claude", "codex"]);
     claude = service.join("claude", ROOM).session_id;
     codex = service.join("codex", ROOM).session_id;
   });

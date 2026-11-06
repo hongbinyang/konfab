@@ -9,41 +9,51 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { DAY_NAMES } from "./domain/hours.js";
+
+const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM");
+
+const hoursSchema = z.object({
+  start: time,
+  end: time,
+  days: z.array(z.enum(DAY_NAMES)).min(1),
+});
+
+const ALL_DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+const DEFAULT_HOURS = {
+  start: "09:00",
+  end: "18:00",
+  days: [...ALL_DAYS],
+};
+
+const defaultsSchema = z.object({
+  hours: hoursSchema.default(DEFAULT_HOURS),
+  max_consecutive_agent_messages: z.number().int().min(1).default(5),
+  wait_timeout_seconds: z.number().int().min(1).default(50),
+  turn_timeout_minutes: z.number().int().min(1).default(30),
+  max_message_chars: z.number().int().min(1).default(20000),
+});
 
 const configSchema = z.object({
   server: z
     .object({ port: z.number().int().min(1024).max(65535).default(8787) })
-    .default({
-      port: 8787,
-    }),
-  room: z
-    .object({
-      name: z.string().min(1).default("test"),
-      topic: z.string().default("Phase 0 connection test"),
-    })
-    .default({ name: "test", topic: "Phase 0 connection test" }),
-  defaults: z
-    .object({
-      max_consecutive_agent_messages: z.number().int().min(1).default(5),
-      wait_timeout_seconds: z.number().int().min(1).default(50),
-      turn_timeout_minutes: z.number().int().min(1).default(30),
-      max_message_chars: z.number().int().min(1).default(20000),
-    })
-    .default({
-      max_consecutive_agent_messages: 5,
-      wait_timeout_seconds: 50,
-      turn_timeout_minutes: 30,
-      max_message_chars: 20000,
-    }),
+    .default({ port: 8787 }),
+  defaults: defaultsSchema.default(() => defaultsSchema.parse({})),
   agents: z
     .record(
       z.string().regex(/^[a-z][a-z0-9_-]*$/),
-      z.object({ display_name: z.string().min(1) }),
+      z.object({
+        display_name: z.string().min(1),
+        hours: hoursSchema.optional(),
+      }),
     )
     .default({
       claude: { display_name: "Claude" },
       codex: { display_name: "Codex" },
     }),
+  pre_approvals: z
+    .array(z.object({ recipient: z.string().min(1), data: z.string().min(1) }))
+    .default([]),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -51,11 +61,11 @@ export type Config = z.infer<typeof configSchema>;
 const DEFAULT_CONFIG = `server:
   port: 8787
 
-room:
-  name: test
-  topic: Phase 0 connection test
-
 defaults:
+  hours:
+    start: "09:00"
+    end: "18:00"
+    days: [sun, mon, tue, wed, thu, fri, sat]
   max_consecutive_agent_messages: 5
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
@@ -66,6 +76,11 @@ agents:
     display_name: Claude
   codex:
     display_name: Codex
+
+# Actions agents may take without asking. Each one is still logged.
+pre_approvals: []
+#  - recipient: github.com/OWNER/REPO
+#    data: code_push
 `;
 
 export function konfabHome(): string {
@@ -86,7 +101,9 @@ export function ensureHome(home: string): void {
 }
 
 export function loadConfig(home: string): Config {
-  return configSchema.parse(
-    parse(readFileSync(join(home, "config.yaml"), "utf8")) ?? {},
-  );
+  return parseConfig(readFileSync(join(home, "config.yaml"), "utf8"));
+}
+
+export function parseConfig(text: string): Config {
+  return configSchema.parse(parse(text) ?? {});
 }

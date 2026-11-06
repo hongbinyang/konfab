@@ -1,0 +1,417 @@
+:root {
+  color-scheme: light dark;
+  --background: #ffffff;
+  --surface: #f4f4f5;
+  --text: #18181b;
+  --muted: #5f5f67;
+  --border: #d4d4d8;
+  --accent: #1d4ed8;
+  --accent-text: #ffffff;
+  --warning: #92400e;
+  --warning-surface: #fef3c7;
+  --error: #b91c1c;
+  --error-surface: #fee2e2;
+  --good: #166534;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #18181b;
+    --surface: #27272a;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --border: #3f3f46;
+    --accent: #93c5fd;
+    --accent-text: #18181b;
+    --warning: #fcd34d;
+    --warning-surface: #422006;
+    --error: #fca5a5;
+    --error-surface: #450a0a;
+    --good: #86efac;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font:
+    15px/1.5 system-ui,
+    sans-serif;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+input,
+textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.secondary {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+button.quiet {
+  flex: none;
+  padding: 2px 8px;
+  border-color: currentColor;
+  background: transparent;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 300px;
+  height: 100dvh;
+}
+
+.sidebar,
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px 12px;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+}
+
+.panel {
+  border-left: 1px solid var(--border);
+}
+
+.room {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.room.selected {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.tag {
+  flex: none;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stack label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.room-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.room-header form {
+  flex: 1;
+  min-width: 240px;
+}
+
+.room-title {
+  flex: 1;
+  min-width: 200px;
+}
+
+.room-title h2 {
+  overflow-wrap: anywhere;
+}
+
+.room-title p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.banner.warning {
+  background: var(--warning-surface);
+  color: var(--warning);
+}
+
+.banner.error {
+  background: var(--error-surface);
+  color: var(--error);
+}
+
+.messages {
+  flex: 1;
+  min-height: 120px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.messages li {
+  margin-bottom: 14px;
+}
+
+.hint,
+.muted {
+  color: var(--muted);
+}
+
+.muted {
+  margin: 2px 0;
+  font-size: 13px;
+}
+
+.sender {
+  font-weight: 600;
+}
+
+.time {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.body {
+  overflow-wrap: anywhere;
+}
+
+.body > :first-child {
+  margin-top: 2px;
+}
+
+.body > :last-child {
+  margin-bottom: 0;
+}
+
+.body pre {
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.body code {
+  font-size: 0.92em;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.composer label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.composer button {
+  align-self: end;
+}
+
+.card {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+
+.card p {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.card.attention {
+  border-color: var(--warning);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  width: auto;
+}
+
+.state {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.state.waiting,
+.state.working {
+  color: var(--good);
+}
+
+.state.not_responding,
+.warning-text {
+  color: var(--warning);
+  font-size: 13px;
+}
+
+details {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+}
+
+.empty p {
+  color: var(--muted);
+}
+
+.signin {
+  max-width: 480px;
+  margin: 15vh auto;
+  padding: 0 16px;
+}
+
+.signin pre {
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .sidebar,
+  .panel {
+    border: 0;
+    overflow-y: visible;
+  }
+
+  .chat {
+    min-height: 70dvh;
+    border-block: 1px solid var(--border);
+  }
+
+  .messages {
+    max-height: 60dvh;
+  }
+}

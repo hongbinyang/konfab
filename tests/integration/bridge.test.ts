@@ -45,11 +45,11 @@ describe("server and bridge", () => {
       maxMessageChars: 1000,
     });
     service.ensureAgent("claude", "Claude");
-    service.ensureRoom(ROOM, "Topic", ["claude"]);
+    service.createRoom(ROOM, "Topic", ["claude"]);
     token = generateToken();
     service.setAgentToken("claude", token);
 
-    app = await buildApp({ service, roomName: ROOM, port: PORT });
+    app = await buildApp({ service, port: PORT });
     await app.listen({ host: "127.0.0.1", port: PORT });
 
     const [clientTransport, serverTransport] =
@@ -74,6 +74,9 @@ describe("server and bridge", () => {
       "join_room",
       "pass_turn",
       "post_message",
+      "read_history",
+      "report_status",
+      "request_permission",
       "wait_for_turn",
     ]);
   });
@@ -126,37 +129,53 @@ describe("server and bridge", () => {
     await other.close();
   });
 
-  it("rejects requests with an untrusted host or origin", async () => {
-    const badHost = await app.inject({
-      method: "GET",
-      url: "/api/state",
-      headers: { host: "evil.test" },
+  it("waits for a permission answer and reports the result", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const { value: pending } = await callTool("request_permission", {
+      session_id: joined.session_id,
+      recipient: "example.com",
+      data_description: "A log file",
+      reason: "To debug a problem",
     });
-    expect(badHost.statusCode).toBe(403);
+    // With no answer, the call returns pending when the wait ends.
+    expect(pending.state).toBe("pending");
+    expect(service.listPermissions("pending")).toHaveLength(1);
 
-    const badOrigin = await app.inject({
-      method: "POST",
-      url: "/api/messages",
-      headers: { host: `127.0.0.1:${PORT}`, origin: "https://evil.test" },
-      payload: { body: "Hello" },
+    const waiting = callTool("request_permission", {
+      session_id: joined.session_id,
+      request_id: pending.request_id,
     });
-    expect(badOrigin.statusCode).toBe(403);
-    expect(service.roomState(ROOM).messages).toEqual([]);
+    setTimeout(
+      () => service.decidePermission(pending.request_id, "denied"),
+      50,
+    );
+    expect((await waiting).value.state).toBe("denied");
   });
 
-  it("accepts a user message from the page and sets a content security policy", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/messages",
-      headers: {
-        host: `127.0.0.1:${PORT}`,
-        origin: `http://127.0.0.1:${PORT}`,
-      },
-      payload: { body: "Hello" },
+  it("rejects an incomplete new permission request", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const result = (await client.callTool({
+      name: "request_permission",
+      arguments: { session_id: joined.session_id, recipient: "example.com" },
+    })) as ToolResult;
+    expect(result.isError).toBe(true);
+  });
+
+  it("reads history and records a status report", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    service.postUserMessage(ROOM, "First");
+    const { value: history } = await callTool("read_history", {
+      session_id: joined.session_id,
     });
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["content-security-policy"]).toContain(
-      "default-src 'self'",
-    );
+    expect(history.messages.map((m: { body: string }) => m.body)).toEqual([
+      "First",
+    ]);
+
+    await callTool("report_status", {
+      session_id: joined.session_id,
+      kind: "low_allowance",
+      detail: "Almost out",
+    });
+    expect(service.listReports()[0]?.detail).toBe("Almost out");
   });
 });

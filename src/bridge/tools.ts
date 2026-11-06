@@ -20,6 +20,10 @@ class HttpError extends Error {
   }
 }
 
+function toPermission(request: { id: number; state: string }) {
+  return { request_id: request.id, state: request.state };
+}
+
 function asToolResult(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value) }] };
 }
@@ -191,6 +195,143 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
             ...(reason ? { reason } : {}),
           }),
         );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "read_history",
+    {
+      description:
+        "Read older messages in your room, for example when a turn's truncated flag is true. Results are oldest first.",
+      inputSchema: {
+        session_id: z.string(),
+        before_id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Return messages older than this message ID"),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+    },
+    async ({ session_id, before_id, limit }) => {
+      try {
+        return asToolResult(
+          await call("/agent/history", {
+            session_id,
+            ...(before_id ? { before_id } : {}),
+            ...(limit ? { limit } : {}),
+          }),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "report_status",
+    {
+      description:
+        "Tell the user about a problem, especially if you know you are low on or out of allowance. It appears as a warning on the Konfab page.",
+      inputSchema: {
+        session_id: z.string(),
+        kind: z.enum(["low_allowance", "out_of_allowance", "other"]),
+        detail: z.string().optional(),
+      },
+    },
+    async ({ session_id, kind, detail }) => {
+      try {
+        return asToolResult(
+          await call("/agent/report", {
+            session_id,
+            kind,
+            detail: detail ?? "",
+          }),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "request_permission",
+    {
+      description:
+        'Ask the user before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI. Do not send anything unless the state is "approved". If the state is "pending", call this again with the same session_id and the request_id you received. An approval covers only this recipient and data.',
+      inputSchema: {
+        session_id: z.string(),
+        recipient: z
+          .string()
+          .optional()
+          .describe(
+            "Who would receive the data, such as github.com/owner/repo",
+          ),
+        data_description: z.string().optional().describe("What would be sent"),
+        reason: z.string().optional().describe("Why it needs to be sent"),
+        data_type: z
+          .string()
+          .optional()
+          .describe("Optional category, such as code_push"),
+        request_id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Check an earlier request instead of creating a new one"),
+      },
+    },
+    async (args, extra) => {
+      const { session_id, request_id, ...details } = args;
+      try {
+        let id = request_id;
+        if (id === undefined) {
+          if (
+            !details.recipient ||
+            !details.data_description ||
+            !details.reason
+          ) {
+            throw new Error(
+              "A new request needs recipient, data_description, and reason",
+            );
+          }
+          const created = await call<{ id: number; state: string }>(
+            "/agent/permission",
+            { session_id, ...details },
+          );
+          if (created.state !== "pending")
+            return asToolResult(toPermission(created));
+          id = created.id;
+        }
+
+        const started = Date.now();
+        let waitSeconds = DEFAULT_WAIT_SECONDS;
+        let latest: { id: number; state: string; wait_seconds: number };
+        do {
+          latest = await call<{
+            id: number;
+            state: string;
+            wait_seconds: number;
+          }>(
+            "/agent/permission/wait",
+            {
+              session_id,
+              request_id: id,
+              timeout_seconds: SERVER_POLL_SECONDS,
+            },
+            extra.signal,
+          );
+          waitSeconds = latest.wait_seconds;
+        } while (
+          latest.state === "pending" &&
+          !extra.signal.aborted &&
+          Date.now() - started < waitSeconds * 1000
+        );
+        return asToolResult(toPermission(latest));
       } catch (error) {
         return asToolError(error);
       }

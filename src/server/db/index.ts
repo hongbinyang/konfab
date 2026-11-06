@@ -82,6 +82,64 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX events_by_type ON events(type, agent_id, id);
   `,
+  `
+  CREATE TABLE sessions_new (
+    id TEXT PRIMARY KEY,
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    state TEXT NOT NULL CHECK (state IN ('active', 'replaced', 'ended')),
+    end_reason TEXT,
+    started_at INTEGER NOT NULL,
+    last_call_at INTEGER NOT NULL,
+    ended_at INTEGER
+  );
+  INSERT INTO sessions_new (id, room_id, agent_id, state, started_at, last_call_at, ended_at)
+    SELECT id, room_id, agent_id, state, started_at, last_call_at, ended_at FROM sessions;
+  DROP TABLE sessions;
+  ALTER TABLE sessions_new RENAME TO sessions;
+  CREATE UNIQUE INDEX one_active_session
+    ON sessions(room_id, agent_id) WHERE state = 'active';
+
+  CREATE TABLE permission_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    recipient TEXT NOT NULL,
+    data_description TEXT NOT NULL,
+    data_type TEXT,
+    reason TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'denied')),
+    decided_by TEXT,
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER
+  );
+  CREATE INDEX permission_requests_by_state ON permission_requests(state, id);
+
+  CREATE TABLE agent_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    dismissed_at INTEGER
+  );
+
+  CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE login_codes (
+    code_hash TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE web_sessions (
+    token_hash TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {
@@ -93,14 +151,27 @@ export function openDatabase(path: string): Db {
   return db;
 }
 
-function migrate(db: Db): void {
+export function migrate(db: Db, target = MIGRATIONS.length): void {
   const current = db.pragma("user_version", { simple: true }) as number;
-  for (let version = current; version < MIGRATIONS.length; version += 1) {
-    const sql = MIGRATIONS[version];
-    if (sql === undefined) continue;
-    db.transaction(() => {
-      db.exec(sql);
-      db.pragma(`user_version = ${version + 1}`);
-    })();
+  if (current >= target) return;
+
+  // Rebuilding a referenced table requires foreign keys to be off, and this
+  // setting can only change outside a transaction.
+  db.pragma("foreign_keys = OFF");
+  try {
+    for (let version = current; version < target; version += 1) {
+      const sql = MIGRATIONS[version];
+      if (sql === undefined) continue;
+      db.transaction(() => {
+        db.exec(sql);
+        const violations = db.pragma("foreign_key_check") as unknown[];
+        if (violations.length > 0) {
+          throw new Error(`Migration ${version + 1} broke foreign keys`);
+        }
+        db.pragma(`user_version = ${version + 1}`);
+      })();
+    }
+  } finally {
+    db.pragma("foreign_keys = ON");
   }
 }

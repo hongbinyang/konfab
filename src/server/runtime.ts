@@ -22,14 +22,12 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
     waitTimeoutSeconds: config.defaults.wait_timeout_seconds,
     turnTimeoutMs: config.defaults.turn_timeout_minutes * 60_000,
     maxMessageChars: config.defaults.max_message_chars,
+    hoursFor: (agentId) =>
+      config.agents[agentId]?.hours ?? config.defaults.hours,
+    preApprovals: config.pre_approvals,
   });
   for (const [id, agent] of Object.entries(config.agents)) {
     service.ensureAgent(id, agent.display_name);
   }
-  service.ensureRoom(
-    config.room.name,
-    config.room.topic,
-    Object.keys(config.agents),
-  );
   return { db, service };
 }

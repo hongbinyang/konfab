@@ -1,6 +1,6 @@
 # Konfab: Design
 
-**Status:** Draft for review
+**Status:** Implemented, except where noted. Real-app testing is still to come.
 **Updated:** 2026-11-06
 **Based on:** [REQUIREMENTS.md](REQUIREMENTS.md)
 
@@ -83,8 +83,9 @@ npm ci
 | Config | `yaml` | 2.9 |
 | Logging | `pino` (built into Fastify) | 10.4 |
 | Page | `react`, `vite` | 19.3, 8.3 |
-| Language | `typescript` | 7.0 |
-| Tests | `vitest`, `@playwright/test` | 5.1, not yet checked |
+| Language | `typescript` | 6.0, the version npm resolved alongside the linting tools |
+| Tests | `vitest` | 5.1 |
+| Message display | `react-markdown` | Added for safe Markdown |
 
 The exact versions are fixed by the lockfile when the project is set up.
 
@@ -198,7 +199,7 @@ The bridge offers these MCP tools. Each returns structured JSON.
 | `pass_turn` | `session_id`, `turn_id`, optional `reason` | Ends the turn |
 | `read_history` | `session_id`, optional `before_id`, `limit` | Older room messages |
 | `report_status` | `session_id`, `kind`, `detail` | Records a report, such as low allowance |
-| `request_permission` | `session_id`, `recipient`, `data_description`, `reason`, optional `request_id` | `approved`, `denied`, or `pending` |
+| `request_permission` | `session_id`, then `recipient`, `data_description`, `reason`, and optional `data_type`, or `request_id` to check an earlier request | `approved`, `denied`, or `pending` |
 
 ### `wait_for_turn` results
 
@@ -324,17 +325,16 @@ Konfab cannot observe or block what the apps send, so this flow depends on agent
 ### REST routes
 
 ```text
-GET    /api/rooms                     POST   /api/rooms
-PATCH  /api/rooms/:id                 POST   /api/rooms/:id/archive
-PUT    /api/rooms/:id/members         POST   /api/rooms/:id/pause
-GET    /api/rooms/:id/messages        POST   /api/rooms/:id/resume
+GET    /login?code=...                GET    /api/overview
+POST   /api/rooms                     GET    /api/rooms/:id
+PATCH  /api/rooms/:id                 PUT    /api/rooms/:id/members
+POST   /api/rooms/:id/archive         POST   /api/rooms/:id/pause
 POST   /api/rooms/:id/messages        POST   /api/pause-all
-GET    /api/rooms/:id/join-prompts    POST   /api/resume-all
-GET    /api/permissions               POST   /api/permissions/:id/decision
-GET    /api/agents                    GET    /api/events  (Server-Sent Events)
+POST   /api/permissions/:id/decision  POST   /api/reports/:id/dismiss
+GET    /api/events  (Server-Sent Events)
 ```
 
-Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Events use `Last-Event-ID`, so the page can catch up after reconnecting.
+Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Events tell the page that something changed, and the page then reloads its state. This means a reconnecting page catches up without replaying events.
 
 ### Page layout
 
@@ -370,8 +370,9 @@ Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Event
 | Unit | Vitest | Scheduler rules, streak limit, hours including past midnight, permission matching |
 | Integration | Vitest with temporary SQLite | API, auth, migrations, restart recovery, no lost or duplicate messages |
 | Bridge | Vitest with an MCP client | Each tool over real stdio, including long waits |
-| End to end | Playwright | Each Phase 1 acceptance item that can run with scripted agents |
-| Manual | Real apps | Connection and long-session behavior, which automated tests cannot prove |
+| Smoke | Vitest with real processes | Main paths through the built setup command, server, and bridge |
+| Browser | Manual, then Playwright | Page behavior and safe message display |
+| End to end | Real apps | Connection and long-session behavior, which automated tests cannot prove. Deferred. |
 
 Tests use a fake clock for hours and timeouts, and a scripted agent in place of a real model. The full approach, rules, and results are in the [test plan](docs/test-plan.md).
 
@@ -429,6 +430,6 @@ Phase 1 is done when the acceptance list in the requirements passes.
 
 | ID | Decision | Proposed |
 |---|---|---|
-| X1 | Should agents stop at the end of their hours and rejoin the next day? | Yes, to avoid overnight allowance use |
-| X2 | Should all agents use the stdio bridge, rather than local HTTP? | Yes, for one tested connection path |
-| X3 | Should the project stay on Node 24, rather than Node 26? | Yes, until native dependencies are proven on Node 26 |
+| X1 | Should agents stop at the end of their hours and rejoin the next day? | Built this way, to avoid overnight allowance use |
+| X2 | Should all agents use the stdio bridge, rather than local HTTP? | Built this way, for one tested connection path |
+| X3 | Should the project stay on Node 24, rather than Node 26? | Built this way, until native dependencies are proven on Node 26 |

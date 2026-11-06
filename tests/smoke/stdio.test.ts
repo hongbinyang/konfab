@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -15,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const WAIT_SECONDS = 2;
+const ROOM = "test";
 
 interface ToolResult {
   isError?: boolean;
@@ -38,27 +40,31 @@ function freePort(): Promise<number> {
   });
 }
 
-describe("built server and bridge over real stdio", () => {
+describe("built app over real processes", () => {
   let home: string;
   let url: string;
   let env: NodeJS.ProcessEnv;
-  let server: ChildProcess;
+  let server: ChildProcess | undefined;
   let tokens: string[];
   let clients: Client[];
+  let cookie: string;
+  let roomId: number;
 
-  const runSetup = (): Promise<void> =>
+  const runCli = (script: string): Promise<string> =>
     new Promise((done, fail) => {
-      const child = spawn(process.execPath, ["dist/cli/setup.js"], {
+      const child = spawn(process.execPath, [script], {
         cwd: ROOT,
         env,
-        stdio: ["ignore", "ignore", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
       });
+      let output = "";
       let errors = "";
-      child.stderr?.on("data", (chunk: Buffer) => (errors += chunk.toString()));
+      child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (errors += chunk.toString()));
       child.on("close", (code) =>
         code === 0
-          ? done()
-          : fail(new Error(`Setup exited with ${code}: ${errors}`)),
+          ? done(output)
+          : fail(new Error(`${script} exited with ${code}: ${errors}`)),
       );
     });
 
@@ -70,7 +76,8 @@ describe("built server and bridge over real stdio", () => {
     });
     for (let attempt = 0; attempt < 100; attempt += 1) {
       try {
-        if ((await fetch(`${url}/api/state`)).ok) return child;
+        await fetch(`${url}/`);
+        return child;
       } catch {
         await new Promise((done) => setTimeout(done, 100));
       }
@@ -87,7 +94,7 @@ describe("built server and bridge over real stdio", () => {
     });
 
   const connect = async (token: string): Promise<Client> => {
-    const client = new Client({ name: "e2e", version: "1.0.0" });
+    const client = new Client({ name: "smoke", version: "1.0.0" });
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -113,31 +120,62 @@ describe("built server and bridge over real stdio", () => {
     return JSON.parse(result.content[0]?.text ?? "null");
   };
 
+  const page = (path: string, options: RequestInit = {}): Promise<Response> =>
+    fetch(`${url}${path}`, {
+      ...options,
+      headers: {
+        cookie,
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    });
+
   const userPost = (body: string): Promise<Response> =>
-    fetch(`${url}/api/messages`, {
+    page(`/api/rooms/${roomId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body }),
     });
 
   const roomState = async (): Promise<RoomState> =>
-    (await (await fetch(`${url}/api/state`)).json()) as RoomState;
+    (await (await page(`/api/rooms/${roomId}`)).json()) as RoomState;
 
   beforeEach(async () => {
     clients = [];
-    home = mkdtempSync(join(tmpdir(), "konfab-e2e-"));
+    server = undefined;
+    home = mkdtempSync(join(tmpdir(), "konfab-smoke-"));
     const port = await freePort();
     url = `http://127.0.0.1:${port}`;
     env = { ...process.env, KONFAB_HOME: home };
     writeFileSync(
       join(home, "config.yaml"),
-      `server:\n  port: ${port}\ndefaults:\n  wait_timeout_seconds: ${WAIT_SECONDS}\n`,
+      [
+        `server:\n  port: ${port}`,
+        "defaults:",
+        `  wait_timeout_seconds: ${WAIT_SECONDS}`,
+        '  hours: { start: "00:00", end: "00:00", days: [sun, mon, tue, wed, thu, fri, sat] }',
+      ].join("\n"),
       { mode: 0o600 },
     );
-    await runSetup();
+    await runCli("dist/cli/setup.js");
     const setup = readFileSync(join(home, "app-setup.md"), "utf8");
     tokens = [...setup.matchAll(/kfb_[\w-]+/g)].map((match) => match[0]);
     server = await startServer();
+
+    const link = (await runCli("dist/cli/login-link.js")).trim();
+    const login = await fetch(link, { redirect: "manual" });
+    expect(login.status).toBe(303);
+    cookie = (login.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+    const created = await page("/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        name: ROOM,
+        topic: "Smoke test",
+        members: ["claude", "codex"],
+      }),
+    });
+    expect(created.status).toBe(201);
+    roomId = ((await created.json()) as { id: number }).id;
   });
 
   afterEach(async () => {
@@ -150,8 +188,8 @@ describe("built server and bridge over real stdio", () => {
     expect(tokens).toHaveLength(2);
     const claude = await connect(tokens[0] ?? "");
     const codex = await connect(tokens[1] ?? "");
-    const a = (await tool(claude, "join_room", { room: "test" })).session_id;
-    const b = (await tool(codex, "join_room", { room: "test" })).session_id;
+    const a = (await tool(claude, "join_room", { room: ROOM })).session_id;
+    const b = (await tool(codex, "join_room", { room: ROOM })).session_id;
 
     const started = Date.now();
     const idle = await tool(claude, "wait_for_turn", { session_id: a });
@@ -179,7 +217,7 @@ describe("built server and bridge over real stdio", () => {
     });
 
     const duringRestart = tool(claude, "wait_for_turn", { session_id: a });
-    await stopServer(server);
+    await stopServer(server as ChildProcess);
     server = await startServer();
     expect((await duringRestart).status).toBe("idle");
 
@@ -208,36 +246,79 @@ describe("built server and bridge over real stdio", () => {
     ]);
   });
 
-  it("rejects a bad token and an untrusted origin, and serves the page", async () => {
+  it("runs the permission flow from agent to page", async () => {
+    const claude = await connect(tokens[0] ?? "");
+    const session = (await tool(claude, "join_room", { room: ROOM }))
+      .session_id;
+    const pending = tool(claude, "request_permission", {
+      session_id: session,
+      recipient: "example.com",
+      data_description: "A log file",
+      reason: "To debug",
+    });
+
+    let requestId: number | undefined;
+    for (let attempt = 0; attempt < 50 && !requestId; attempt += 1) {
+      const overview = (await (await page("/api/overview")).json()) as {
+        permissions: { id: number }[];
+      };
+      requestId = overview.permissions[0]?.id;
+      if (!requestId) await new Promise((done) => setTimeout(done, 100));
+    }
+    expect(requestId).toBeDefined();
+
+    await page(`/api/permissions/${requestId}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision: "approved" }),
+    });
+    expect((await pending).state).toBe("approved");
+  });
+
+  it("protects the app and serves the built page", async () => {
+    const signedOut = await fetch(`${url}/api/overview`);
+    expect(signedOut.status).toBe(401);
+
     const badToken = await fetch(`${url}/agent/join`, {
       method: "POST",
       headers: {
         Authorization: "Bearer wrong",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ room: "test" }),
+      body: JSON.stringify({ room: ROOM }),
     });
     expect(badToken.status).toBe(401);
 
-    const badOrigin = await fetch(`${url}/api/messages`, {
+    const badOrigin = await page(`/api/rooms/${roomId}/messages`, {
       method: "POST",
-      headers: {
-        Origin: "https://evil.test",
-        "Content-Type": "application/json",
-      },
+      headers: { Origin: "https://evil.test" },
       body: JSON.stringify({ body: "Hello" }),
     });
     expect(badOrigin.status).toBe(403);
 
-    const page = await fetch(`${url}/`);
-    expect(page.ok).toBe(true);
-    expect(await page.text()).toContain("Konfab");
-    expect(page.headers.get("content-security-policy")).toContain(
-      "default-src 'self'",
+    const home = await fetch(`${url}/`);
+    expect(home.ok).toBe(true);
+    const html = await home.text();
+    expect(html).toContain("<title>Konfab</title>");
+    expect(home.headers.get("content-security-policy")).toContain(
+      "default-src 'none'",
     );
+
+    const script = /src="(\/assets\/[^"]+\.js)"/.exec(html)?.[1];
+    expect(script).toBeDefined();
+    expect((await fetch(`${url}${script}`)).ok).toBe(true);
+
+    // The page must load nothing from outside this computer.
+    const assets = readdirSync(join(ROOT, "dist/web/assets"));
+    const external = assets.filter((name) =>
+      /(?:src|href)=["']https?:\/\//.test(
+        readFileSync(join(ROOT, "dist/web/assets", name), "utf8"),
+      ),
+    );
+    expect(external).toEqual([]);
+    expect(html).not.toMatch(/(?:src|href)=["']https?:\/\//);
   });
 
-  it("keeps secrets out of the database and restricts local file access", async () => {
+  it("keeps secrets out of the database and restricts local files", async () => {
     const database = readFileSync(join(home, "konfab.db"));
     expect(database.includes(tokens[0] ?? "missing")).toBe(false);
     expect(statSync(home).mode & 0o777).toBe(0o700);

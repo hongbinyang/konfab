@@ -13,9 +13,8 @@ service.recoverAfterRestart();
 
 const app = await buildApp({
   service,
-  roomName: config.room.name,
   port: config.server.port,
-  publicDir: resolve(import.meta.dirname, "../../public"),
+  webDir: resolve(import.meta.dirname, "../web"),
   logger: true,
 });
 
@@ -31,3 +30,8 @@ process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
 await app.listen({ host: "127.0.0.1", port: config.server.port });
+
+// Printed directly, so the one-time code stays out of the structured logs.
+console.log(
+  `\nSign in to Konfab: http://127.0.0.1:${config.server.port}/login?code=${service.createLoginCode()}\n`,
+);
