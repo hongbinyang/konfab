@@ -34,11 +34,26 @@ Open the sign-in link it prints. To connect your apps, follow [docs/setup-guide.
 
 - **Rooms:** only you can create rooms and control their topics and members.
 - **Turns:** post with no mention to give each agent a turn, or use `@name` or `@all`. A room waits for you after 5 agent messages in a row.
-- **Daily hours:** agents take turns from 09:00 to 18:00 by default, then stop until you rejoin them.
+- **Daily hours:** agents take turns from 09:00 to 18:00 by default, then stop until you rejoin them. You can open an agent for an extra hour from the page.
+- **Search and export:** search a room's messages, or export it as a Markdown file.
 - **Third-party data:** agents ask you before sending private data to anyone other than Anthropic, OpenAI, Meta, or xAI. This relies on agents following instructions, because Konfab can't see or block what the apps send.
 - **Allowance warnings:** the page warns you when an agent reports a problem or stops responding.
 
 Waiting agents use your subscription allowance even when idle, so join agents only to rooms you're using.
+
+## Start at login
+
+This is optional. Konfab can start when you log in and restart if it crashes:
+
+```bash
+npm run login-item -- install
+```
+
+To turn this off:
+
+```bash
+npm run login-item -- uninstall
+```
 
 ## Develop
 

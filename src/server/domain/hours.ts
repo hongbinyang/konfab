@@ -38,6 +38,23 @@ export function isWithinHours(date: Date, hours: Hours): boolean {
   return (today && now >= start) || (yesterday && now < end);
 }
 
+/**
+ * Returns when the current hours end, or null if they are not active or have
+ * no fixed end time because they cover the whole day.
+ */
+export function currentEnd(date: Date, hours: Hours): number | null {
+  if (!isWithinHours(date, hours) || hours.start === hours.end) return null;
+  const end = toMinutes(hours.end);
+  const now = date.getHours() * 60 + date.getMinutes();
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate() + (end <= now ? 1 : 0),
+    Math.floor(end / 60),
+    end % 60,
+  ).getTime();
+}
+
 /** Returns the next time these hours begin, or null if no days are active. */
 export function nextStart(date: Date, hours: Hours): number | null {
   const start = toMinutes(hours.start);

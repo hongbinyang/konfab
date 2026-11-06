@@ -49,6 +49,7 @@ export interface RoomAgent {
   state: AgentState;
   hours: { start: string; end: string; days: string[] } | null;
   next_start: number | null;
+  closes_at: number | null;
   join_prompt: string;
   stats: {
     model_wait_calls: number;

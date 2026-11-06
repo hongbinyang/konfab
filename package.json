@@ -13,6 +13,7 @@
     "start": "npm run build && node dist/server/index.js",
     "setup": "npm run build && node dist/cli/setup.js",
     "login-link": "npm run build --silent && node dist/cli/login-link.js",
+    "login-item": "npm run build --silent && node dist/cli/login-item.js",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
     "format": "prettier --write .",

@@ -231,6 +231,71 @@ describe("Phase 1 behavior", () => {
     });
   });
 
+  describe("extended hours", () => {
+    it("lets an agent take turns outside hours until the extension ends", () => {
+      now = at(19);
+      service.extendHours("claude", 60);
+      const session = service.join("claude", ROOM).session_id;
+      service.postUserMessage(ROOM, "@claude evening");
+      expect(service.poll("claude", session, true).status).toBe("turn");
+      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(20));
+    });
+
+    it("closes the session when the extension ends", () => {
+      now = at(19);
+      service.extendHours("claude", 60);
+      const session = service.join("claude", ROOM).session_id;
+      now = at(20);
+      service.tick();
+      expect(service.poll("claude", session, true)).toMatchObject({
+        status: "closed",
+        reason: "outside_hours",
+      });
+    });
+
+    it("reports the later of the scheduled end and the extension", () => {
+      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(18));
+      now = at(17, 30);
+      service.extendHours("claude", 60);
+      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(18, 30));
+      service.extendHours("claude", 0);
+      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(18));
+    });
+  });
+
+  describe("search and export", () => {
+    it("finds text and treats wildcards literally", () => {
+      service.postUserMessage(ROOM, "100% done");
+      service.postUserMessage(ROOM, "100 items");
+      service.postUserMessage(ROOM, "snake_case");
+      service.postUserMessage(ROOM, "snakeXcase");
+      const bodies = (query: string) =>
+        service.searchMessages(ROOM, query).map((message) => message.body);
+      expect(bodies("100%")).toEqual(["100% done"]);
+      expect(bodies("snake_")).toEqual(["snake_case"]);
+      expect(bodies("ITEMS")).toEqual(["100 items"]);
+      expect(bodies("missing")).toEqual([]);
+    });
+
+    it("searches only the chosen room", () => {
+      service.createRoom("other", "", ["codex"]);
+      service.postUserMessage("other", "Secret plan");
+      expect(service.searchMessages(ROOM, "Secret")).toEqual([]);
+    });
+
+    it("exports the topic and messages as Markdown", () => {
+      service.postUserMessage(ROOM, "@claude hi");
+      const turn = expectTurn(service.poll("claude", claude, true));
+      service.postAgentMessage("claude", claude, turn.turn_id, "Hello");
+      const { filename, markdown } = service.exportRoom(ROOM);
+      expect(filename).toBe(`${ROOM}.md`);
+      expect(markdown).toContain("Design topic");
+      expect(markdown).toContain("## You (");
+      expect(markdown).toContain("## Claude (");
+      expect(markdown).toContain("Hello");
+    });
+  });
+
   describe("permissions", () => {
     const ask = (sessionId: string = claude) =>
       service.requestPermission("claude", sessionId, {

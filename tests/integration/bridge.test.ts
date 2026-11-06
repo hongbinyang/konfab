@@ -129,6 +129,40 @@ describe("server and bridge", () => {
     await other.close();
   });
 
+  it("sends progress while waiting", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    let updates = 0;
+    await client.callTool(
+      {
+        name: "wait_for_turn",
+        arguments: { session_id: joined.session_id },
+      },
+      undefined,
+      { onprogress: () => (updates += 1) },
+    );
+    expect(updates).toBeGreaterThan(0);
+  });
+
+  it("ends a wait as idle when the server cannot be reached", async () => {
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await createBridgeServer({
+      baseUrl: "http://127.0.0.1:1",
+      token,
+      defaultWaitSeconds: 1,
+    }).connect(serverTransport);
+    const other = new Client({ name: "test", version: "1.0.0" });
+    await other.connect(clientTransport);
+    const started = Date.now();
+    const result = (await other.callTool({
+      name: "wait_for_turn",
+      arguments: { session_id: "any" },
+    })) as ToolResult;
+    expect(JSON.parse(result.content[0]?.text ?? "null").status).toBe("idle");
+    expect(Date.now() - started).toBeLessThan(5000);
+    await other.close();
+  });
+
   it("waits for a permission answer and reports the result", async () => {
     const { value: joined } = await callTool("join_room", { room: ROOM });
     const { value: pending } = await callTool("request_permission", {

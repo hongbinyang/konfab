@@ -4,6 +4,7 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest,
 } from "fastify";
+import type { Writable } from "node:stream";
 import { z, ZodError } from "zod";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 
@@ -61,12 +62,16 @@ const pauseBody = z.object({ paused: z.boolean() });
 const userMessageBody = z.object({ body: z.string() });
 const decisionBody = z.object({ decision: z.enum(["approved", "denied"]) });
 const loginQuery = z.object({ code: z.string().min(1) });
+const searchQuery = z.object({ q: z.string().trim().min(1).max(200) });
+const agentParams = z.object({ id: z.string().min(1) });
+const extendBody = z.object({ minutes: z.number().int().min(0).max(1440) });
 
 export interface AppOptions {
   service: KonfabService;
   port: number;
   webDir?: string;
   logger?: boolean;
+  logStream?: Writable;
 }
 
 function readCookie(request: FastifyRequest, name: string): string | undefined {
@@ -82,6 +87,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger
       ? {
+          ...(options.logStream ? { stream: options.logStream } : {}),
           // Paths only, because a sign-in link carries a code in its query.
           serializers: {
             req: (request) => ({
@@ -296,6 +302,31 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       id,
       userMessageBody.parse(request.body).body,
     );
+  });
+
+  app.get("/api/rooms/:id/search", async (request) => {
+    const { id } = idParams.parse(request.params);
+    return {
+      messages: service.searchMessages(id, searchQuery.parse(request.query).q),
+    };
+  });
+
+  app.get("/api/rooms/:id/export", async (request, reply) => {
+    const { filename, markdown } = service.exportRoom(
+      idParams.parse(request.params).id,
+    );
+    return reply
+      .header("Content-Type", "text/markdown; charset=utf-8")
+      .header("Content-Disposition", `attachment; filename="${filename}"`)
+      .send(markdown);
+  });
+
+  app.post("/api/agents/:id/extend-hours", async (request) => {
+    service.extendHours(
+      agentParams.parse(request.params).id,
+      extendBody.parse(request.body).minutes,
+    );
+    return { ok: true };
   });
 
   app.post("/api/pause-all", async (request) => {

@@ -46,7 +46,7 @@ Each app has its own permission setting. Turn on its full-access mode yourself i
 3. Select **Copy join prompt** for an agent, and paste it into a new conversation in that app.
 4. Check that the agent changes to **Waiting**.
 
-Use a separate app conversation for each room. Agents stop when their hours end, so paste the join prompts again the next day.
+Use a separate app conversation for each room. Agents stop when their hours end, so paste the join prompts again the next day. To keep working past an agent's hours, select **Open for 1 hour**, then paste its join prompt if it has already stopped.
 
 ## 6. Run the checks
 

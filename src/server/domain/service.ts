@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { Db } from "../db/index.js";
-import { isWithinHours, nextStart, type Hours } from "./hours.js";
+import { currentEnd, isWithinHours, nextStart, type Hours } from "./hours.js";
 
 export class KonfabError extends Error {
   constructor(
@@ -153,6 +153,7 @@ const RULES = [
   "other than Anthropic, OpenAI, Meta, or xAI, call request_permission and wait for approval.",
   "Pushes to a GitHub repo also need request_permission, with data_type code_push.",
   "If the topic names a writer for a repo, only that agent may edit that repo.",
+  "When you change code, commit it to your own git branch.",
   "If you know you are low on or out of allowance, call report_status.",
   "When your work is done, call post_message or pass_turn, then call wait_for_turn again.",
 ].join(" ");
@@ -436,6 +437,7 @@ export class KonfabService {
           state: this.agentState(room.id, agent.id),
           hours: hours ?? null,
           next_start: hours ? nextStart(new Date(this.now()), hours) : null,
+          closes_at: this.closesAt(agent.id),
           stats: this.agentStats(room.id, agent.id),
           join_prompt: this.joinPrompt(room.name),
         };
@@ -862,6 +864,63 @@ export class KonfabService {
     this.notify();
   }
 
+  // Search and export
+
+  searchMessages(ref: RoomRef, query: string, limit = 100): MessageView[] {
+    const room = this.room(ref);
+    const pattern = `%${query.trim().replace(/[\\%_]/g, (match) => `\\${match}`)}%`;
+    const rows = this.db
+      .prepare(
+        `SELECT id, sender_type, sender_id, body, created_at FROM messages
+         WHERE room_id = ? AND body LIKE ? ESCAPE '\\'
+         ORDER BY id DESC LIMIT ?`,
+      )
+      .all(room.id, pattern, limit) as MessageView[];
+    return rows.reverse();
+  }
+
+  exportRoom(ref: RoomRef): { filename: string; markdown: string } {
+    const room = this.room(ref);
+    const rows = this.db
+      .prepare(
+        `SELECT m.id, m.sender_type, m.sender_id, m.body, m.created_at, a.display_name
+         FROM messages m LEFT JOIN agents a ON a.id = m.sender_id
+         WHERE m.room_id = ? ORDER BY m.id`,
+      )
+      .all(room.id) as (MessageView & { display_name: string | null })[];
+    const sections = [`# ${room.name}`];
+    if (room.topic) sections.push(room.topic);
+    for (const row of rows) {
+      const sender =
+        row.sender_type === "user"
+          ? "You"
+          : (row.display_name ?? row.sender_id);
+      const time = new Date(row.created_at).toISOString();
+      sections.push(`## ${sender} (${time})`, row.body);
+    }
+    return {
+      filename: `${room.name}.md`,
+      markdown: `${sections.join("\n\n")}\n`,
+    };
+  }
+
+  // Hours
+
+  /** Keeps an agent open for this many minutes from now, or clears it with 0. */
+  extendHours(agentId: string, minutes: number): void {
+    if (!this.db.prepare("SELECT 1 FROM agents WHERE id = ?").get(agentId)) {
+      throw new KonfabError("agent_not_found", 404, "Unknown agent");
+    }
+    this.db
+      .prepare(
+        `INSERT INTO settings (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(`hours_until:${agentId}`, String(this.now() + minutes * 60_000));
+    this.logEvent("hours_extended", null, agentId, { minutes });
+    this.notify();
+  }
+
   // Time-based rules and recovery
 
   /** Requeues work left active by a previous server process. */
@@ -964,7 +1023,31 @@ export class KonfabService {
 
   private isInsideHours(agentId: string): boolean {
     const hours = this.options.hoursFor?.(agentId);
-    return !hours || isWithinHours(new Date(this.now()), hours);
+    return (
+      !hours ||
+      isWithinHours(new Date(this.now()), hours) ||
+      this.extendedUntil(agentId) > this.now()
+    );
+  }
+
+  private extendedUntil(agentId: string): number {
+    const row = this.db
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(`hours_until:${agentId}`) as { value: string } | undefined;
+    return row ? Number(row.value) : 0;
+  }
+
+  private closesAt(agentId: string): number | null {
+    const hours = this.options.hoursFor?.(agentId);
+    if (!hours) return null;
+    const now = new Date(this.now());
+    const scheduledEnd = currentEnd(now, hours);
+    const extended = this.extendedUntil(agentId);
+    if (isWithinHours(now, hours)) {
+      if (scheduledEnd === null) return null;
+      return Math.max(scheduledEnd, extended);
+    }
+    return extended > this.now() ? extended : null;
   }
 
   private endSession(sessionId: string, reason: string): void {

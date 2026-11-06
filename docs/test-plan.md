@@ -44,27 +44,30 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 
 ## 5. Coverage by requirement
 
-| Area                                                     | Requirements      | Tested by                          | Status                                               |
-| -------------------------------------------------------- | ----------------- | ---------------------------------- | ---------------------------------------------------- |
-| Rooms, topics, and membership                            | R1 to R5          | Unit, integration                  | Pass                                                 |
-| History survives restarts                                | R6                | Smoke                              | Pass                                                 |
-| Message details, identity, and size limit                | R7 to R9          | Unit, integration                  | Pass                                                 |
-| Live room list, messages, and posting                    | U1                | Integration, smoke, manual browser | Pass                                                 |
-| Agent status, join prompts, pause, permissions, warnings | U2 to U6          | Unit, integration, manual browser  | Pass                                                 |
-| Bridge tools                                             | A1, A2            | Integration, smoke                 | Pass                                                 |
-| One conversation per room                                | A3                | Unit                               | Pass                                                 |
-| Rejoining without duplicates                             | A4                | Unit, smoke                        | Pass                                                 |
-| Turn order, mentions, and streak limit                   | A5 to A11         | Unit, smoke                        | Pass                                                 |
-| Agent rules                                              | A12, P1           | Unit                               | Pass                                                 |
-| Daily hours                                              | M1 to M3          | Unit                               | Pass                                                 |
-| Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                                 |
-| Repo writer rule                                         | F3                | Unit                               | Pass, relies on agents following it                  |
-| Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it                  |
-| No outside assets                                        | P7                | Smoke                              | Pass                                                 |
-| Loopback, auth, and request protection                   | S1 to S3          | Integration, smoke                 | Pass                                                 |
-| Secrets in storage and logs                              | S4                | Unit, smoke                        | Partly tested. Log redaction has no direct test yet. |
-| Message display safety                                   | Design section 12 | Manual browser                     | Pass, automation deferred                            |
-| Real apps connect and stay connected                     | T1 to T5          | End to end                         | **Not yet run**                                      |
+| Area                                                     | Requirements      | Tested by                          | Status                                            |
+| -------------------------------------------------------- | ----------------- | ---------------------------------- | ------------------------------------------------- |
+| Rooms, topics, and membership                            | R1 to R5          | Unit, integration                  | Pass                                              |
+| History survives restarts                                | R6                | Smoke                              | Pass                                              |
+| Message details, identity, and size limit                | R7 to R9          | Unit, integration                  | Pass                                              |
+| Live room list, messages, and posting                    | U1                | Integration, smoke, manual browser | Pass                                              |
+| Agent status, join prompts, pause, permissions, warnings | U2 to U6          | Unit, integration, manual browser  | Pass                                              |
+| Bridge tools                                             | A1, A2            | Integration, smoke                 | Pass                                              |
+| One conversation per room                                | A3                | Unit                               | Pass                                              |
+| Rejoining without duplicates                             | A4                | Unit, smoke                        | Pass                                              |
+| Turn order, mentions, and streak limit                   | A5 to A11         | Unit, smoke                        | Pass                                              |
+| Agent rules                                              | A12, P1           | Unit                               | Pass                                              |
+| Daily hours                                              | M1 to M3          | Unit                               | Pass                                              |
+| Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                              |
+| Repo writer rule                                         | F3                | Unit                               | Pass, relies on agents following it               |
+| Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it               |
+| No outside assets                                        | P7                | Smoke                              | Pass                                              |
+| Loopback, auth, and request protection                   | S1 to S3          | Integration, smoke                 | Pass                                              |
+| Secrets in storage and logs                              | S4                | Integration, smoke                 | Pass                                              |
+| Message display safety                                   | Design section 12 | Manual browser                     | Pass, automation deferred                         |
+| Search and export                                        | R10               | Unit, integration, manual browser  | Pass                                              |
+| Extended hours and closing time                          | Design section 9  | Unit, integration, manual browser  | Pass                                              |
+| Start at login                                           | S5                | Unit for the generated file        | File validated, not yet installed on a real login |
+| Real apps connect and stay connected                     | T1 to T5          | End to end                         | **Not yet run**                                   |
 
 ## 6. Exit criteria
 
@@ -88,34 +91,34 @@ Coverage is a way to find untested code, not proof of quality, so these targets 
 
 Results from 2026-11-06 on `phase-0-connection-test`:
 
-| Measure                                          | Result                                                     |
-| ------------------------------------------------ | ---------------------------------------------------------- |
-| Unit and integration tests                       | 86 passed                                                  |
-| Smoke tests                                      | 4 passed                                                   |
-| Runtime package vulnerabilities                  | 0                                                          |
-| Development tool vulnerabilities                 | 10 moderate, in the linting tools                          |
-| Line coverage, unit and integration only         | 92.71% overall, 97.94% in `service.ts`, 100% in `hours.ts` |
-| Upgrade of a copy of the real version 1 database | Passed                                                     |
-| Manual browser check                             | Passed in dark mode, light mode, and at phone width        |
+| Measure                                          | Result                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Unit and integration tests                       | 103 passed                                                                                                   |
+| Smoke tests                                      | 4 passed                                                                                                     |
+| Runtime package vulnerabilities                  | 0                                                                                                            |
+| Development tool vulnerabilities                 | 10 moderate, in the linting tools                                                                            |
+| Line coverage, unit and integration only         | 94.52% overall, 98.08% in `service.ts`, 100% in `hours.ts`                                                   |
+| Upgrade of a copy of the real version 1 database | Passed                                                                                                       |
+| Manual browser check                             | Passed in dark mode, light mode, and at phone width. Search, export, and closing time checked in light mode. |
 
 ### Known gaps
 
 - Nothing has been run with the real apps.
 - Page behavior has no automated browser tests.
-- Log redaction has no direct test.
-- The bridge's progress notifications and its wait loop while the server is down have no direct test.
+- Starting at login has not been installed and tested through a real login.
 - Agent rules can be tested only for being sent, not for being followed.
 
 ## 8. Bug log
 
 Bugs found by testing and review:
 
-| Bug                                                                | Found by             | Covered by                                                          |
-| ------------------------------------------------------------------ | -------------------- | ------------------------------------------------------------------- |
-| A second agent's wait could fail while another agent held the turn | Scripted stdio run   | Unit: "keeps other agents idle while one agent has the active turn" |
-| The first wait ignored a shorter configured wait length            | Integration test     | Integration: "returns idle when the wait ends with nothing to do"   |
-| The bridge could fail on a stale connection after a server restart | Integration test     | Integration and smoke restart tests                                 |
-| The bridge's wait loop never ended if the server was down          | Code review          | **No direct test yet**                                              |
-| The permission wait ignored the configured wait length             | Slow test run        | Integration: "waits for a permission answer and reports the result" |
-| HTML in messages disappeared instead of showing as text            | Manual browser check | Manual only until browser tests exist                               |
-| The join prompt did not state the third-party rule                 | Requirement review   | Unit: "states the data rule in the join prompt and on each turn"    |
+| Bug                                                                | Found by             | Covered by                                                           |
+| ------------------------------------------------------------------ | -------------------- | -------------------------------------------------------------------- |
+| A second agent's wait could fail while another agent held the turn | Scripted stdio run   | Unit: "keeps other agents idle while one agent has the active turn"  |
+| The first wait ignored a shorter configured wait length            | Integration test     | Integration: "returns idle when the wait ends with nothing to do"    |
+| The bridge could fail on a stale connection after a server restart | Integration test     | Integration and smoke restart tests                                  |
+| The bridge's wait loop never ended if the server was down          | Code review          | Integration: "ends a wait as idle when the server cannot be reached" |
+| The permission wait ignored the configured wait length             | Slow test run        | Integration: "waits for a permission answer and reports the result"  |
+| HTML in messages disappeared instead of showing as text            | Manual browser check | Manual only until browser tests exist                                |
+| The join prompt did not state the third-party rule                 | Requirement review   | Unit: "states the data rule in the join prompt and on each turn"     |
+| "Open for 1 hour" appeared even when it would change nothing       | Manual browser check | Manual only until browser tests exist                                |

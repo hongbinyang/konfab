@@ -1,3 +1,4 @@
+import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/server/api/app.js";
@@ -226,6 +227,76 @@ describe("page API", () => {
       const dismissed = await call("POST", `/api/reports/${reportId}/dismiss`);
       expect(dismissed.statusCode).toBe(200);
     });
+  });
+
+  it("searches and exports a room", async () => {
+    const { id } = service.createRoom("notes", "A topic", ["claude"]);
+    service.postUserMessage(id, "Find this 100%");
+    service.postUserMessage(id, "Other text");
+
+    const search = await call("GET", `/api/rooms/${id}/search?q=100%25`);
+    expect(search.json().messages).toHaveLength(1);
+    const empty = await call("GET", `/api/rooms/${id}/search?q=%20`);
+    expect(empty.statusCode).toBe(400);
+
+    const exported = await call("GET", `/api/rooms/${id}/export`);
+    expect(exported.headers["content-disposition"]).toContain("notes.md");
+    expect(exported.body).toContain("# notes");
+    expect(exported.body).toContain("Find this 100%");
+  });
+
+  it("extends an agent's hours and rejects unknown agents", async () => {
+    const ok = await call("POST", "/api/agents/claude/extend-hours", {
+      minutes: 60,
+    });
+    expect(ok.statusCode).toBe(200);
+    const missing = await call("POST", "/api/agents/ghost/extend-hours", {
+      minutes: 60,
+    });
+    expect(missing.statusCode).toBe(404);
+    const invalid = await call("POST", "/api/agents/claude/extend-hours", {
+      minutes: 5000,
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
+  it("keeps sign-in codes and credentials out of the logs", async () => {
+    const lines: string[] = [];
+    const logged = await buildApp({
+      service,
+      port: PORT,
+      logger: true,
+      logStream: new Writable({
+        write(chunk, _encoding, done) {
+          lines.push(String(chunk));
+          done();
+        },
+      }),
+    });
+    const code = service.createLoginCode();
+    const login = await logged.inject({
+      method: "GET",
+      url: `/login?code=${code}`,
+      headers: { host: HOST },
+    });
+    const sessionCookie =
+      String(login.headers["set-cookie"]).split(";")[0] ?? "";
+    await logged.inject({
+      method: "GET",
+      url: "/api/overview",
+      headers: {
+        host: HOST,
+        cookie: sessionCookie,
+        authorization: "Bearer secret-agent-token",
+      },
+    });
+    await logged.close();
+
+    const output = lines.join("");
+    expect(output).toContain("/login");
+    expect(output).not.toContain(code);
+    expect(output).not.toContain("secret-agent-token");
+    expect(output).not.toContain(sessionCookie.split("=")[1] ?? "missing");
   });
 
   it("pushes live updates over Server-Sent Events", async () => {

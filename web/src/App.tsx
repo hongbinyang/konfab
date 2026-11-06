@@ -37,6 +37,9 @@ function formatTime(timestamp: number): string {
   });
 }
 
+const CLOSING_SOON_MS = 15 * 60_000;
+const EXTEND_OFFER_MS = 60 * 60_000;
+
 function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
@@ -282,6 +285,8 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
   const lastMessageId = messages.at(-1)?.id;
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<RoomState["messages"] | null>(null);
 
   useEffect(() => {
     const list = listRef.current;
@@ -312,6 +317,20 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
         body: { name: name.trim(), topic },
       });
       setEditing(false);
+    });
+  };
+
+  const search = (event: FormEvent) => {
+    event.preventDefault();
+    if (!query.trim()) {
+      setResults(null);
+      return;
+    }
+    void act(async () => {
+      const found = await request<{ messages: RoomState["messages"] }>(
+        `/api/rooms/${room.id}/search?q=${encodeURIComponent(query)}`,
+      );
+      setResults(found.messages);
     });
   };
 
@@ -404,6 +423,53 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
           </>
         )}
       </header>
+
+      <form className="search" role="search" onSubmit={search}>
+        <label htmlFor="search">Search messages</label>
+        <input
+          id="search"
+          type="search"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            if (!event.target.value) setResults(null);
+          }}
+        />
+        <button type="submit" className="secondary">
+          Search
+        </button>
+        <a
+          className="button secondary"
+          href={`/api/rooms/${room.id}/export`}
+          download
+        >
+          Export
+        </a>
+      </form>
+      {results && (
+        <section className="results" aria-label="Search results">
+          <p className="muted">
+            {results.length === 0
+              ? "No matching messages"
+              : `${results.length} matching ${results.length === 1 ? "message" : "messages"}`}
+          </p>
+          <ul>
+            {results.map((message) => (
+              <li key={message.id}>
+                <span className="sender">
+                  {message.sender_type === "user"
+                    ? "You"
+                    : displayName(message.sender_id)}
+                </span>
+                <span className="time">{formatTime(message.created_at)}</span>
+                <div className="body">
+                  <Markdown>{message.body}</Markdown>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <ol
         className="messages"
@@ -562,7 +628,11 @@ function Agents({
               <strong>{agent.display_name}</strong>
             </label>
             {member ? (
-              <AgentDetails agent={member} archived={room.room.archived} />
+              <AgentDetails
+                agent={member}
+                archived={room.room.archived}
+                act={act}
+              />
             ) : (
               <p className="muted">Not in this room</p>
             )}
@@ -576,9 +646,11 @@ function Agents({
 function AgentDetails({
   agent,
   archived,
+  act,
 }: {
   agent: RoomAgent;
   archived: boolean;
+  act: Act;
 }) {
   const [copied, setCopied] = useState(false);
   const { stats } = agent;
@@ -593,7 +665,10 @@ function AgentDetails({
       )}
       {agent.hours && (
         <p className="muted">
-          Hours: {agent.hours.start} to {agent.hours.end}
+          Hours:{" "}
+          {agent.hours.start === agent.hours.end
+            ? "All day"
+            : `${agent.hours.start} to ${agent.hours.end}`}
           {agent.state === "outside_hours" && agent.next_start
             ? `. Next opens ${new Date(agent.next_start).toLocaleString([], {
                 weekday: "short",
@@ -603,6 +678,36 @@ function AgentDetails({
             : ""}
         </p>
       )}
+      {agent.closes_at !== null && (
+        <p
+          className={
+            agent.closes_at - Date.now() <= CLOSING_SOON_MS
+              ? "warning-text"
+              : "muted"
+          }
+        >
+          Closes at {formatTime(agent.closes_at)}
+        </p>
+      )}
+      {!archived &&
+        (agent.state === "outside_hours" ||
+          (agent.closes_at !== null &&
+            agent.closes_at - Date.now() <= EXTEND_OFFER_MS)) && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              void act(() =>
+                request(`/api/agents/${agent.id}/extend-hours`, {
+                  method: "POST",
+                  body: { minutes: 60 },
+                }),
+              )
+            }
+          >
+            Open for 1 hour
+          </button>
+        )}
       {!archived && (
         <button
           type="button"

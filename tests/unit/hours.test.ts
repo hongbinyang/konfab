@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  currentEnd,
   isWithinHours,
   nextStart,
   type DayName,
@@ -40,6 +41,26 @@ describe("isWithinHours", () => {
     const allDay: Hours = { start: "00:00", end: "00:00", days: ["fri"] };
     expect(isWithinHours(friday(3), allDay)).toBe(true);
     expect(isWithinHours(new Date(2026, 10, 7, 3), allDay)).toBe(false);
+  });
+});
+
+describe("currentEnd", () => {
+  it("returns today's end during hours", () => {
+    expect(currentEnd(friday(10), OFFICE)).toBe(friday(18).getTime());
+  });
+
+  it("returns null outside hours and for all-day hours", () => {
+    expect(currentEnd(friday(19), OFFICE)).toBeNull();
+    const allDay: Hours = { start: "00:00", end: "00:00", days: ALL_DAYS };
+    expect(currentEnd(friday(10), allDay)).toBeNull();
+  });
+
+  it("handles hours past midnight", () => {
+    const night: Hours = { start: "22:00", end: "02:00", days: ALL_DAYS };
+    expect(currentEnd(friday(23), night)).toBe(
+      new Date(2026, 10, 7, 2).getTime(),
+    );
+    expect(currentEnd(friday(1), night)).toBe(friday(2).getTime());
   });
 });
 

@@ -218,7 +218,7 @@ One local server holds all state, and each app starts a small bridge process. Se
 
 | ID | Question | Decision |
 |---|---|---|
-| D1 | What is the app called? | Konfab. Trademarks, domains, and package names should be checked before any public release. |
+| D1 | What is the app called? | Konfab. On 2026-11-06, the npm name looked unused, but `konfab.com` and `konfab.io` responded, and one small GitHub project uses the name. No trademark search has been done. |
 | D2 | Which language is used? | TypeScript |
 | D3 | Does v1 keep Daily Hours now that joining is manual? | Yes, since the check is small |
 | D4 | How long are history and logs kept? | Until the user deletes them |

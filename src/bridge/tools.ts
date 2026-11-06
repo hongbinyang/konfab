@@ -9,6 +9,8 @@ const DEFAULT_WAIT_SECONDS = 50;
 export interface BridgeOptions {
   baseUrl: string;
   token: string;
+  /** How long to wait if the server cannot be reached to provide its setting. */
+  defaultWaitSeconds?: number;
 }
 
 class HttpError extends Error {
@@ -109,7 +111,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     },
     async ({ session_id }, extra) => {
       const started = Date.now();
-      let waitSeconds = DEFAULT_WAIT_SECONDS;
+      let waitSeconds = options.defaultWaitSeconds ?? DEFAULT_WAIT_SECONDS;
       let first = true;
       let progress = 0;
       const progressToken = extra._meta?.progressToken;
