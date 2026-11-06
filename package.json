@@ -16,7 +16,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run test:e2e"
   },
   "dependencies": {
     "@fastify/static": "^10.1.10",
@@ -30,6 +33,7 @@
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
+    "@vitest/coverage-v8": "^5.1.0",
     "eslint": "^10.14.0",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",

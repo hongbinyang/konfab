@@ -25,7 +25,7 @@ const configSchema = z.object({
   defaults: z
     .object({
       max_consecutive_agent_messages: z.number().int().min(1).default(5),
-      wait_timeout_seconds: z.number().int().min(5).default(50),
+      wait_timeout_seconds: z.number().int().min(1).default(50),
       turn_timeout_minutes: z.number().int().min(1).default(30),
       max_message_chars: z.number().int().min(1).default(20000),
     })

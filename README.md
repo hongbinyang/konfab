@@ -38,7 +38,7 @@ To connect your apps and run the test, follow [docs/setup-guide.md](docs/setup-g
 npm run check
 ```
 
-This runs type checks, linting, formatting checks, and tests.
+This runs type checks, linting, formatting checks, and unit, integration, and end-to-end tests. It must pass before each commit. See the [test plan](docs/test-plan.md).
 
 ## Local data
 

@@ -373,7 +373,7 @@ Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Event
 | End to end | Playwright | Each Phase 1 acceptance item that can run with scripted agents |
 | Manual | Real apps | Connection and long-session behavior, which automated tests cannot prove |
 
-Tests use a fake clock for hours and timeouts, and a scripted agent in place of a real model.
+Tests use a fake clock for hours and timeouts, and a scripted agent in place of a real model. The full approach, rules, and results are in the [test plan](docs/test-plan.md).
 
 ## 14. Delivery plan
 
