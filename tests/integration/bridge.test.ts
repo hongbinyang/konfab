@@ -1,0 +1,162 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { FastifyInstance } from "fastify";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createBridgeServer } from "../../src/bridge/tools.js";
+import { buildApp } from "../../src/server/api/app.js";
+import { openDatabase, type Db } from "../../src/server/db/index.js";
+import {
+  generateToken,
+  KonfabService,
+} from "../../src/server/domain/service.js";
+
+const ROOM = "test";
+const PORT = 18787;
+
+interface ToolResult {
+  isError?: boolean;
+  content: { type: string; text: string }[];
+}
+
+describe("server and bridge", () => {
+  let db: Db;
+  let service: KonfabService;
+  let app: FastifyInstance;
+  let token: string;
+  let client: Client;
+
+  const callTool = async (name: string, args: Record<string, unknown>) => {
+    const result = (await client.callTool({
+      name,
+      arguments: args,
+    })) as ToolResult;
+    return {
+      isError: result.isError,
+      value: JSON.parse(result.content[0]?.text ?? "null"),
+    };
+  };
+
+  beforeEach(async () => {
+    db = openDatabase(":memory:");
+    service = new KonfabService(db, {
+      maxConsecutiveAgentMessages: 5,
+      waitTimeoutSeconds: 1,
+      turnTimeoutMs: 60_000,
+      maxMessageChars: 1000,
+    });
+    service.ensureAgent("claude", "Claude");
+    service.ensureRoom(ROOM, "Topic", ["claude"]);
+    token = generateToken();
+    service.setAgentToken("claude", token);
+
+    app = await buildApp({ service, roomName: ROOM, port: PORT });
+    await app.listen({ host: "127.0.0.1", port: PORT });
+
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await createBridgeServer({
+      baseUrl: `http://127.0.0.1:${PORT}`,
+      token,
+    }).connect(serverTransport);
+    client = new Client({ name: "test", version: "1.0.0" });
+    await client.connect(clientTransport);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    await app.close();
+    db.close();
+  });
+
+  it("lists the Phase 0 tools", async () => {
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "join_room",
+      "pass_turn",
+      "post_message",
+      "wait_for_turn",
+    ]);
+  });
+
+  it("returns idle when the wait ends with nothing to do", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const { value } = await callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    expect(value.status).toBe("idle");
+    expect(service.roomState(ROOM).agents[0]?.stats.model_wait_calls).toBe(1);
+  });
+
+  it("wakes a waiting agent when the user posts, then records its reply", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const waiting = callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    setTimeout(() => service.postUserMessage(ROOM, "Hello"), 50);
+
+    const { value: turn } = await waiting;
+    expect(turn.status).toBe("turn");
+    expect(turn.messages[0].body).toBe("Hello");
+
+    await callTool("post_message", {
+      session_id: joined.session_id,
+      turn_id: turn.turn_id,
+      body: "Hi there",
+    });
+    expect(
+      service.roomState(ROOM).messages.map((message) => message.body),
+    ).toEqual(["Hello", "Hi there"]);
+  });
+
+  it("reports an invalid token as a tool error", async () => {
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await createBridgeServer({
+      baseUrl: `http://127.0.0.1:${PORT}`,
+      token: "wrong",
+    }).connect(serverTransport);
+    const other = new Client({ name: "test", version: "1.0.0" });
+    await other.connect(clientTransport);
+    const result = (await other.callTool({
+      name: "join_room",
+      arguments: { room: ROOM },
+    })) as ToolResult;
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Invalid agent token");
+    await other.close();
+  });
+
+  it("rejects requests with an untrusted host or origin", async () => {
+    const badHost = await app.inject({
+      method: "GET",
+      url: "/api/state",
+      headers: { host: "evil.test" },
+    });
+    expect(badHost.statusCode).toBe(403);
+
+    const badOrigin = await app.inject({
+      method: "POST",
+      url: "/api/messages",
+      headers: { host: `127.0.0.1:${PORT}`, origin: "https://evil.test" },
+      payload: { body: "Hello" },
+    });
+    expect(badOrigin.statusCode).toBe(403);
+    expect(service.roomState(ROOM).messages).toEqual([]);
+  });
+
+  it("accepts a user message from the page and sets a content security policy", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/messages",
+      headers: {
+        host: `127.0.0.1:${PORT}`,
+        origin: `http://127.0.0.1:${PORT}`,
+      },
+      payload: { body: "Hello" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-security-policy"]).toContain(
+      "default-src 'self'",
+    );
+  });
+});
