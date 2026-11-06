@@ -51,3 +51,7 @@ This runs type checks, linting, formatting checks, and unit, integration, and sm
 ## Local data
 
 Konfab stores its config, database, and app configuration entries in `~/.konfab/`. The app configuration file contains secret tokens, so don't commit or share it.
+
+## License
+
+Konfab is available under the [MIT License](LICENSE).
