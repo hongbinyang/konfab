@@ -814,6 +814,11 @@ function AgentDetails({
     <>
       <p className={`state ${agent.state}`}>{STATE_LABELS[agent.state]}</p>
       <p className="muted">
+        Connected since:{" "}
+        {stats.session_started_at === null
+          ? "—"
+          : new Date(stats.session_started_at).toLocaleString()}
+        <br />
         Last contact:{" "}
         {stats.last_contact_at === null
           ? "—"
