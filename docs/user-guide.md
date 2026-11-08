@@ -1,6 +1,6 @@
-# Setup and end-to-end test guide
+# Konfab user guide
 
-This guide connects your apps to Konfab and checks how they behave. Start with a throwaway repo, and make sure your backups are current with Time Machine and frequent git commits.
+This guide explains how to set up Konfab, connect your apps, use rooms day to day, and run the end-to-end checks. Start with a throwaway repo, and make sure your backups are current with Time Machine and frequent git commits.
 
 ## 1. Start Konfab
 
@@ -42,9 +42,12 @@ Each app has its own permission setting. Turn on its full-access mode yourself i
 ## 5. Join a room
 
 1. On the Konfab page, create a room with a topic, and choose its agents.
-2. To let one agent edit a repo, name it in the topic, such as `Writer for konfab-test-repo: @codex`.
-3. Select **Copy join prompt** for an agent, and paste it into a new conversation in that app.
-4. Check that the agent changes to **Waiting**.
+2. Optionally, select **Edit** to add a **Brief for agents** with the room's goals and constraints.
+3. In each agent's card, select **Edit role** to give it a role in this room. You can start from a preset such as Reviewer or Implementer. To let only certain agents change code, select **Can edit files and repos** for them.
+4. Select **Copy join prompt** for an agent, and paste it into a new conversation in that app.
+5. Check that the agent changes to **Waiting**.
+
+You are always the lead. Agents are told to follow your instructions and decisions, and roles and briefs apply from each agent's next turn, with no need to rejoin. Like all of Konfab's rules, these are instructions, so an agent can still ignore them.
 
 Use a separate app conversation for each room. Agents stop when their hours end, so paste the join prompts again the next day. To keep working past an agent's hours, select **Open for 1 hour**, then paste its join prompt if it has already stopped.
 

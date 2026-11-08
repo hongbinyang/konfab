@@ -143,6 +143,11 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE rooms ADD COLUMN on_break INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  ALTER TABLE rooms ADD COLUMN brief TEXT NOT NULL DEFAULT '';
+  ALTER TABLE room_members ADD COLUMN role TEXT NOT NULL DEFAULT '';
+  ALTER TABLE room_members ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

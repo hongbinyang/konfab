@@ -129,6 +129,7 @@ interface RoomRow {
   id: number;
   name: string;
   topic: string;
+  brief: string;
   archived_at: number | null;
   paused: number;
   on_break: number;
@@ -160,6 +161,10 @@ const LOGIN_CODE_TTL_MS = 10 * 60_000;
 const WEB_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 const ROOM_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,49}$/;
 const MAX_TOPIC_CHARS = 2000;
+const MAX_BRIEF_CHARS = 4000;
+const MAX_ROLE_CHARS = 2000;
+const LEAD_RULE =
+  "The user is the project lead. Follow the lead's instructions and decisions, and if another agent's suggestion conflicts with the lead, follow the lead.";
 const MAX_PASS_REASON_CHARS = 500;
 const BREAK_INSTRUCTIONS =
   "The user has started a break to save allowance. End your work now. Do not call wait_for_turn or any other Konfab tool again unless the user asks you to rejoin.";
@@ -169,7 +174,6 @@ const RULES = [
   "Before sending file contents, conversation content, secrets, or personal data to anyone",
   "other than Anthropic, OpenAI, Meta, or xAI, call request_permission and wait for approval.",
   "Pushes to a GitHub repo also need request_permission, with data_type code_push.",
-  "If the topic names a writer for a repo, only that agent may edit that repo.",
   "When you change code, commit it to your own git branch.",
   "If you know you are low on or out of allowance, call report_status.",
   "When your work is done, call post_message or pass_turn, then call wait_for_turn again.",
@@ -315,7 +319,10 @@ export class KonfabService {
     return { id, name, topic };
   }
 
-  updateRoom(ref: RoomRef, changes: { name?: string; topic?: string }) {
+  updateRoom(
+    ref: RoomRef,
+    changes: { name?: string; topic?: string; brief?: string },
+  ) {
     const room = this.room(ref);
     if (changes.name !== undefined && changes.name !== room.name) {
       this.validateRoomName(changes.name);
@@ -330,10 +337,38 @@ export class KonfabService {
       }
     }
     if (changes.topic !== undefined) this.validateTopic(changes.topic);
+    if (changes.brief !== undefined) {
+      this.validateLength(changes.brief, MAX_BRIEF_CHARS, "Briefs");
+    }
     this.db
-      .prepare("UPDATE rooms SET name = ?, topic = ? WHERE id = ?")
-      .run(changes.name ?? room.name, changes.topic ?? room.topic, room.id);
+      .prepare("UPDATE rooms SET name = ?, topic = ?, brief = ? WHERE id = ?")
+      .run(
+        changes.name ?? room.name,
+        changes.topic ?? room.topic,
+        changes.brief ?? room.brief,
+        room.id,
+      );
     this.logEvent("room_updated", room.id, null, changes);
+    this.notify();
+  }
+
+  /** Sets an agent's role in one room. It applies from the agent's next turn. */
+  setMemberRole(
+    ref: RoomRef,
+    agentId: string,
+    settings: { role: string; can_edit: boolean },
+  ): void {
+    const room = this.room(ref);
+    this.requireMember(room.id, agentId);
+    this.validateLength(settings.role, MAX_ROLE_CHARS, "Roles");
+    this.db
+      .prepare(
+        "UPDATE room_members SET role = ?, can_edit = ? WHERE room_id = ? AND agent_id = ?",
+      )
+      .run(settings.role.trim(), settings.can_edit ? 1 : 0, room.id, agentId);
+    this.logEvent("role_changed", room.id, agentId, {
+      can_edit: settings.can_edit,
+    });
     this.notify();
   }
 
@@ -449,11 +484,16 @@ export class KonfabService {
     const room = this.room(ref);
     const agents = this.db
       .prepare(
-        `SELECT a.id, a.display_name FROM room_members m
+        `SELECT a.id, a.display_name, m.role, m.can_edit FROM room_members m
          JOIN agents a ON a.id = m.agent_id
          WHERE m.room_id = ? ORDER BY m.position`,
       )
-      .all(room.id) as { id: string; display_name: string }[];
+      .all(room.id) as {
+      id: string;
+      display_name: string;
+      role: string;
+      can_edit: number;
+    }[];
     const queued = this.db
       .prepare(
         "SELECT agent_id FROM turns WHERE room_id = ? AND state = 'queued' ORDER BY id",
@@ -466,6 +506,7 @@ export class KonfabService {
         id: room.id,
         name: room.name,
         topic: room.topic,
+        brief: room.brief,
         paused: room.paused === 1,
         on_break: room.on_break === 1,
         archived: room.archived_at !== null,
@@ -477,6 +518,8 @@ export class KonfabService {
         return {
           id: agent.id,
           display_name: agent.display_name,
+          role: agent.role,
+          can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
           hours: hours ?? null,
           next_start: hours ? nextStart(new Date(this.now()), hours) : null,
@@ -555,7 +598,7 @@ export class KonfabService {
       session_id: sessionId,
       room: room.name,
       topic: room.topic,
-      rules: RULES,
+      rules: this.instructionsFor(room.id, agentId),
       members: this.memberIds(room.id),
       recent_messages: this.recentMessages(room.id, 20),
     };
@@ -1059,6 +1102,40 @@ export class KonfabService {
 
   // Internals
 
+  /** Builds an agent's instructions, with the core rules always last. */
+  private instructionsFor(roomId: number, agentId: string): string {
+    const room = this.roomById(roomId);
+    const members = this.db
+      .prepare(
+        `SELECT m.agent_id, m.role, m.can_edit, a.display_name FROM room_members m
+         JOIN agents a ON a.id = m.agent_id
+         WHERE m.room_id = ? ORDER BY m.position`,
+      )
+      .all(roomId) as {
+      agent_id: string;
+      role: string;
+      can_edit: number;
+      display_name: string;
+    }[];
+    const self = members.find((member) => member.agent_id === agentId);
+    const editors = members.filter((member) => member.can_edit === 1);
+
+    const parts = [LEAD_RULE];
+    if (room.brief.trim())
+      parts.push(`Room brief from the lead: ${room.brief}`);
+    if (self?.role) parts.push(`Your role in this room: ${self.role}`);
+    if (self?.can_edit === 1) {
+      parts.push("You may edit files and repos for this room's work.");
+    } else if (editors.length > 0) {
+      const names = editors.map((editor) => editor.display_name).join(" and ");
+      parts.push(
+        `Only ${names} may edit files or repos in this room. Do not edit them yourself; describe the changes you suggest instead.`,
+      );
+    }
+    parts.push(RULES);
+    return parts.join("\n\n");
+  }
+
   private startBreak(roomId: number): void {
     this.db.prepare("UPDATE rooms SET on_break = 1 WHERE id = ?").run(roomId);
     const sessions = this.db
@@ -1346,7 +1423,7 @@ export class KonfabService {
       turn_id: turn.id,
       room: room.name,
       topic: room.topic,
-      rules: RULES,
+      rules: this.instructionsFor(room.id, turn.agent_id),
       messages,
       truncated,
       wait_seconds: this.options.waitTimeoutSeconds,
@@ -1555,6 +1632,16 @@ export class KonfabService {
         "invalid_room_name",
         400,
         "Room names use lowercase letters, numbers, hyphens, and underscores, and start with a letter",
+      );
+    }
+  }
+
+  private validateLength(value: string, max: number, label: string): void {
+    if (value.length > max) {
+      throw new KonfabError(
+        "too_long",
+        400,
+        `${label} can be up to ${max} characters`,
       );
     }
   }

@@ -229,6 +229,35 @@ describe("page API", () => {
     });
   });
 
+  it("updates the room brief and an agent's role", async () => {
+    const { id } = service.createRoom("team", "", ["claude", "codex"]);
+    const brief = await call("PATCH", `/api/rooms/${id}`, {
+      brief: "Ship it",
+    });
+    expect(brief.json().room.brief).toBe("Ship it");
+
+    const role = await call("PUT", `/api/rooms/${id}/members/codex`, {
+      role: "Implementer",
+      can_edit: true,
+    });
+    expect(role.statusCode).toBe(200);
+    expect(role.json().agents[1]).toMatchObject({
+      id: "codex",
+      role: "Implementer",
+      can_edit: true,
+    });
+
+    const missing = await call("PUT", `/api/rooms/${id}/members/ghost`, {
+      role: "",
+      can_edit: false,
+    });
+    expect(missing.statusCode).toBe(403);
+    const invalid = await call("PUT", `/api/rooms/${id}/members/codex`, {
+      role: "x",
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it("starts a break for one room or all rooms", async () => {
     const one = service.createRoom("one", "", ["claude"]);
     const two = service.createRoom("two", "", ["codex"]);

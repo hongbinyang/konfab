@@ -64,6 +64,8 @@ export interface RoomAgent {
   next_start: number | null;
   closes_at: number | null;
   join_prompt: string;
+  role: string;
+  can_edit: boolean;
   stats: {
     model_wait_calls: number;
     calls_per_hour: number | null;
@@ -75,7 +77,11 @@ export interface RoomAgent {
 }
 
 export interface RoomState {
-  room: RoomSummary & { agent_streak: number; streak_limit: number };
+  room: RoomSummary & {
+    brief: string;
+    agent_streak: number;
+    streak_limit: number;
+  };
   agents: RoomAgent[];
   queued: string[];
   messages: Message[];

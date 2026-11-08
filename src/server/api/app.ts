@@ -56,7 +56,13 @@ const createRoomBody = z.object({
 const updateRoomBody = z.object({
   name: z.string().optional(),
   topic: z.string().optional(),
+  brief: z.string().optional(),
 });
+const memberParams = z.object({
+  id: z.coerce.number().int().positive(),
+  agentId: z.string().min(1),
+});
+const roleBody = z.object({ role: z.string(), can_edit: z.boolean() });
 const membersBody = z.object({ members: z.array(z.string()) });
 const pauseBody = z.object({ paused: z.boolean() });
 const userMessageBody = z.object({ body: z.string() });
@@ -270,11 +276,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.patch("/api/rooms/:id", async (request) => {
     const { id } = idParams.parse(request.params);
-    const { name, topic } = updateRoomBody.parse(request.body);
+    const { name, topic, brief } = updateRoomBody.parse(request.body);
     service.updateRoom(id, {
       ...(name !== undefined ? { name } : {}),
       ...(topic !== undefined ? { topic } : {}),
+      ...(brief !== undefined ? { brief } : {}),
     });
+    return service.roomState(id);
+  });
+
+  app.put("/api/rooms/:id/members/:agentId", async (request) => {
+    const { id, agentId } = memberParams.parse(request.params);
+    service.setMemberRole(id, agentId, roleBody.parse(request.body));
     return service.roomState(id);
   });
 

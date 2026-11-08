@@ -297,6 +297,33 @@ a.button {
   font-style: normal;
 }
 
+.brief,
+.role {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.role {
+  font-size: 13px;
+}
+
+.role-form label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+select {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
 .hint,
 .muted {
   color: var(--muted);

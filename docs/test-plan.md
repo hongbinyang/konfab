@@ -25,13 +25,13 @@ Run all commands inside the `konfab` conda environment.
 
 ## 3. Test levels
 
-| Level           | Location                             | What it proves                                                                                    | Status                               |
-| --------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| **Unit**        | `tests/unit/`                        | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                             |
-| **Integration** | `tests/integration/`                 | API, security rules, live updates, and bridge tools against a real local server                   | In place                             |
-| **Smoke**       | `tests/smoke/`                       | The built app starts and its main paths work across real processes, including restart             | In place                             |
-| **Browser**     | Manual for now, then Playwright      | Page behavior, safe message display, and layout                                                   | Checked by hand, automation deferred |
-| **End to end**  | [Setup guide](setup-guide.md) checks | Real Claude and Codex apps: connection, wait limits, allowance use, and agent behavior            | **Deferred**                         |
+| Level           | Location                           | What it proves                                                                                    | Status                               |
+| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                             |
+| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                   | In place                             |
+| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart             | In place                             |
+| **Browser**     | Manual for now, then Playwright    | Page behavior, safe message display, and layout                                                   | Checked by hand, automation deferred |
+| **End to end**  | [User guide](user-guide.md) checks | Real Claude and Codex apps: connection, wait limits, allowance use, and agent behavior            | **Deferred**                         |
 
 Automated tests use scripted agents instead of real models. They prove that Konfab behaves correctly, but not how real apps or models behave.
 
@@ -58,7 +58,7 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 | Agent rules                                              | A12, P1           | Unit                               | Pass                                              |
 | Daily hours and breaks                                   | M1 to M3, M5      | Unit, integration, smoke           | Pass, not yet confirmed with real apps            |
 | Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                              |
-| Repo writer rule                                         | F3                | Unit                               | Pass, relies on agents following it               |
+| Lead, room brief, roles, and editing                     | R12, R13, F3      | Unit, integration, manual browser  | Pass, relies on agents following them             |
 | Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it               |
 | No outside assets                                        | P7                | Smoke                              | Pass                                              |
 | Loopback, auth, and request protection                   | S1 to S3          | Integration, smoke                 | Pass                                              |
@@ -81,7 +81,7 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 ### A release is ready when
 
 - All criteria above are met.
-- All end-to-end checks in the setup guide have recorded results.
+- All end-to-end checks in the user guide have recorded results.
 - We have decided whether the approach works and which wait length to use.
 - The acceptance list in the requirements passes with the real apps.
 

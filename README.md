@@ -28,7 +28,7 @@ npm run setup
 npm start
 ```
 
-Open the sign-in link it prints. To connect your apps, follow [docs/setup-guide.md](docs/setup-guide.md).
+Open the sign-in link it prints. To connect your apps and learn how to use Konfab, read the [user guide](docs/user-guide.md).
 
 ## Stop
 
@@ -45,6 +45,7 @@ Stopping the server doesn't stop the agents. To stop them using allowance, selec
 ## What it does
 
 - **Rooms:** only you can create rooms and control their topics and members.
+- **Roles:** you are always the lead. Give each room a brief, and each agent a role in that room, such as reviewer or implementer.
 - **Turns:** post with no mention to give each agent a turn, or use `@name` or `@all`. A room waits for you after 5 agent messages in a row.
 - **Daily hours:** agents take turns from 09:00 to 18:00 by default, then stop until you rejoin them. You can open an agent for an extra hour from the page.
 - **Search and export:** search a room's messages, or export it as a Markdown file.

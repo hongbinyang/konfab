@@ -97,7 +97,7 @@ The exact versions are fixed by the lockfile when the project is set up.
 - **Tests:** a single `npm run check` runs types, lint, and tests. It must pass before each commit.
 - **Database changes:** numbered SQL migration files, applied at startup inside a transaction.
 - **Secrets:** tokens are never committed or logged.
-- **Docs:** README covers setup, and the setup guide covers app configuration and backups.
+- **Docs:** README covers setup, and the user guide covers app configuration and backups.
 
 ## 4. Project layout
 
@@ -127,7 +127,7 @@ konfab/
     integration/
     e2e/
   docs/
-    setup-guide.md
+    user-guide.md
 ```
 
 ## 5. Local data and config
@@ -272,6 +272,18 @@ queued --> active --> completed
 - **Restart:** the server marks all active turns `abandoned` and queues them again at startup. Bridges retry automatically, and the agent's existing session ID keeps working.
 - **Large backlogs:** if unseen messages exceed the size limit, the turn includes the most recent ones plus a `truncated` flag, and the agent uses `read_history` for the rest.
 
+### Lead, briefs, and roles
+
+Every turn and join response includes instructions built in this order:
+
+1. The lead rule, which says the user is the project lead and decides
+2. The room brief, if the user wrote one
+3. This agent's role in this room, if set
+4. Who may edit files and repos, if any agent is marked as an editor
+5. Konfab's core rules, including the third-party data rule
+
+Briefs are stored on the room, and roles and edit permission are stored on the room membership. Removing an agent from a room clears its role.
+
 ## 9. Waiting and allowance
 
 This is the main design tradeoff.
@@ -386,7 +398,7 @@ The test should stay small, but its server and bridge code can carry over.
 
 1. Set up the git repo, conda environment, and project tooling.
 2. Build the bridge, `join_room`, `wait_for_turn`, `post_message`, and `pass_turn`, with one room in SQLite and a basic page.
-3. Write the setup guide for adding the bridge to each app.
+3. Write the user guide for adding the bridge to each app.
 4. Run the checks on a throwaway repo:
 
 | Check | Measure | Decision it drives |
@@ -394,7 +406,7 @@ The test should stay small, but its server and bridge code can carry over.
 | T1 Connection | Both apps can use the tools | Whether this approach works at all |
 | T2 Waiting | Longest stable wait, and any configurable limit | Wait length and session length |
 | T2 Cost | Allowance used over an idle hour | Whether `idle_stop_minutes` is needed |
-| T3 Prompts | Which approval prompts remain with full access | Setup guide and expected interruptions |
+| T3 Prompts | Which approval prompts remain with full access | User guide and expected interruptions |
 | T4 Rules | Whether agents keep following rules after many turns | Prompt wording |
 | T5 Allowance | Whether agents can see their allowance | How useful `report_status` can be |
 
@@ -409,7 +421,7 @@ Build in this order, so that each step can be used and tested:
 5. Permissions and pre-approvals
 6. Allowance warnings
 7. Security hardening
-8. Page polish and setup guide
+8. Page polish and user guide
 
 Phase 1 is done when the acceptance list in the requirements passes.
 
@@ -423,7 +435,7 @@ Phase 1 is done when the acceptance list in the requirements passes.
 | A1 to A12 Joining and turns | 7, 8, 12 |
 | M1 to M3 Daily hours | 5, 8, 9 |
 | W1 to W3 Allowance | 9 |
-| F1 to F5 Local access | 2, 7, and the setup guide |
+| F1 to F5 Local access | 2, 7, and the user guide |
 | P1 to P7 Third-party data | 10, 12 |
 | S1 to S4 Security | 12 |
 | S5 Start at login (SHOULD) | A later login item using the absolute Node path |

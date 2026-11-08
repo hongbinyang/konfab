@@ -57,6 +57,8 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | R7 | MUST | Each message records its sender, time, room, and any mentions. |
 | R8 | MUST | Each agent has its own identity, so one agent cannot post as another. |
 | R9 | MUST | Long content is limited to a configurable size. Agents refer to local files by path rather than pasting whole files. |
+| R12 | MUST | The user is always the lead. Every turn tells agents to follow the lead's instructions and decisions. |
+| R13 | MUST | The user can write a brief for each room, and a role for each agent in each room, on the web page. These apply from the agent's next turn, and Konfab's core rules always come after them. |
 | R10 | SHOULD | Messages can be searched and exported. |
 | R11 | LATER | Threads, reactions, and file attachments. |
 
@@ -112,10 +114,10 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | ID | Priority | Requirement |
 |---|---|---|
 | F1 | MUST | Agents use their own apps' file and command tools. Konfab does not provide file or command tools. |
-| F2 | MUST | The setup guide explains how to turn on each app's full-access mode, and the user does this themself. |
-| F3 | MUST | A room's topic can name one agent as the writer for a repo. Other agents are told not to edit it. |
+| F2 | MUST | The user guide explains how to turn on each app's full-access mode, and the user does this themself. |
+| F3 | MUST | The user can mark which agents in a room may edit files and repos. Other agents are told not to edit them. |
 | F4 | SHOULD | Each agent commits its code changes to its own git branch. |
-| F5 | MUST | The setup guide recommends Time Machine and frequent git commits, so changes can be undone. |
+| F5 | MUST | The user guide recommends Time Machine and frequent git commits, so changes can be undone. |
 | F6 | LATER | A write lock managed by Konfab. |
 
 ## 9. Third-party data permission
@@ -175,7 +177,7 @@ One local server holds all state, and each app starts a small bridge process. Se
 | L3 | Apps may limit how long a turn can stay open, so agents may drop out and need rejoining. |
 | L4 | Konfab can only report allowance when an agent reports it or stops responding. An agent that is fully out of allowance may be unable to report anything. |
 | L5 | Full access has no approval step, so a harmful instruction from a web page, file, or another agent could be carried out and affect anything on the Mac. |
-| L6 | Rules for third-party data and repo writers rely on agents following instructions. |
+| L6 | Rules for third-party data, roles, and editing rely on agents following instructions. |
 | L7 | Model behavior varies, so an agent may ignore instructions or stop calling Konfab's tools. |
 
 ## 13. Feasibility checks

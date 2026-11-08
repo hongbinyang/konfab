@@ -42,6 +42,16 @@ const BREAK_CONFIRMATION =
   "Agents will stop and use no more allowance. To bring one back, paste its join prompt into its app. Start the break?";
 const BREAK_HELP =
   "Agents stop and use no allowance until you paste their join prompts";
+const ROLE_PRESETS: Record<string, string> = {
+  Implementer:
+    "Implement the agreed changes. Keep changes small, run the tests, and report what you changed.",
+  Reviewer:
+    "Review proposals and code for bugs, risks, and missing tests. Be specific, and say how confident you are.",
+  Critic:
+    "Challenge assumptions and point out weaknesses or better alternatives. Be constructive and concise.",
+  Researcher:
+    "Gather facts and sources, separate evidence from opinion, and summarize what you find.",
+};
 const CLOSING_SOON_MS = 15 * 60_000;
 const EXTEND_OFFER_MS = 60 * 60_000;
 
@@ -304,6 +314,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic);
+  const [brief, setBrief] = useState(room.brief);
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
   const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}`;
@@ -341,7 +352,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
     void act(async () => {
       await request(`/api/rooms/${room.id}`, {
         method: "PATCH",
-        body: { name: name.trim(), topic },
+        body: { name: name.trim(), topic, brief },
       });
       setEditing(false);
     });
@@ -386,6 +397,15 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
                 onChange={(event) => setTopic(event.target.value)}
               />
             </label>
+            <label>
+              Brief for agents
+              <textarea
+                value={brief}
+                rows={5}
+                placeholder="Goals, constraints, and how the agents should work together"
+                onChange={(event) => setBrief(event.target.value)}
+              />
+            </label>
             <div className="row">
               <button type="submit">Save</button>
               <button
@@ -402,6 +422,12 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             <div className="room-title">
               <h2># {room.name}</h2>
               <p>{room.topic || "No topic yet"}</p>
+              {room.brief && (
+                <details>
+                  <summary>Brief for agents</summary>
+                  <p className="brief">{room.brief}</p>
+                </details>
+              )}
             </div>
             {!room.archived && (
               <div className="row">
@@ -411,6 +437,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
                   onClick={() => {
                     setName(room.name);
                     setTopic(room.topic);
+                    setBrief(room.brief);
                     setEditing(true);
                   }}
                 >
@@ -504,7 +531,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               <li key={message.id}>
                 <span className="sender">
                   {message.sender_type === "user"
-                    ? "You"
+                    ? "You (Lead)"
                     : displayName(message.sender_id)}
                 </span>
                 <span className="time">{formatTime(message.created_at)}</span>
@@ -544,7 +571,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             <li key={`message-${item.id}`}>
               <span className="sender">
                 {item.sender_type === "user"
-                  ? "You"
+                  ? "You (Lead)"
                   : displayName(item.sender_id)}
               </span>
               <span className="time">{formatTime(item.created_at)}</span>
@@ -691,6 +718,7 @@ function Agents({
             {member ? (
               <AgentDetails
                 agent={member}
+                roomId={room.room.id}
                 archived={room.room.archived}
                 act={act}
               />
@@ -706,19 +734,107 @@ function Agents({
 
 function AgentDetails({
   agent,
+  roomId,
   archived,
   act,
 }: {
   agent: RoomAgent;
+  roomId: number;
   archived: boolean;
   act: Act;
 }) {
   const [copied, setCopied] = useState(false);
   const { stats } = agent;
+  const [editingRole, setEditingRole] = useState(false);
+  const [role, setRole] = useState(agent.role);
+  const [canEdit, setCanEdit] = useState(agent.can_edit);
+
+  const saveRole = (event: FormEvent) => {
+    event.preventDefault();
+    void act(async () => {
+      await request(`/api/rooms/${roomId}/members/${agent.id}`, {
+        method: "PUT",
+        body: { role, can_edit: canEdit },
+      });
+      setEditingRole(false);
+    });
+  };
 
   return (
     <>
       <p className={`state ${agent.state}`}>{STATE_LABELS[agent.state]}</p>
+      {editingRole ? (
+        <form className="stack role-form" onSubmit={saveRole}>
+          <label>
+            Start from
+            <select
+              defaultValue=""
+              onChange={(event) => {
+                const preset = ROLE_PRESETS[event.target.value];
+                if (preset) setRole(preset);
+              }}
+            >
+              <option value="">Choose a preset</option>
+              {Object.keys(ROLE_PRESETS).map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Role
+            <textarea
+              value={role}
+              rows={4}
+              placeholder="What this agent should do in this room"
+              onChange={(event) => setRole(event.target.value)}
+            />
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={canEdit}
+              onChange={(event) => setCanEdit(event.target.checked)}
+            />
+            Can edit files and repos
+          </label>
+          <div className="row">
+            <button type="submit">Save role</button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setEditingRole(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <p className="role">
+            {agent.role ? (
+              agent.role
+            ) : (
+              <span className="muted">No role set</span>
+            )}
+          </p>
+          {agent.can_edit && <p className="muted">Can edit files and repos</p>}
+          {!archived && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                setRole(agent.role);
+                setCanEdit(agent.can_edit);
+                setEditingRole(true);
+              }}
+            >
+              Edit role
+            </button>
+          )}
+        </>
+      )}
       {agent.state === "not_responding" && (
         <p className="warning-text">
           It may be out of allowance, so check its app.
