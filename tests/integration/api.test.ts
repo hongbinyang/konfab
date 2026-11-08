@@ -277,18 +277,23 @@ describe("page API", () => {
 
   it("searches and exports a room", async () => {
     const { id } = service.createRoom("notes", "A topic", ["claude"]);
-    service.postUserMessage(id, "Find this 100%");
+    service.postUserMessage(id, "Find this 100% 👍🏽 🎉");
     service.postUserMessage(id, "Other text");
 
     const search = await call("GET", `/api/rooms/${id}/search?q=100%25`);
     expect(search.json().messages).toHaveLength(1);
+    const emojiSearch = await call(
+      "GET",
+      `/api/rooms/${id}/search?q=${encodeURIComponent("👍🏽")}`,
+    );
+    expect(emojiSearch.json().messages[0].body).toBe("Find this 100% 👍🏽 🎉");
     const empty = await call("GET", `/api/rooms/${id}/search?q=%20`);
     expect(empty.statusCode).toBe(400);
 
     const exported = await call("GET", `/api/rooms/${id}/export`);
     expect(exported.headers["content-disposition"]).toContain("notes.md");
     expect(exported.body).toContain("# notes");
-    expect(exported.body).toContain("Find this 100%");
+    expect(exported.body).toContain("Find this 100% 👍🏽 🎉");
   });
 
   it("extends an agent's hours and rejects unknown agents", async () => {

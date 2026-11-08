@@ -1,0 +1,50 @@
+.emoji-picker {
+  position: relative;
+  align-self: end;
+}
+.emoji-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: min(340px, 85vw);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  box-shadow: 0 4px 16px #0003;
+  z-index: 2;
+}
+.emoji-search {
+  display: grid;
+  gap: 4px;
+}
+.emoji-search input {
+  width: 100%;
+}
+.emoji-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+}
+.emoji-categories button {
+  font-size: 12px;
+  padding: 4px;
+}
+.emoji-categories button[aria-pressed="true"] {
+  outline: 2px solid currentColor;
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.emoji-grid button {
+  font-size: 22px;
+  padding: 4px;
+}
+.emoji-grid p {
+  grid-column: 1 / -1;
+}
