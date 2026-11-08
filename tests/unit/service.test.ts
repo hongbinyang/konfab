@@ -58,6 +58,65 @@ describe("KonfabService", () => {
 
   afterEach(() => db.close());
 
+  it("records completed waits and one inferred contact loss per lapse", () => {
+    service.beginObservedWait("claude", claude, "call-one");
+    now += 12_000;
+    service.finishObservedWait("claude", claude, "call-one");
+    service.beginObservedWait("claude", claude, "interrupted");
+    now += 100_000;
+    service.tick();
+    service.tick();
+    const first = service.activity(ROOM);
+    expect(
+      first.filter(
+        (event) => event.type === "contact_lost" && event.agent_id === "claude",
+      ),
+    ).toHaveLength(1);
+    expect(
+      first.find(
+        (event) => event.type === "contact_lost" && event.agent_id === "claude",
+      )?.last_contact_at,
+    ).toBe(1_000_000);
+    expect(
+      service.roomState(ROOM).agents.find((a) => a.id === "claude")?.stats
+        .longest_wait_ms,
+    ).toBe(12_000);
+    service.poll("claude", claude, true);
+    expect(
+      service
+        .activity(ROOM)
+        .some(
+          (event) =>
+            event.type === "contact_restored" && event.agent_id === "claude",
+        ),
+    ).toBe(true);
+  });
+
+  it("computes median answer time excluding permission waits", () => {
+    service.postUserMessage(ROOM, "@claude work");
+    const first = expectTurn(service.poll("claude", claude, true));
+    now += 2_000;
+    const permission = service.requestPermission("claude", claude, {
+      recipient: "example.test",
+      data_description: "test",
+      reason: "test",
+    });
+    now += 10_000;
+    service.decidePermission(permission.id, "approved");
+    now += 4_000;
+    service.postAgentMessage("claude", claude, first.turn_id, "done");
+    service.postUserMessage(ROOM, "@claude again");
+    const second = expectTurn(service.poll("claude", claude, true));
+    now += 8_000;
+    service.passTurn("claude", claude, second.turn_id);
+    const stats = service
+      .roomState(ROOM)
+      .agents.find((a) => a.id === "claude")?.stats;
+    expect(stats?.median_answer_ms).toBe(7_000);
+    expect(stats?.paused_turns).toBe(1);
+    expect(service.exportRoom(ROOM).markdown).toContain("## Activity");
+  });
+
   it("authenticates only valid tokens", () => {
     const token = generateToken();
     service.setAgentToken("claude", token);

@@ -501,3 +501,19 @@ dd {
     max-height: 60dvh;
   }
 }
+
+.activity {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+}
+.activity ol {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-left: 24px;
+}
+.activity li {
+  margin: 4px 0;
+}
+.activity time {
+  color: var(--muted);
+}

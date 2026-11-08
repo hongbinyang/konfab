@@ -67,6 +67,12 @@ export interface RoomAgent {
   role: string;
   can_edit: boolean;
   stats: {
+    session_started_at: number | null;
+    last_contact_at: number | null;
+    longest_wait_ms: number | null;
+    median_answer_ms: number | null;
+    paused_turns: number;
+    answer_samples: number;
     model_wait_calls: number;
     calls_per_hour: number | null;
     longest_gap_ms: number;
@@ -74,6 +80,14 @@ export interface RoomAgent {
     turns_completed: number;
     turns_skipped: number;
   };
+}
+
+export interface ActivityEvent {
+  id: number;
+  type: string;
+  agent_id: string | null;
+  created_at: number;
+  last_contact_at: number | null;
 }
 
 export interface RoomState {
@@ -86,6 +100,7 @@ export interface RoomState {
   queued: string[];
   messages: Message[];
   passes?: Pass[];
+  activity: ActivityEvent[];
 }
 
 export class UnauthorizedError extends Error {}

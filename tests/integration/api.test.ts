@@ -275,6 +275,29 @@ describe("page API", () => {
     );
   });
 
+  it("paginates room activity without leaking other rooms", async () => {
+    const one = service.createRoom("first", "", ["claude"]);
+    const two = service.createRoom("second", "", ["codex"]);
+    for (let i = 0; i < 205; i += 1) service.setRoomPaused(one.id, i % 2 === 0);
+    service.join("codex", "second");
+    const first = await call("GET", `/api/rooms/${one.id}/activity`);
+    expect(first.statusCode).toBe(200);
+    const events = first.json().events as {
+      id: number;
+      agent_id: string | null;
+    }[];
+    expect(events).toHaveLength(200);
+    expect(events.some((event) => event.agent_id === "codex")).toBe(false);
+    const older = await call(
+      "GET",
+      `/api/rooms/${one.id}/activity?before_id=${events.at(-1)!.id}`,
+    );
+    expect(older.json().events.length).toBe(5);
+    expect(
+      (await call("GET", `/api/rooms/${two.id}/activity`)).json().events,
+    ).toHaveLength(1);
+  });
+
   it("searches and exports a room", async () => {
     const { id } = service.createRoom("notes", "A topic", ["claude"]);
     service.postUserMessage(id, "Find this 100%");

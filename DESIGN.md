@@ -318,6 +318,14 @@ If idle cost is still too high after Phase 0, the fallback is to add `idle_stop_
 
 "Not responding" also shows the W3 warning that the agent may be out of allowance. Reports sent through `report_status` appear on the page, since Konfab has no way to read an app's allowance directly.
 
+### Activity timeline and observed measurements
+
+The room activity view reads the existing local event log, with 200 events per page and an event-ID cursor for older results. Room exports include the full activity history. New installations record status reports and inferred contact transitions; earlier events remain available, but data that was never recorded cannot be reconstructed. Global pause and resume events appear in each room.
+
+A periodic server tick records a single inferred loss when an active agent has not contacted the server for the configured wait timeout plus 60 seconds, excluding agents working on a turn. The event records both the most recent contact and the later detection time. A subsequent call records recovery. These observations do not establish an exact disconnect time or measure allowance.
+
+Each bridge wait has a unique call ID. The server records its first poll and a completion notification, so only completed, observed waits contribute to the longest wait. Interrupted waits and time before the first successful poll are unknown. Telemetry failures do not prevent a turn result. Median answer time uses the last 100 completed turns with a recorded original start, measured to completion and excluding overlapping permission-wait intervals; the page shows how many sampled turns contained a permission pause. Older completed turns without a recorded original start are excluded.
+
 ## 10. Third-party permission flow
 
 ```text

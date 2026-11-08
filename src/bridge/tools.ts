@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
@@ -111,6 +112,18 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     },
     async ({ session_id }, extra) => {
       const started = Date.now();
+      const callId = randomUUID();
+      const finish = async () => {
+        try {
+          await call(
+            "/agent/wait-finished",
+            { session_id, call_id: callId },
+            AbortSignal.timeout(2000),
+          );
+        } catch {
+          /* Telemetry must not interrupt turn-taking. */
+        }
+      };
       let waitSeconds = options.defaultWaitSeconds ?? DEFAULT_WAIT_SECONDS;
       let first = true;
       let progress = 0;
@@ -125,12 +138,15 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           try {
             const result = await call<{ status: string; wait_seconds: number }>(
               "/agent/wait",
-              { session_id, first, timeout_seconds: timeout },
+              { session_id, first, call_id: callId, timeout_seconds: timeout },
               extra.signal,
             );
             first = false;
             waitSeconds = result.wait_seconds;
-            if (result.status !== "idle") return asToolResult(result);
+            if (result.status !== "idle") {
+              await finish();
+              return asToolResult(result);
+            }
           } catch (error) {
             if (error instanceof HttpError || extra.signal.aborted) throw error;
             await delay(RETRY_DELAY_MS, extra.signal);
@@ -148,6 +164,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
             });
           }
         }
+        if (!extra.signal.aborted) await finish();
         return asToolResult({ status: "idle" });
       } catch (error) {
         return asToolError(error);
