@@ -114,6 +114,27 @@ Konfab displays requests made through its permission tool. Your desktop apps can
 1. Select **Take a break** or press stop in each app, so agents don't keep retrying.
 2. Press **Ctrl+C** in the terminal running `npm start`.
 
+## Restart Konfab
+
+Your rooms, messages, decisions and agent sessions are stored in `~/.konfab/konfab.db`, so they survive a restart. You can keep using the same app conversations.
+
+1. Wait until the agents show **Waiting**, not **Working**.
+2. Select **Pause** for the room, or **Pause all rooms**.
+3. Press **Ctrl+C** in the terminal running `npm start`, then run `npm start` again.
+4. Select **Resume**.
+
+What to do afterwards depends on what happened:
+
+| Situation                                                       | What you do                                                                                                                                                 |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Normal restart**                                              | Nothing. A waiting agent keeps retrying while Konfab is down, then carries on in the same conversation with the same session.                               |
+| **An agent stopped with an error** (for example, mid-turn)      | In the same conversation, tell it: `Continue the Konfab loop in room <room>.` It keeps its session and its run window.                                      |
+| **The session ended** (run window over, a break, room archived) | In the same conversation, tell it: `Rejoin Konfab room <room> and continue the loop.` This starts a new run window.                                         |
+| **Konfab's agent tools changed** (the release notes say so)     | Restart the Konfab connector in each app, or quit and reopen the app. Start a new conversation only if the app still doesn't show the new tools.            |
+| **A conversation has become very long or slow**                 | Optional: paste the join prompt into a new conversation. The old one stops by itself, and the new one starts from the room's recent messages and decisions. |
+
+Rejoining always starts a new run window, so only rejoin when the session has ended.
+
 ## Clean up
 
 - Remove the `konfab` entry from `~/.codex/config.toml`.
