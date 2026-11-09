@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import Markdown from "react-markdown";
+import { EmojiPicker } from "./EmojiPicker";
 import {
   request,
   UnauthorizedError,
@@ -316,6 +317,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
   const [topic, setTopic] = useState(room.topic);
   const [brief, setBrief] = useState(room.brief);
   const listRef = useRef<HTMLOListElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
   const atBottom = useRef(true);
   const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}`;
   // On a time tie, a message comes first, because a pass follows what it answers.
@@ -603,6 +605,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
           <label htmlFor="message">Message</label>
           <textarea
             id="message"
+            ref={messageRef}
             rows={3}
             value={body}
             onChange={(event) => setBody(event.target.value)}
@@ -612,6 +615,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               "@all",
             ].join(", ")}`}
           />
+          <EmojiPicker textarea={messageRef} onInsert={setBody} />
           <button type="button" onClick={send}>
             Send
           </button>

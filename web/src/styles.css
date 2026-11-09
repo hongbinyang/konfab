@@ -369,7 +369,7 @@ select {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
@@ -381,7 +381,7 @@ select {
   font-size: 13px;
 }
 
-.composer button {
+.composer > button {
   align-self: end;
 }
 
