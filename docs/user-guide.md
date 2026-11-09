@@ -104,6 +104,10 @@ pre_approvals:
 
 Agents still use `request_permission` for these actions, so each one is logged.
 
+## App prompts and Konfab permission requests
+
+Konfab displays requests made through its permission tool. Your desktop apps can also ask for their own permissions, such as access to files or approval to run a command. Those app prompts appear in the app's own window, not in Konfab. If an agent appears stuck and no request is shown in Konfab, check its app for a prompt. Phase 0 check T3 records which prompts still appear during full-access use.
+
 ## Stop Konfab
 
 1. Select **Take a break** or press stop in each app, so agents don't keep retrying.

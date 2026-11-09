@@ -349,6 +349,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return service.roomState(idParams.parse(request.params).id);
   });
 
+  app.get("/api/rooms/:id/permissions", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { before_id } = z
+      .object({ before_id: z.coerce.number().int().positive().optional() })
+      .parse(request.query);
+    return service.permissionHistory(id, before_id);
+  });
+
   app.get("/api/rooms/:id/activity", async (request) => {
     const { id } = idParams.parse(request.params);
     const { before_id } = z

@@ -571,3 +571,21 @@ dd {
   max-height: 180px;
   object-fit: contain;
 }
+
+.permission-log {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+}
+.permission-log ol {
+  max-height: 300px;
+  overflow-y: auto;
+  padding-left: 0;
+  list-style: none;
+}
+.permission-log .permission-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}

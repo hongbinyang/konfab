@@ -15,6 +15,7 @@ import {
   type ActivityEvent,
   type Attachment,
   type Decision,
+  type Permission,
   type AgentState,
   type Overview,
   type RoomAgent,
@@ -620,65 +621,11 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             </li>
           ) : item.kind === "permission" ? (
             <li key={`permission-${item.id}`} className="permission-card">
-              <strong>
-                Permission request from {displayName(item.agent_id)}
-              </strong>
-              <span className="time">{formatTime(item.created_at)}</span>
-              <p>
-                Recipient: {item.recipient}
-                <br />
-                Data: {item.data_description}
-                <br />
-                Reason: {item.reason}
-              </p>
-              {item.data_type === "code_push" &&
-                (item.push_repository ? (
-                  <p>
-                    Repository: {item.push_repository}
-                    <br />
-                    Branch: {item.push_branch}
-                    <br />
-                    Commits:{" "}
-                    <code>
-                      {item.push_base}..{item.push_head}
-                    </code>
-                  </p>
-                ) : (
-                  <p>Legacy request: no recorded commit scope.</p>
-                ))}
-              {item.state === "pending" ? (
-                <div className="row">
-                  {(["approved", "denied"] as const).map((decision) => (
-                    <button
-                      key={decision}
-                      type="button"
-                      className={
-                        decision === "denied" ? "secondary" : undefined
-                      }
-                      onClick={() =>
-                        void act(() =>
-                          request(`/api/permissions/${item.id}/decision`, {
-                            method: "POST",
-                            body: { decision },
-                          }),
-                        )
-                      }
-                    >
-                      {decision === "approved" ? "Approve" : "Deny"}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p>
-                  {item.state === "approved" ? "Approved" : "Denied"}{" "}
-                  {item.decided_by === "pre_approval"
-                    ? "automatically (pre-approval)"
-                    : "by you"}
-                  {item.decided_at !== null
-                    ? ` at ${new Date(item.decided_at).toLocaleString()}`
-                    : ""}
-                </p>
-              )}
+              <PermissionCard
+                item={item}
+                name={displayName(item.agent_id)}
+                act={act}
+              />
             </li>
           ) : (
             <li id={`message-${item.id}`} key={`message-${item.id}`}>
@@ -719,6 +666,13 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
           ),
         )}
       </ol>
+
+      <PermissionLog
+        roomId={room.id}
+        recent={state.permissions}
+        agents={agents}
+        act={act}
+      />
 
       <details className="activity">
         <summary>Activity timeline</summary>
@@ -871,6 +825,173 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
         </div>
       )}
     </>
+  );
+}
+
+function PermissionCard({
+  item,
+  name,
+  act,
+}: {
+  item: Permission;
+  name: string;
+  act: Act;
+}) {
+  return (
+    <>
+      <strong>Permission request from {name}</strong>
+      <span className="time">{new Date(item.created_at).toLocaleString()}</span>
+      <p>
+        Recipient: {item.recipient}
+        <br />
+        Data: {item.data_description}
+        <br />
+        Reason: {item.reason}
+      </p>
+      {item.data_type === "code_push" &&
+        (item.push_repository ? (
+          <p>
+            Repository: {item.push_repository}
+            <br />
+            Branch: {item.push_branch}
+            <br />
+            Commits:{" "}
+            <code>
+              {item.push_base}..{item.push_head}
+            </code>
+          </p>
+        ) : (
+          <p>Legacy request: no recorded commit scope.</p>
+        ))}
+      {item.state === "pending" ? (
+        <div className="row">
+          {(["approved", "denied"] as const).map((decision) => (
+            <button
+              key={decision}
+              type="button"
+              className={decision === "denied" ? "secondary" : undefined}
+              onClick={() =>
+                void act(() =>
+                  request(`/api/permissions/${item.id}/decision`, {
+                    method: "POST",
+                    body: { decision },
+                  }),
+                )
+              }
+            >
+              {decision === "approved" ? "Approve" : "Deny"}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p>
+          {item.state === "approved" ? "Approved" : "Denied"}{" "}
+          {item.decided_by === "pre_approval"
+            ? "automatically (pre-approval)"
+            : "by you"}
+          {item.decided_at !== null
+            ? ` at ${new Date(item.decided_at).toLocaleString()}`
+            : ""}
+        </p>
+      )}
+    </>
+  );
+}
+
+function PermissionLog({
+  roomId,
+  recent,
+  agents,
+  act,
+}: {
+  roomId: number;
+  recent: Permission[];
+  agents: RoomAgent[];
+  act: Act;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pageCount, setPageCount] = useState(1);
+  const [items, setItems] = useState<Permission[]>([]);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const revision = recent
+    .map((item) => `${item.id}:${item.state}:${item.decided_at ?? ""}`)
+    .join(",");
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        let cursor: number | null = null;
+        const all: Permission[] = [];
+        for (let page = 0; page < pageCount; page += 1) {
+          const url: string = `/api/rooms/${roomId}/permissions${cursor === null ? "" : `?before_id=${cursor}`}`;
+          const result: {
+            permissions: Permission[];
+            next_before_id: number | null;
+          } = await request(url);
+          all.push(...result.permissions);
+          cursor = result.next_before_id;
+          if (cursor === null) break;
+        }
+        if (!cancelled) {
+          setItems(all);
+          setHasOlder(cursor !== null);
+          setError("");
+        }
+      } catch (caught) {
+        if (!cancelled) setError(errorMessage(caught));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, pageCount, revision, roomId]);
+  const pending = recent
+    .filter((item) => item.state === "pending")
+    .sort((a, b) => b.id - a.id);
+  const answered = items.filter((item) => item.state !== "pending");
+  return (
+    <details
+      className="permission-log"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>Permissions</summary>
+      {error && <p role="alert">{error}</p>}
+      {loading && <p>Loading…</p>}
+      {!loading && !pending.length && !answered.length && (
+        <p>No permission requests yet.</p>
+      )}
+      <ol>
+        {[...pending, ...answered].map((item) => (
+          <li className="permission-card" key={item.id}>
+            <PermissionCard
+              item={item}
+              name={
+                agents.find((agent) => agent.id === item.agent_id)
+                  ?.display_name ?? item.agent_id
+              }
+              act={act}
+            />
+          </li>
+        ))}
+      </ol>
+      {hasOlder && (
+        <button
+          type="button"
+          className="secondary"
+          disabled={loading}
+          onClick={() => setPageCount((count) => count + 1)}
+        >
+          Load older
+        </button>
+      )}
+    </details>
   );
 }
 
