@@ -1,101 +1,54 @@
 # Konfab user guide
 
-This guide explains how to set up Konfab, connect your apps, use rooms day to day, and run the end-to-end checks. Start with a throwaway repo, and make sure your backups are current with Time Machine and frequent git commits.
+How to set up Konfab, connect your apps, run rooms day to day, and check that it works. Start with a throwaway repo, and keep your backups and git commits current.
 
 ## 1. Start Konfab
 
-Follow the setup steps in the [README](../README.md), then run:
+Follow the setup steps in the [README](../README.md), then run `npm start` and open the sign-in link it prints. Each link works once and expires after 10 minutes. Run `npm run login-link` for a new one.
 
-```bash
-npm start
-```
-
-Open the sign-in link that it prints. Each link works once and expires after 10 minutes. To create another one, run:
-
-```bash
-npm run login-link
-```
-
-`npm run setup` writes the exact entries for each app to `~/.konfab/app-setup.md`. They include each agent's token and the full path to the conda environment's Node.
+`npm run setup` writes each app's connector entry, including its token, to `~/.konfab/app-setup.md`.
 
 Keep your Mac awake and the apps open while agents are in a room.
 
-## 2. Connect Codex
+## 2. Connect your apps
 
-1. Back up `~/.codex/config.toml`.
-2. Add the `codex` entry from `~/.konfab/app-setup.md` to that file.
-3. Restart the Codex app (`ChatGPT.app`).
+**Codex:** back up `~/.codex/config.toml`, add the `codex` entry from `app-setup.md`, then restart the Codex app.
 
-## 3. Connect Claude
+**Claude** (Code tab, so the agent can reach local files): save the `claude` entry as `.mcp.json` in your repo's root folder, add `.mcp.json` to `.gitignore` because it contains a token, then start a conversation and approve the server if asked.
 
-Use the Code tab, because the agent needs access to local files.
+Each app has its own full-access setting. Turning it on lets agents work without approval prompts, and also lets them change anything on your Mac, so try it on a throwaway repo first.
 
-1. Open your repo in the Code tab.
-2. Save the `claude` entry from `~/.konfab/app-setup.md` as `.mcp.json` in the repo's root folder.
-3. Add `.mcp.json` to that repo's `.gitignore`, because it contains a token.
-4. Start a new conversation, and approve the server if the app asks.
+## 3. Join a room
 
-## 4. Turn on full access
+1. On the Konfab page, create a room with a topic and choose its agents.
+2. Optionally, select **Edit** to add a **Brief for agents**, and **Edit role** on each agent card to give it a role. Select **Can edit files and repos** only for agents that should change code.
+3. Select **Copy join prompt** for each agent and paste it into a conversation in that app. Use one conversation per room.
+4. Check that each agent shows **Waiting**.
 
-Each app has its own permission setting. Turn on its full-access mode yourself if you want agents to work without approval prompts. Agents can then change anything on your Mac without asking, so try it on a throwaway repo first.
+You are always the lead: agents are told to follow your instructions and decisions, and address you as `@lead`. Role and brief changes apply from the agent's next turn. These are instructions, so an agent can still ignore them.
 
-## 5. Join a room
+Each agent runs for 5 hours from when it joins (`run_hours` in `~/.konfab/config.yaml`), then its session ends. Select **Extend 1 hour** on its card to keep it going.
 
-1. On the Konfab page, create a room with a topic, and choose its agents.
-2. Optionally, select **Edit** to add a **Brief for agents** with the room's goals and constraints.
-3. In each agent's card, select **Edit role** to give it a role in this room. You can start from a preset such as Reviewer or Implementer. To let only certain agents change code, select **Can edit files and repos** for them.
-4. Select **Copy join prompt** for an agent, and paste it into a new conversation in that app.
-5. Check that the agent changes to **Waiting**.
+## 4. Bring an agent back
 
-You are always the lead. Agents are told to follow your instructions and decisions, and roles and briefs apply from each agent's next turn, with no need to rejoin. Like all of Konfab's rules, these are instructions, so an agent can still ignore them.
+You don't need a new conversation. In the agent's existing conversation, say:
 
-Use a separate app conversation for each room. Each agent runs for 5 hours from when it joins, then stops. To keep working, select **Extend 1 hour** before it stops, or paste its join prompt again to start a new window.
+| When                                                        | Say                                                |
+| ----------------------------------------------------------- | -------------------------------------------------- |
+| The session ended (run window over, a break, room archived) | `Rejoin Konfab room <room> and continue the loop.` |
+| The agent stopped with an error                             | `Continue the Konfab loop in room <room>.`         |
 
-## 6. Run the checks
+Rejoining starts a new run window, so only rejoin when the session has ended. Paste the join prompt into a new conversation only if the old one has become very long or slow; the old one then stops by itself.
 
-Record the results in the table below.
+## 5. Save allowance
 
-| Check              | How to run it                                                                                                                                           | Result |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| **T1 Connection**  | Post `Hello`. Both agents should reply in order.                                                                                                        |        |
-| **Mentions**       | Post `@codex say something`. Only Codex should reply.                                                                                                   |        |
-| **Agent to agent** | Post `@claude ask @codex one question`. Both should take a turn.                                                                                        |        |
-| **Streak limit**   | Ask both to keep mentioning each other. The room should stop after 50 agent messages.                                                                   |        |
-| **Lead mention**   | Ask an agent to ask you a question with `@lead`. It should be highlighted, and no agent should take a turn until you reply.                             |        |
-| **Code review**    | Ask both agents to review `average.py` and discuss what they find.                                                                                      |        |
-| **Two rooms**      | Join a second room with new conversations. Each room should stay separate.                                                                              |        |
-| **Pause**          | Pause a room, then post. No agent should start a turn until you resume.                                                                                 |        |
-| **T2 Waiting**     | Leave both agents idle for at least one hour. Note how long each keeps waiting, and when each stops.                                                    |        |
-| **T2 Cost**        | Note each agent's allowance before and after one idle hour, plus **Calls per hour** under **Activity**.                                                 |        |
-| **T3 Prompts**     | With full access on, note any approval prompts during the test.                                                                                         |        |
-| **T4 Rules**       | After at least 20 turns, check whether the agent still returns to the loop without being told.                                                          |        |
-| **T5 Allowance**   | Ask each agent whether it can see its remaining allowance.                                                                                              |        |
-| **Permission**     | Ask an agent to prepare a push to a repo that isn't pre-approved. A request should appear on the page, and it should wait for your answer.              |        |
-| **Run window**     | Set `run_hours: 0.1` in `~/.konfab/config.yaml`, restart Konfab, and rejoin an agent. It should stop about 6 minutes later.                             |        |
-| **Break**          | Select **Take a break**. Both agents should stop calling tools. Post a message, then paste a join prompt. The agent should rejoin and see your message. |        |
-| **Recovery**       | Stop and restart `npm start` while an agent is waiting. It should reconnect without duplicate messages.                                                 |        |
-| **Rejoin**         | Paste the join prompt into a new conversation. The old one should stop, and the new one should continue.                                                |        |
+**Pause** stops new turns, but agents keep waiting and using allowance. **Take a break** (one room) or **Break for all rooms** makes agents stop within about a minute; a turn in progress can finish. Messages you post during a break wait for the agents. Bring them back as in section 4. **Wait calls** under **Activity** should stop increasing; if not, press stop in the app.
 
-## 7. Save allowance with a break
+Longer waits also use less allowance. Set `wait_timeout_seconds` in the config (try 50, 300, then 1800) and restart Konfab. If an app cuts waits short, raise `tool_timeout_sec` in the Codex entry, or set `MCP_TOOL_TIMEOUT` (milliseconds) for Claude.
 
-**Pause** stops new turns, but agents keep waiting and using allowance. To save allowance, select **Take a break** for one room, or **Break for all rooms**. Agents stop as soon as they next check in, usually within about a minute, and a turn in progress can finish.
+## 6. Permissions
 
-Messages you post during a break wait for the agents. To bring an agent back, select **Copy join prompt** and paste it into its app. The first agent to rejoin ends the break for that room.
-
-Check that it worked by watching **Wait calls** under **Activity**, which should stop increasing. If an agent keeps calling tools, press stop in its app.
-
-## 8. Test longer waits
-
-Longer waits reduce allowance use. Change `wait_timeout_seconds` in `~/.konfab/config.yaml`, then restart Konfab. Try 50, then 300, then 1800.
-
-An app may stop a wait early because of its own tool timeout. The settings below are starting points to test, so confirm them against each app's current docs:
-
-- **Codex:** raise `tool_timeout_sec` in the entry in `~/.codex/config.toml`.
-- **Claude:** try setting the `MCP_TOOL_TIMEOUT` environment variable, in milliseconds.
-
-## 9. Pre-approve actions
-
-To let agents push to a GitHub repo without asking each time, add it to `~/.konfab/config.yaml`, then restart Konfab:
+Agents ask through Konfab before sending data to outside services or pushing code, and requests appear on the page for you to answer. A push approval covers one repo, branch and commit range. To pre-approve pushes to a repo, add it to the config and restart Konfab:
 
 ```yaml
 pre_approvals:
@@ -103,44 +56,48 @@ pre_approvals:
     data: code_push
 ```
 
-Agents still use `request_permission` for these actions, so each one is logged.
+Pre-approved actions are still logged. Your apps can also show their own prompts (file access, running commands) in their own windows. If an agent seems stuck and Konfab shows no request, check its app.
 
-## App prompts and Konfab permission requests
+## 7. Restart or update Konfab
 
-Konfab displays requests made through its permission tool. Your desktop apps can also ask for their own permissions, such as access to files or approval to run a command. Those app prompts appear in the app's own window, not in Konfab. If an agent appears stuck and no request is shown in Konfab, check its app for a prompt. Phase 0 check T3 records which prompts still appear during full-access use.
+Rooms, messages, decisions and agent sessions live in `~/.konfab/konfab.db` and survive restarts.
 
-## Stop Konfab
+1. Select **Pause all rooms**, ideally while agents show **Waiting**.
+2. Press **Ctrl+C** in the terminal running `npm start`, then run `npm start` again.
+3. Select **Resume**.
 
-1. Select **Take a break** or press stop in each app, so agents don't keep retrying.
-2. Press **Ctrl+C** in the terminal running `npm start`.
+Agents carry on in the same conversations with the same sessions, even if they were mid-turn. A request retried during the restart is never applied twice. If Konfab is down for more than 60 seconds while an agent is mid-turn, that agent stops with an error; bring it back as in section 4. To allow longer restarts, set `KONFAB_RETRY_TIMEOUT_MS` (up to `600000`) in each app's connector entry.
 
-## Restart Konfab
+**After updating Konfab** (`git pull`), restart the server first, then restart the Konfab connector in each app (or quit and reopen the app). A card showing **Reload connector** means that app still runs an older connector. A new connector refuses to work with an older server and asks you to update it.
 
-Your rooms, messages, decisions and agent sessions are stored in `~/.konfab/konfab.db`, so they survive a restart. You can keep using the same app conversations.
+If an agent was mid-turn and never comes back, the room waits on that turn for up to `turn_timeout_minutes` (default 30).
 
-1. Wait until the agents show **Waiting**, not **Working**.
-2. Select **Pause** for the room, or **Pause all rooms**.
-3. Press **Ctrl+C** in the terminal running `npm start`, then run `npm start` again.
-4. Select **Resume**.
+## 8. Stop and clean up
 
-What to do afterwards depends on what happened:
+To stop, select **Take a break** (or press stop in each app), then press **Ctrl+C** in the `npm start` terminal.
 
-| Situation                                                       | What you do                                                                                                                                                                       |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Normal restart**                                              | Nothing. Agents retry while Konfab is down, even in the middle of a turn, then carry on in the same conversation with the same session. A retried request is never applied twice. |
-| **An agent stopped with an error** (Konfab was down too long)   | In the same conversation, tell it: `Continue the Konfab loop in room <room>.` It keeps its session and its run window.                                                            |
-| **The session ended** (run window over, a break, room archived) | In the same conversation, tell it: `Rejoin Konfab room <room> and continue the loop.` This starts a new run window.                                                               |
-| **The agent card shows Reload connector**                       | Konfab's agent tools changed. Restart the Konfab connector in that app, or quit and reopen the app. Start a new conversation only if the app still doesn't show the new tools.    |
-| **A conversation has become very long or slow**                 | Optional: paste the join prompt into a new conversation. The old one stops by itself, and the new one starts from the room's recent messages and decisions.                       |
+To remove Konfab: delete the `konfab` entry from `~/.codex/config.toml` and `.mcp.json` from the repo. Run `npm run setup -- --rotate` to replace tokens.
 
-Rejoining always starts a new run window, so only rejoin when the session has ended.
+## Checks
 
-Agents retry for up to 60 seconds of downtime in the middle of a turn. To allow longer restarts, set `KONFAB_RETRY_TIMEOUT_MS` (up to `600000`) in the environment of each app's Konfab connector.
+Record results as you go.
 
-After you update Konfab, restart the server before you reload any connector. A new connector refuses to join, request permissions or report status through an older server, and asks you to update Konfab first.
-
-## Clean up
-
-- Remove the `konfab` entry from `~/.codex/config.toml`.
-- Delete `.mcp.json` from the repo.
-- Run `npm run setup -- --rotate` if you want to replace the tokens.
+| Check              | How to run it                                                                                                | Result |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ | ------ |
+| **T1 Connection**  | Post `Hello`. Both agents reply in order.                                                                    |        |
+| **Mentions**       | Post `@codex say something`. Only Codex replies.                                                             |        |
+| **Agent to agent** | Post `@claude ask @codex one question`. Both take a turn.                                                    |        |
+| **Streak limit**   | Ask both to keep mentioning each other. The room stops after 50 agent messages.                              |        |
+| **Lead mention**   | Ask an agent to ask you something with `@lead`. It's highlighted, and no agent takes a turn until you reply. |        |
+| **Code review**    | Ask both agents to review `average.py` and discuss what they find.                                           |        |
+| **Two rooms**      | Join a second room in separate conversations. The rooms stay separate.                                       |        |
+| **Pause**          | Pause a room, then post. No agent starts a turn until you resume.                                            |        |
+| **T2 Idle cost**   | Leave agents idle for an hour. Note how long each keeps waiting, allowance used, and **Calls per hour**.     |        |
+| **T3 Prompts**     | With full access on, note any approval prompts the apps still show.                                          |        |
+| **T4 Rules**       | After 20+ turns, the agents still return to the loop without being told.                                     |        |
+| **T5 Allowance**   | Ask each agent whether it can see its remaining allowance.                                                   |        |
+| **Permission**     | Ask an agent to prepare a push to a repo that isn't pre-approved. A request appears and waits for you.       |        |
+| **Run window**     | Set `run_hours: 0.1`, restart Konfab, and rejoin an agent. Its session ends about 6 minutes later.           |        |
+| **Break**          | Take a break, post a message, then tell an agent to rejoin. It rejoins in the same conversation and sees it. |        |
+| **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
+| **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |

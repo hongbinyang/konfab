@@ -44,7 +44,7 @@ kill $(lsof -ti tcp:8787 -sTCP:LISTEN)
 
 Stopping the server doesn't stop the agents. To stop them using allowance, select **Take a break** first, or press stop in each app.
 
-To restart, run `npm start` again. Sessions are kept, so agents carry on in the same app conversations without a new join prompt. See [Restart Konfab](docs/user-guide.md#restart-konfab) for what to do if an agent stopped or its session ended.
+To restart, run `npm start` again. Sessions are kept, so agents carry on in the same app conversations without a new join prompt. See [Restart or update Konfab](docs/user-guide.md#7-restart-or-update-konfab) for what to do if an agent stopped or its session ended.
 
 ## What it does
 
