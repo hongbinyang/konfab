@@ -52,6 +52,7 @@ export interface MessageView {
   created_at: number;
   attachments?: AttachmentView[];
   mentions?: string[];
+  unread?: boolean;
 }
 
 export type WaitResult = (
@@ -586,6 +587,7 @@ export class KonfabService {
         paused: room.paused === 1,
         on_break: room.on_break === 1,
         archived: room.archived_at !== null,
+        ...this.leadReadInfo(room.id),
       })),
       agents,
       permissions: this.listPermissions("pending"),
@@ -670,7 +672,11 @@ export class KonfabService {
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
-      messages: this.withAttachments(room.id, messages),
+      messages: this.decorateLeadUnread(
+        room.id,
+        this.withAttachments(room.id, messages),
+      ),
+      read_info: this.leadReadInfo(room.id, messages[0]?.id),
       activity: this.activity(room.id),
       permissions: this.roomPermissions(room.id, messages[0]?.created_at ?? 0),
       decisions: this.decisions(room.id),
@@ -1148,6 +1154,133 @@ export class KonfabService {
     }));
   }
 
+  private leadReadInfo(roomId: number, firstLoaded?: number) {
+    const cursor = (
+      this.db
+        .prepare("SELECT lead_read_cursor FROM rooms WHERE id = ?")
+        .get(roomId) as { lead_read_cursor: number }
+    ).lead_read_cursor;
+    const counts = this.db
+      .prepare(
+        `SELECT COUNT(*) AS unread_count, MIN(m.id) AS first_unread_id,
+      COALESCE(SUM(CASE WHEN m.id < ? THEN 1 ELSE 0 END), 0) AS older_unread_count,
+      COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM json_each(m.mentions) mm WHERE mm.value IN ('lead', 'all')) THEN 1 ELSE 0 END), 0) AS attention_count
+      FROM messages m WHERE m.room_id = ? AND m.sender_type = 'agent' AND m.id > ?
+      AND NOT EXISTS (SELECT 1 FROM lead_seen_messages s WHERE s.room_id = m.room_id AND s.message_id = m.id)`,
+      )
+      .get(firstLoaded ?? 0, roomId, cursor) as {
+      unread_count: number;
+      first_unread_id: number | null;
+      older_unread_count: number;
+      attention_count: number;
+    };
+    return { cursor, ...counts };
+  }
+
+  private decorateLeadUnread(roomId: number, messages: MessageView[]) {
+    const cursor = this.leadReadInfo(roomId).cursor;
+    const seen = new Set(
+      (
+        this.db
+          .prepare(
+            "SELECT message_id FROM lead_seen_messages WHERE room_id = ? AND message_id >= ? AND message_id <= ?",
+          )
+          .all(roomId, messages[0]?.id ?? 0, messages.at(-1)?.id ?? 0) as {
+          message_id: number;
+        }[]
+      ).map((row) => row.message_id),
+    );
+    return messages.map((message) => ({
+      ...message,
+      unread:
+        message.sender_type === "agent" &&
+        message.id > cursor &&
+        !seen.has(message.id),
+    }));
+  }
+
+  markLeadRead(ref: RoomRef, ids: number[], all = false) {
+    const room = this.room(ref);
+    if (
+      ids.length > 200 ||
+      ids.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    )
+      throw new KonfabError(
+        "invalid_read_ids",
+        400,
+        "Send up to 200 positive message IDs",
+      );
+    let changed = false;
+    const result = this.db.transaction(() => {
+      const cursor = this.leadReadInfo(room.id).cursor;
+      for (const id of new Set(ids)) {
+        const message = this.db
+          .prepare(
+            "SELECT sender_type FROM messages WHERE room_id = ? AND id = ?",
+          )
+          .get(room.id, id) as { sender_type: string } | undefined;
+        if (!message)
+          throw new KonfabError(
+            "invalid_read_ids",
+            400,
+            "Read message must belong to this room",
+          );
+        if (!all && message.sender_type === "agent" && id > cursor)
+          changed =
+            Boolean(
+              this.db
+                .prepare(
+                  "INSERT OR IGNORE INTO lead_seen_messages (room_id, message_id) VALUES (?, ?)",
+                )
+                .run(room.id, id).changes,
+            ) || changed;
+      }
+      const firstUnread = all
+        ? null
+        : this.leadReadInfo(room.id).first_unread_id;
+      const next = (
+        this.db
+          .prepare(
+            "SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE room_id = ? AND id < ?",
+          )
+          .get(room.id, firstUnread ?? Number.MAX_SAFE_INTEGER) as {
+          id: number;
+        }
+      ).id;
+      if (next > cursor) {
+        this.db
+          .prepare("UPDATE rooms SET lead_read_cursor = ? WHERE id = ?")
+          .run(next, room.id);
+        this.db
+          .prepare(
+            "DELETE FROM lead_seen_messages WHERE room_id = ? AND message_id <= ?",
+          )
+          .run(room.id, next);
+        changed = true;
+      }
+      return this.leadReadInfo(room.id);
+    })();
+    if (changed) this.notify();
+    return result;
+  }
+
+  leadMessagePage(ref: RoomRef, before: number, limit = 100) {
+    const room = this.room(ref);
+    const messages = this.db
+      .prepare(
+        "SELECT id, sender_type, sender_id, body, created_at FROM messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
+      )
+      .all(room.id, before, Math.min(100, Math.max(1, limit))) as MessageView[];
+    messages.reverse();
+    return {
+      messages: this.decorateLeadUnread(
+        room.id,
+        this.withAttachments(room.id, messages),
+      ),
+      read_info: this.leadReadInfo(room.id, messages[0]?.id),
+    };
+  }
+
   postUserMessage(ref: RoomRef, body: string, attachmentIds: string[] = []) {
     if (body.trim() || attachmentIds.length === 0) this.validateBody(body);
     else if (body.length > this.options.maxMessageChars)
@@ -1204,6 +1337,7 @@ export class KonfabService {
         )
         .run(this.now(), room.id);
       for (const target of targets) this.enqueue(room.id, target, "user");
+      this.markLeadRead(room.id, [], true);
       return id;
     })();
     this.notify();

@@ -308,3 +308,10 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | -- | -- | -- |
 | RU1 | MUST | Lead, Permissions, Decisions and Agents can collapse independently; the whole right panel can collapse and defaults closed below 900 px. Browser preferences persist across rooms with safe fallbacks when storage is unavailable. Pending permissions force their section and the panel open without changing saved preferences. Allowance warnings and stale working status open Agents and show a warning badge when the panel is collapsed. |
 | RU2 | MUST | Agent status, warnings and compact actions stay visible; role and statistics are under Details. Decision creation is disclosed on request and long decision text can expand. Toggles support keyboard activation and expose expanded state. |
+
+## Unread messages
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RU3 | MUST | A fixed New messages divider and soft unread highlight identify unseen agent replies. Visibility in a focused tab records reads in bounded batches. Server cursors plus sparse seen IDs preserve skipped unread messages across tabs and restarts. Own posts mark earlier messages read; Mark all read and Esc outside forms are available. Existing messages form the initial upgrade baseline. |
+| RU4 | MUST | Room badges and tab title show unread counts; lead mentions have an attention badge. Scrolling up preserves position and exposes a jump pill when unread messages exist. Backlogs beyond 500 messages have an explicit older-unread load action. |

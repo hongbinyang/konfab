@@ -236,6 +236,15 @@ const MIGRATIONS: readonly string[] = [
     UNIQUE(session_id, threshold, cycle)
   );
   `,
+  `
+  ALTER TABLE rooms ADD COLUMN lead_read_cursor INTEGER NOT NULL DEFAULT 0;
+  UPDATE rooms SET lead_read_cursor = COALESCE((SELECT MAX(id) FROM messages WHERE room_id = rooms.id), 0);
+  CREATE TABLE lead_seen_messages (
+    room_id INTEGER NOT NULL REFERENCES rooms(id), message_id INTEGER NOT NULL REFERENCES messages(id),
+    PRIMARY KEY(room_id, message_id)
+  );
+  CREATE INDEX messages_unread ON messages(room_id, sender_type, id);
+  `,
 ];
 
 export function openDatabase(path: string): Db {

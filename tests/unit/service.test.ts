@@ -460,6 +460,88 @@ describe("KonfabService", () => {
     ).toEqual({ state: "abandoned" });
   });
 
+  it("keeps skipped messages unread when reading out of order", () => {
+    const roomId = service.roomState(ROOM).room.id;
+    const insert = db.prepare(
+      "INSERT INTO messages (room_id, sender_type, sender_id, body, mentions, created_at) VALUES (?, 'agent', 'claude', ?, ?, ?)",
+    );
+    const first = Number(
+      insert.run(roomId, "First", "[]", now).lastInsertRowid,
+    );
+    const second = Number(
+      insert.run(roomId, "Second", '["lead"]', now).lastInsertRowid,
+    );
+    const third = Number(
+      insert.run(roomId, "Third", "[]", now).lastInsertRowid,
+    );
+    expect(service.markLeadRead(ROOM, [third])).toMatchObject({
+      cursor: 0,
+      unread_count: 2,
+      first_unread_id: first,
+      attention_count: 1,
+    });
+    expect(service.markLeadRead(ROOM, [first])).toMatchObject({
+      cursor: first,
+      unread_count: 1,
+    });
+    expect(service.markLeadRead(ROOM, [second, second])).toMatchObject({
+      cursor: third,
+      unread_count: 0,
+    });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM lead_seen_messages").get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("validates read batches atomically and posting marks earlier messages read", () => {
+    const roomId = service.roomState(ROOM).room.id;
+    const id = Number(
+      db
+        .prepare(
+          "INSERT INTO messages (room_id, sender_type, sender_id, body, created_at) VALUES (?, 'agent', 'claude', 'Unread', ?)",
+        )
+        .run(roomId, now).lastInsertRowid,
+    );
+    service.createRoom("other-read", "", ["claude"]);
+    const other = service.roomState("other-read").room.id;
+    const foreign = Number(
+      db
+        .prepare(
+          "INSERT INTO messages (room_id, sender_type, sender_id, body, created_at) VALUES (?, 'agent', 'claude', 'Other', ?)",
+        )
+        .run(other, now).lastInsertRowid,
+    );
+    expect(() => service.markLeadRead(ROOM, [id, foreign])).toThrow(
+      "belong to this room",
+    );
+    expect(service.roomState(ROOM).read_info.unread_count).toBe(1);
+    service.postUserMessage(ROOM, "My reply");
+    expect(service.roomState(ROOM).read_info.unread_count).toBe(0);
+    expect(service.roomState("other-read").read_info.unread_count).toBe(1);
+  });
+
+  it("reports and pages unread messages older than the latest 500", () => {
+    const roomId = service.roomState(ROOM).room.id;
+    const insert = db.prepare(
+      "INSERT INTO messages (room_id, sender_type, sender_id, body, created_at) VALUES (?, 'agent', 'claude', 'Backlog', ?)",
+    );
+    db.transaction(() => {
+      for (let i = 0; i < 501; i++) insert.run(roomId, now);
+    })();
+    const state = service.roomState(ROOM);
+    expect(state.messages).toHaveLength(500);
+    expect(state.read_info).toMatchObject({
+      unread_count: 501,
+      older_unread_count: 1,
+    });
+    const page = service.leadMessagePage(ROOM, state.messages[0]!.id);
+    expect(page.messages).toHaveLength(1);
+    expect(page.messages[0]?.unread).toBe(true);
+    expect(page.read_info.older_unread_count).toBe(0);
+    service.markLeadRead(ROOM, [], true);
+    expect(service.roomState(ROOM).read_info.unread_count).toBe(0);
+  });
+
   it("tracks bounded working status separately and clears it on post or pass", () => {
     expect(() =>
       service.reportStatus("claude", claude, "working", "x".repeat(121)),

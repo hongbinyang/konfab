@@ -312,10 +312,22 @@ describe("server and bridge", () => {
           .prepare("SELECT COUNT(*) AS count FROM permission_requests")
           .get(),
       ).toEqual({ count: 1 });
+      const readId = post.json().message_id as number;
+      diskService.markLeadRead(ROOM, [readId]);
+      const savedCursor = diskService.roomState(ROOM).read_info.cursor;
       diskDb.prepare("UPDATE bridge_receipts SET created_at = 0").run();
       await diskApp.close();
       diskDb.close();
       diskDb = openDatabase(filename);
+      const restartedReadService = new KonfabService(diskDb, {
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60000,
+        maxMessageChars: 1000,
+      });
+      expect(restartedReadService.roomState(ROOM).read_info).toMatchObject({
+        cursor: savedCursor,
+        unread_count: 0,
+      });
       expect(
         diskDb.prepare("SELECT COUNT(*) AS count FROM bridge_receipts").get(),
       ).toEqual({ count: 0 });
