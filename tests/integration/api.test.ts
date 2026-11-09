@@ -283,6 +283,53 @@ describe("page API", () => {
     );
   });
 
+  it("pages the complete permission history without crossing room boundaries", async () => {
+    service.ensureAgent("worker", "Worker");
+    const room = service.createRoom("history", "", ["worker"]);
+    service.createRoom("other-history", "", ["worker"]);
+    const session = service.join("worker", "history").session_id;
+    const otherSession = service.join("worker", "other-history").session_id;
+    for (let i = 0; i < 103; i += 1) {
+      const item = service.requestPermission("worker", session, {
+        recipient: "example.test",
+        data_description: `item ${i}`,
+        reason: "test",
+      });
+      service.decidePermission(item.id, i % 2 ? "approved" : "denied");
+    }
+    service.requestPermission("worker", otherSession, {
+      recipient: "other.test",
+      data_description: "other room",
+      reason: "test",
+    });
+    const url = `/api/rooms/${room.id}/permissions`;
+    expect(
+      (await app.inject({ method: "GET", url, headers: { host: HOST } }))
+        .statusCode,
+    ).toBe(401);
+    const first = (await call("GET", url)).json();
+    expect(first.permissions).toHaveLength(50);
+    const second = (
+      await call("GET", `${url}?before_id=${first.next_before_id}`)
+    ).json();
+    expect(second.permissions).toHaveLength(50);
+    const third = (
+      await call("GET", `${url}?before_id=${second.next_before_id}`)
+    ).json();
+    expect(third.permissions).toHaveLength(3);
+    expect(third.next_before_id).toBeNull();
+    const all = [
+      ...first.permissions,
+      ...second.permissions,
+      ...third.permissions,
+    ] as { id: number; room_id: number }[];
+    expect(new Set(all.map((item) => item.id)).size).toBe(103);
+    expect(all.every((item) => item.room_id === room.id)).toBe(true);
+    expect(all.map((item) => item.id)).toEqual(
+      [...all.map((item) => item.id)].sort((a, b) => b - a),
+    );
+  });
+
   it("stores authenticated attachments, sends image-only messages and exposes local metadata", async () => {
     const room = service.createRoom("files", "", ["claude"]);
     const session = service.join("claude", "files").session_id;

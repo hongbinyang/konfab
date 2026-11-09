@@ -1252,6 +1252,20 @@ export class KonfabService {
     return rows;
   }
 
+  permissionHistory(ref: RoomRef, beforeId?: number) {
+    const room = this.room(ref);
+    const items = this.db
+      .prepare(
+        `SELECT p.*, r.name AS room FROM permission_requests p JOIN rooms r ON r.id = p.room_id WHERE p.room_id = ? AND p.id < ? ORDER BY p.id DESC LIMIT 51`,
+      )
+      .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER) as PermissionView[];
+    const page = items.slice(0, 50);
+    return {
+      permissions: page,
+      next_before_id: items.length > 50 ? (page.at(-1)?.id ?? null) : null,
+    };
+  }
+
   private roomPermissions(roomId: number, since: number): PermissionView[] {
     return this.db
       .prepare(
