@@ -4,6 +4,8 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
+  useId,
   type KeyboardEvent,
 } from "react";
 import Markdown from "react-markdown";
@@ -24,7 +26,7 @@ import {
 
 const STATE_LABELS: Record<AgentState, string> = {
   not_joined: "Not joined",
-  waiting: "Idle",
+  waiting: "Waiting for a turn",
   working: "Working",
   queued: "Queued",
   waiting_approval: "Waiting for approval",
@@ -1072,6 +1074,76 @@ function MessageAttachments({
   );
 }
 
+function usePanelPreference(
+  key: string,
+  fallback: boolean,
+): [boolean, (open: boolean) => void] {
+  const [choices, setChoices] = useState<Record<string, boolean>>({});
+  let stored = fallback;
+  try {
+    const value = localStorage.getItem(key);
+    if (value === "true" || value === "false") stored = value === "true";
+  } catch {
+    /* Storage may be unavailable in private browsing. */
+  }
+  return [
+    choices[key] ?? stored,
+    (open) => {
+      setChoices((previous) => ({ ...previous, [key]: open }));
+      try {
+        localStorage.setItem(key, String(open));
+      } catch {
+        /* Keep the in-memory choice. */
+      }
+    },
+  ];
+}
+
+function CollapsibleSection({
+  title,
+  accessibleLabel,
+  preferenceKey,
+  urgent = false,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  accessibleLabel?: string;
+  preferenceKey: string;
+  urgent?: boolean;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [preferredOpen, setOpen] = usePanelPreference(
+    preferenceKey,
+    defaultOpen,
+  );
+  const open = urgent || preferredOpen;
+  const id = useId();
+  return (
+    <section className="panel-section" aria-label={title}>
+      <h2>
+        <button
+          className="section-toggle"
+          aria-label={accessibleLabel}
+          type="button"
+          aria-expanded={open}
+          aria-controls={id}
+          disabled={urgent}
+          title={urgent ? "Kept open while attention is needed" : undefined}
+          onClick={() => setOpen(!open)}
+        >
+          <span>{title}</span>
+          <span aria-hidden="true">{open ? "−" : "+"}</span>
+        </button>
+      </h2>
+      <div id={id} hidden={!open}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function Panel({
   overview,
   room,
@@ -1083,74 +1155,161 @@ function Panel({
   act: Act;
   pageConnected: boolean;
 }) {
+  const [preferredOpen, setPanelOpen] = usePanelPreference(
+    "konfab.ui.v1.panel",
+    !window.matchMedia("(max-width: 900px)").matches,
+  );
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    if (!room?.agents.some((agent) => agent.working)) return;
+    const timer = setInterval(() => setClock(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [room?.agents]);
+  const warning = overview.reports.some(
+    (report) =>
+      report.kind === "low_allowance" || report.kind === "out_of_allowance",
+  );
+  const staleWorking =
+    room?.agents.some(
+      (agent) =>
+        agent.working &&
+        Math.max(clock, Date.now()) - agent.working.updated_at >=
+          agent.working.stale_after_ms,
+    ) ?? false;
+  const urgent = overview.permissions.length > 0;
+  const attentionCount =
+    (room?.agents.filter(
+      (agent) =>
+        agent.working &&
+        Math.max(clock, Date.now()) - agent.working.updated_at >=
+          agent.working.stale_after_ms,
+    ).length ?? 0) +
+    overview.reports.filter(
+      (report) =>
+        report.kind === "low_allowance" || report.kind === "out_of_allowance",
+    ).length;
+  const open = preferredOpen || urgent;
+  const panelId = useId();
   return (
-    <aside className="panel">
-      <section aria-label="Lead status">
-        <h2>Lead</h2>
-        <p title="This status reflects the page connection, not whether a person is present.">
-          {pageConnected ? "Page connected" : "Page disconnected"}
-        </p>
-      </section>
-      {overview.permissions.length > 0 && (
-        <section aria-label="Permission requests">
-          <h2>Permission requests</h2>
-          {overview.permissions.map((permission) => (
-            <div className="card attention" key={permission.id}>
-              <p>
-                <strong>{permission.agent_id}</strong> in #{permission.room}{" "}
-                wants to send data to <strong>{permission.recipient}</strong>
-              </p>
-              <dl>
-                <dt>Data</dt>
-                <dd>{permission.data_description}</dd>
-                <dt>Reason</dt>
-                <dd>{permission.reason}</dd>
-                {permission.data_type === "code_push" &&
-                  permission.push_repository && (
-                    <>
-                      <dt>Repository</dt>
-                      <dd>{permission.push_repository}</dd>
-                      <dt>Branch</dt>
-                      <dd>{permission.push_branch}</dd>
-                      <dt>Commits</dt>
-                      <dd>
-                        <code>
-                          {permission.push_base}..{permission.push_head}
-                        </code>
-                      </dd>
-                    </>
-                  )}
-              </dl>
-              <div className="row">
-                {(["approved", "denied"] as const).map((decision) => (
-                  <button
-                    key={decision}
-                    type="button"
-                    className={decision === "denied" ? "secondary" : undefined}
-                    onClick={() =>
-                      void act(() =>
-                        request(`/api/permissions/${permission.id}/decision`, {
-                          method: "POST",
-                          body: { decision },
-                        }),
-                      )
-                    }
-                  >
-                    {decision === "approved" ? "Approve" : "Deny"}
-                  </button>
-                ))}
+    <aside
+      className={open ? "panel" : "panel panel-collapsed"}
+      aria-label="Room details"
+    >
+      <button
+        className="secondary panel-toggle"
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        disabled={urgent}
+        title={
+          urgent
+            ? "Kept open while attention is needed"
+            : open
+              ? "Collapse right panel"
+              : "Open right panel"
+        }
+        onClick={() => setPanelOpen(!open)}
+      >
+        {open ? "»" : "«"}
+        {!open && attentionCount > 0 && (
+          <span
+            className="rail-warning"
+            aria-label={`${attentionCount} agent warnings`}
+          >
+            ⚠ {attentionCount}
+          </span>
+        )}
+        <span className="sr-only">
+          {open ? "Collapse right panel" : "Open right panel"}
+        </span>
+      </button>
+      <div id={panelId} className="panel-content" hidden={!open}>
+        <CollapsibleSection
+          title={`Lead · ${pageConnected ? "connected" : "disconnected"}`}
+          preferenceKey="konfab.ui.v1.section.lead"
+          defaultOpen={false}
+        >
+          <p title="This status reflects the page connection, not whether a person is present.">
+            {pageConnected ? "Page connected" : "Page disconnected"}
+          </p>
+        </CollapsibleSection>
+        {overview.permissions.length > 0 && (
+          <CollapsibleSection
+            title={`Permissions · ${overview.permissions.length} pending`}
+            preferenceKey="konfab.ui.v1.section.permissions"
+            urgent
+          >
+            {overview.permissions.map((permission) => (
+              <div className="card attention" key={permission.id}>
+                <p>
+                  <strong>{permission.agent_id}</strong> in #{permission.room}{" "}
+                  wants to send data to <strong>{permission.recipient}</strong>
+                </p>
+                <dl>
+                  <dt>Data</dt>
+                  <dd>{permission.data_description}</dd>
+                  <dt>Reason</dt>
+                  <dd>{permission.reason}</dd>
+                  {permission.data_type === "code_push" &&
+                    permission.push_repository && (
+                      <>
+                        <dt>Repository</dt>
+                        <dd>{permission.push_repository}</dd>
+                        <dt>Branch</dt>
+                        <dd>{permission.push_branch}</dd>
+                        <dt>Commits</dt>
+                        <dd>
+                          <code>
+                            {permission.push_base}..{permission.push_head}
+                          </code>
+                        </dd>
+                      </>
+                    )}
+                </dl>
+                <div className="row">
+                  {(["approved", "denied"] as const).map((decision) => (
+                    <button
+                      key={decision}
+                      type="button"
+                      className={
+                        decision === "denied" ? "secondary" : undefined
+                      }
+                      onClick={() =>
+                        void act(() =>
+                          request(
+                            `/api/permissions/${permission.id}/decision`,
+                            {
+                              method: "POST",
+                              body: { decision },
+                            },
+                          ),
+                        )
+                      }
+                    >
+                      {decision === "approved" ? "Approve" : "Deny"}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </section>
-      )}
-      {room && <Decisions key={room.room.id} room={room} act={act} />}
-      {room && <Agents overview={overview} room={room} act={act} />}
+            ))}
+          </CollapsibleSection>
+        )}
+        {room && <Decisions key={room.room.id} room={room} act={act} />}
+        {room && (
+          <Agents
+            overview={overview}
+            room={room}
+            act={act}
+            urgent={warning || staleWorking}
+          />
+        )}
+      </div>
     </aside>
   );
 }
 
 function Decisions({ room, act }: { room: RoomState; act: Act }) {
+  const [adding, setAdding] = useState(false);
   const [body, setBody] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1161,12 +1320,25 @@ function Decisions({ room, act }: { room: RoomState; act: Act }) {
         body: { body },
       });
       setBody("");
+      setAdding(false);
     });
   };
   return (
-    <section aria-label="Decisions">
-      <h2>Decisions</h2>
+    <CollapsibleSection
+      title={`Decisions (${room.decisions.length})`}
+      preferenceKey="konfab.ui.v1.section.decisions"
+    >
       {!room.room.archived && (
+        <button
+          className="secondary"
+          type="button"
+          aria-expanded={adding}
+          onClick={() => setAdding(!adding)}
+        >
+          {adding ? "Cancel new decision" : "+ Add decision"}
+        </button>
+      )}
+      {!room.room.archived && adding && (
         <form className="stack" onSubmit={submit}>
           <label>
             New decision
@@ -1192,7 +1364,7 @@ function Decisions({ room, act }: { room: RoomState; act: Act }) {
           act={act}
         />
       ))}
-    </section>
+    </CollapsibleSection>
   );
 }
 
@@ -1207,6 +1379,7 @@ function DecisionCard({
   archived: boolean;
   act: Act;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const [revising, setRevising] = useState(false);
   const [draft, setDraft] = useState(decision.body);
   const [versions, setVersions] = useState<
@@ -1239,7 +1412,26 @@ function DecisionCard({
         </strong>{" "}
         · v{decision.version}
       </p>
-      <p>{decision.body}</p>
+      <p
+        className={
+          expanded ||
+          (decision.body.length <= 100 && !decision.body.includes("\n"))
+            ? "decision-body"
+            : "decision-body clipped"
+        }
+      >
+        {decision.body}
+      </p>
+      {(decision.body.length > 100 || decision.body.includes("\n")) && (
+        <button
+          className="quiet secondary"
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
       {decision.source_message_id !== null && (
         <a href={`#message-${decision.source_message_id}`}>Source message</a>
       )}
@@ -1347,10 +1539,12 @@ function Agents({
   overview,
   room,
   act,
+  urgent,
 }: {
   overview: Overview;
   room: RoomState;
   act: Act;
+  urgent: boolean;
 }) {
   const members = room.agents.map((agent) => agent.id);
   const setMembers = (next: string[]) =>
@@ -1362,27 +1556,88 @@ function Agents({
     );
 
   return (
-    <section aria-label="Agents">
-      <h2>Agents</h2>
+    <CollapsibleSection
+      title={`Agents · ${room.agents.filter((agent) => agent.state === "working" || agent.working).length} working · ${room.agents.length} total`}
+      preferenceKey="konfab.ui.v1.section.agents"
+      urgent={urgent}
+    >
       {overview.agents.map((agent) => {
         const member = room.agents.find((item) => item.id === agent.id);
+        const lastPost = [...room.messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.sender_type === "agent" && message.sender_id === agent.id,
+          );
         return (
-          <div className="card" key={agent.id}>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={member !== undefined}
-                disabled={room.room.archived}
-                onChange={(event) =>
-                  setMembers(
-                    event.target.checked
-                      ? [...members, agent.id]
-                      : members.filter((id) => id !== agent.id),
-                  )
-                }
-              />
-              <strong>{agent.display_name}</strong>
-            </label>
+          <div className="card compact-agent" key={agent.id}>
+            <div className="agent-heading">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={member !== undefined}
+                  disabled={room.room.archived}
+                  onChange={(event) =>
+                    setMembers(
+                      event.target.checked
+                        ? [...members, agent.id]
+                        : members.filter((id) => id !== agent.id),
+                    )
+                  }
+                />
+                <strong>{agent.display_name}</strong>
+              </label>
+              {member && (
+                <>
+                  <span className={`state ${member.state}`}>
+                    {STATE_LABELS[member.state]}
+                  </span>
+                  {member.state === "waiting" &&
+                    !member.working &&
+                    lastPost && (
+                      <span
+                        className="muted"
+                        title={new Date(lastPost.created_at).toLocaleString()}
+                      >
+                        last post{" "}
+                        {Math.max(
+                          0,
+                          Math.floor(
+                            (Date.now() - lastPost.created_at) / 60000,
+                          ),
+                        )}{" "}
+                        min ago
+                      </span>
+                    )}
+                  {member.closes_at !== null && (
+                    <span
+                      className={
+                        member.closes_at - Date.now() <= CLOSING_SOON_MS
+                          ? "warning-text"
+                          : "muted"
+                      }
+                    >
+                      ends {formatTime(member.closes_at)}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+            {overview.reports
+              .filter(
+                (report) =>
+                  report.agent_id === agent.id &&
+                  report.room === room.room.name &&
+                  report.kind !== "other",
+              )
+              .map((report) => (
+                <p className="warning-text" key={report.id}>
+                  {report.kind === "out_of_allowance"
+                    ? "Out of allowance"
+                    : "Low allowance"}
+                  {report.detail ? `: ${report.detail}` : ""}
+                </p>
+              ))}
             {member ? (
               <AgentDetails
                 agent={member}
@@ -1396,7 +1651,7 @@ function Agents({
           </div>
         );
       })}
-    </section>
+    </CollapsibleSection>
   );
 }
 
@@ -1443,102 +1698,6 @@ function AgentDetails({
 
   return (
     <>
-      <p className={`state ${agent.state}`}>{STATE_LABELS[agent.state]}</p>
-      <p className="muted">
-        Connected since:{" "}
-        {stats.session_started_at === null
-          ? "—"
-          : new Date(stats.session_started_at).toLocaleString()}
-        <br />
-        Last contact:{" "}
-        {stats.last_contact_at === null
-          ? "—"
-          : new Date(stats.last_contact_at).toLocaleString()}
-        <br />
-        Longest completed observed wait:{" "}
-        {stats.longest_wait_ms === null
-          ? "—"
-          : formatDuration(stats.longest_wait_ms)}
-        <br />
-        Median answer time:{" "}
-        {stats.median_answer_ms === null
-          ? "—"
-          : formatDuration(stats.median_answer_ms)}{" "}
-        ({stats.paused_turns} of {stats.answer_samples} turns had permission
-        pauses; pause time excluded)
-      </p>
-      {editingRole ? (
-        <form className="stack role-form" onSubmit={saveRole}>
-          <label>
-            Start from
-            <select
-              defaultValue=""
-              onChange={(event) => {
-                const preset = ROLE_PRESETS[event.target.value];
-                if (preset) setRole(preset);
-              }}
-            >
-              <option value="">Choose a preset</option>
-              {Object.keys(ROLE_PRESETS).map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Role
-            <textarea
-              value={role}
-              rows={4}
-              placeholder="What this agent should do in this room"
-              onChange={(event) => setRole(event.target.value)}
-            />
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={canEdit}
-              onChange={(event) => setCanEdit(event.target.checked)}
-            />
-            Can edit files and repos
-          </label>
-          <div className="row">
-            <button type="submit">Save role</button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setEditingRole(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      ) : (
-        <>
-          <p className="role">
-            {agent.role ? (
-              agent.role
-            ) : (
-              <span className="muted">No role set</span>
-            )}
-          </p>
-          {agent.can_edit && <p className="muted">Can edit files and repos</p>}
-          {!archived && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                setRole(agent.role);
-                setCanEdit(agent.can_edit);
-                setEditingRole(true);
-              }}
-            >
-              Edit role
-            </button>
-          )}
-        </>
-      )}
       {agent.state === "not_responding" && (
         <p className="warning-text">
           It may be out of allowance, so check its app.
@@ -1553,64 +1712,160 @@ function AgentDetails({
         </p>
       )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}
-      {agent.closes_at !== null && (
-        <p
-          className={
-            agent.closes_at - Date.now() <= CLOSING_SOON_MS
-              ? "warning-text"
-              : "muted"
-          }
-        >
-          Running · ends at {formatTime(agent.closes_at)}
+      <CollapsibleSection
+        title="Details"
+        accessibleLabel={`${agent.display_name} details`}
+        preferenceKey={`konfab.ui.v1.agent.${agent.id}.details`}
+        defaultOpen={false}
+        urgent={editingRole}
+      >
+        <p className="muted">
+          Connected since:{" "}
+          {stats.session_started_at === null
+            ? "—"
+            : new Date(stats.session_started_at).toLocaleString()}
+          <br />
+          Last contact:{" "}
+          {stats.last_contact_at === null
+            ? "—"
+            : new Date(stats.last_contact_at).toLocaleString()}
+          <br />
+          Longest completed observed wait:{" "}
+          {stats.longest_wait_ms === null
+            ? "—"
+            : formatDuration(stats.longest_wait_ms)}
+          <br />
+          Median answer time:{" "}
+          {stats.median_answer_ms === null
+            ? "—"
+            : formatDuration(stats.median_answer_ms)}{" "}
+          ({stats.paused_turns} of {stats.answer_samples} turns had permission
+          pauses; pause time excluded)
         </p>
-      )}
-      {!archived && agent.closes_at !== null && (
-        <button
-          type="button"
-          className="secondary"
-          onClick={() =>
-            void act(() =>
-              request(`/api/rooms/${roomId}/members/${agent.id}/extend-run`, {
-                method: "POST",
-                body: { minutes: 60 },
-              }),
-            )
-          }
-        >
-          Extend 1 hour
-        </button>
-      )}
-      {!archived && (
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => {
-            void navigator.clipboard.writeText(agent.join_prompt).then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            });
-          }}
-        >
-          {copied ? "Copied" : "Copy join prompt"}
-        </button>
-      )}
-      <details>
-        <summary>Activity</summary>
-        <dl>
-          <dt>Wait calls</dt>
-          <dd>{stats.model_wait_calls}</dd>
-          <dt>Calls per hour</dt>
-          <dd>{stats.calls_per_hour?.toFixed(1) ?? "None"}</dd>
-          <dt>Longest gap</dt>
-          <dd>{formatDuration(stats.longest_gap_ms)}</dd>
-          <dt>Rejoins</dt>
-          <dd>{stats.rejoins}</dd>
-          <dt>Turns completed</dt>
-          <dd>{stats.turns_completed}</dd>
-          <dt>Turns skipped</dt>
-          <dd>{stats.turns_skipped}</dd>
-        </dl>
-      </details>
+        {editingRole ? (
+          <form className="stack role-form" onSubmit={saveRole}>
+            <label>
+              Start from
+              <select
+                defaultValue=""
+                onChange={(event) => {
+                  const preset = ROLE_PRESETS[event.target.value];
+                  if (preset) setRole(preset);
+                }}
+              >
+                <option value="">Choose a preset</option>
+                {Object.keys(ROLE_PRESETS).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Role
+              <textarea
+                value={role}
+                rows={4}
+                placeholder="What this agent should do in this room"
+                onChange={(event) => setRole(event.target.value)}
+              />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={canEdit}
+                onChange={(event) => setCanEdit(event.target.checked)}
+              />
+              Can edit files and repos
+            </label>
+            <div className="row">
+              <button type="submit">Save role</button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setEditingRole(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <p className="role">
+              {agent.role ? (
+                agent.role
+              ) : (
+                <span className="muted">No role set</span>
+              )}
+            </p>
+            {agent.can_edit && (
+              <p className="muted">Can edit files and repos</p>
+            )}
+          </>
+        )}
+        <details>
+          <summary>Activity</summary>
+          <dl>
+            <dt>Wait calls</dt>
+            <dd>{stats.model_wait_calls}</dd>
+            <dt>Calls per hour</dt>
+            <dd>{stats.calls_per_hour?.toFixed(1) ?? "None"}</dd>
+            <dt>Longest gap</dt>
+            <dd>{formatDuration(stats.longest_gap_ms)}</dd>
+            <dt>Rejoins</dt>
+            <dd>{stats.rejoins}</dd>
+            <dt>Turns completed</dt>
+            <dd>{stats.turns_completed}</dd>
+            <dt>Turns skipped</dt>
+            <dd>{stats.turns_skipped}</dd>
+          </dl>
+        </details>
+      </CollapsibleSection>
+      <div className="agent-actions">
+        {!archived && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              setRole(agent.role);
+              setCanEdit(agent.can_edit);
+              setEditingRole(true);
+            }}
+          >
+            Edit role
+          </button>
+        )}
+        {!archived && agent.closes_at !== null && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              void act(() =>
+                request(`/api/rooms/${roomId}/members/${agent.id}/extend-run`, {
+                  method: "POST",
+                  body: { minutes: 60 },
+                }),
+              )
+            }
+          >
+            Extend 1 hour
+          </button>
+        )}
+        {!archived && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              void navigator.clipboard.writeText(agent.join_prompt).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              });
+            }}
+          >
+            {copied ? "Copied" : "Copy join prompt"}
+          </button>
+        )}
+      </div>
     </>
   );
 }

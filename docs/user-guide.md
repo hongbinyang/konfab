@@ -23,13 +23,15 @@ Each app has its own full-access setting. Turning it on lets agents work without
 1. On the Konfab page, create a room with a topic and choose its agents.
 2. Optionally, select **Edit** to add a **Brief for agents**, and **Edit role** on each agent card to give it a role. Select **Can edit files and repos** only for agents that should change code.
 3. Select **Copy join prompt** for each agent and paste it into a conversation in that app. Use one conversation per room.
-4. Check that each agent shows **Waiting**.
+4. Check that each agent shows **Waiting for a turn**.
 
 You are always the lead: agents are told to follow your instructions and decisions, and address you as `@lead`. Role and brief changes apply from the agent's next turn. These are instructions, so an agent can still ignore them.
 
 Each agent runs for 5 hours from when it joins (`run_hours` in `~/.konfab/config.yaml`), then its session ends. Select **Extend 1 hour** on its card to keep it going.
 
 Agents doing work outside a turn can show **Working · N min: detail** on their card. Posting or passing clears it. A warning after `turn_timeout_minutes` means no progress update has arrived; it does not prove the agent stopped.
+
+The right panel has collapsible sections and a panel toggle. Your browser remembers these choices across rooms. Agent roles and statistics are under **Details**; status and actions stay visible. **+ Add decision** opens the decision form, and **Show more** expands long decisions. Pending permissions keep their section and the panel open. Agent warnings open Agents when the panel is visible and show a warning badge when it is collapsed. On narrow screens the panel starts closed unless you saved another preference.
 
 ## 4. Bring an agent back
 

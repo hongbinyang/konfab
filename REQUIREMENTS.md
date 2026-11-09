@@ -301,3 +301,10 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | AT5 | MUST | Only the lead can upload attachments. Downloads require the authenticated page, and unsafe types are downloads rather than inline content. |
 
 **Done when** a pasted image and an attached file survive sending and reload, and a room member can locate each file.
+
+## Right panel usability
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RU1 | MUST | Lead, Permissions, Decisions and Agents can collapse independently; the whole right panel can collapse and defaults closed below 900 px. Browser preferences persist across rooms with safe fallbacks when storage is unavailable. Pending permissions force their section and the panel open without changing saved preferences. Allowance warnings and stale working status open Agents and show a warning badge when the panel is collapsed. |
+| RU2 | MUST | Agent status, warnings and compact actions stay visible; role and statistics are under Details. Decision creation is disclosed on request and long decision text can expand. Toggles support keyboard activation and expose expanded state. |
