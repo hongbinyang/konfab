@@ -574,7 +574,7 @@ export class KonfabService {
         on_break: room.on_break === 1,
         archived: room.archived_at !== null,
         agent_streak: room.agent_streak,
-        streak_limit: this.options.maxConsecutiveAgentMessages ?? 20,
+        streak_limit: this.options.maxConsecutiveAgentMessages ?? 50,
       },
       agents: agents.map((agent) => {
         const hours = this.options.hoursFor?.(agent.id);
@@ -2096,7 +2096,7 @@ export class KonfabService {
     sessionId: string,
   ): TurnRow | null {
     if (room.paused === 1 || this.isAllPaused()) return null;
-    if (room.agent_streak >= (this.options.maxConsecutiveAgentMessages ?? 20))
+    if (room.agent_streak >= (this.options.maxConsecutiveAgentMessages ?? 50))
       return null;
 
     const queued = this.db

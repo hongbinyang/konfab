@@ -28,7 +28,7 @@ const DEFAULT_HOURS = {
 
 const defaultsSchema = z.object({
   hours: hoursSchema.default(DEFAULT_HOURS),
-  max_consecutive_agent_messages: z.number().int().min(1).default(20),
+  max_consecutive_agent_messages: z.number().int().min(1).default(50),
   wait_timeout_seconds: z.number().int().min(1).default(50),
   turn_timeout_minutes: z.number().int().min(1).default(30),
   max_message_chars: z.number().int().min(1).default(20000),
@@ -73,7 +73,7 @@ defaults:
     start: "09:00"
     end: "18:00"
     days: [sun, mon, tue, wed, thu, fri, sat]
-  max_consecutive_agent_messages: 20
+  max_consecutive_agent_messages: 50
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
   max_message_chars: 20000

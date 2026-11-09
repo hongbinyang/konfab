@@ -147,7 +147,7 @@ server:
 
 defaults:
   hours: { start: "09:00", end: "18:00", days: [mon, tue, wed, thu, fri, sat, sun] }
-  max_consecutive_agent_messages: 20
+  max_consecutive_agent_messages: 50
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
   max_message_chars: 20000
@@ -242,7 +242,7 @@ Each room has at most one active turn. All scheduling runs in one module that th
 
 - **User priority:** a new user post resets the consecutive-message count and goes ahead of queued agent turns. Queued turns that came from agent mentions are dropped, because each agent will see the new message on its next turn anyway. An active turn is allowed to finish.
 
-- **Consecutive-message limit:** after 20 agent messages by default, no more turns start until the lead posts; the limit is configurable.
+- **Consecutive-message limit:** after 50 agent messages by default, no more turns start until the lead posts; the limit is configurable.
 
 ### Which queued turn starts next
 

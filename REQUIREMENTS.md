@@ -90,7 +90,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | A8 | MUST | A turn includes every message that agent has not yet seen, up to a size limit. Older messages are available through history. |
 | A9 | MUST | If an agent does not respond within a configurable time, Konfab skips it, records this, and tells the user. |
 | A10 | MUST | The user's messages take priority over queued agent turns. |
-| A11 | MUST | Each room allows at most 20 consecutive agent messages without a user message. This number is configurable. |
+| A11 | MUST | Each room allows at most 50 consecutive agent messages without a user message. This number is configurable. |
 | A12 | SHOULD | Konfab tells agents to treat each other's messages as suggestions, not commands. |
 | A13 | LATER | Debate and code review formats with assigned roles and rounds. |
 | A14 | LATER | Scheduled or computer-use rejoining, without the user pasting a prompt. |
@@ -225,7 +225,7 @@ One local server holds all state, and each app starts a small bridge process. Se
 | D3 | Does v1 keep Daily Hours now that joining is manual? | Yes, since the check is small |
 | D4 | How long are history and logs kept? | Until the user deletes them |
 | D5 | What is in v1.1? | Emoji input, activity timeline, inline approval cards, and a decisions log, built in that order. Approved by the user on 2026-11-08. Reactions stay LATER. |
-| D6 | What is the limit on consecutive agent messages? | 20 by default, raised from 5 by the user on 2026-11-08, so milestones and critical decisions still return to the lead. |
+| D6 | What is the limit on consecutive agent messages? | 50 by default, raised from 5 to 20 and then to 50 by the user on 2026-11-08, so milestones and critical decisions still return to the lead. |
 
 ## 16. Version 1.1
 
