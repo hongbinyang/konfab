@@ -313,6 +313,16 @@ describe("server and bridge", () => {
           .get(),
       ).toEqual({ count: 1 });
       const readId = post.json().message_id as number;
+      diskService.setRoomPaused(ROOM, false);
+      diskService.ensureAgent("codex", "Codex");
+      diskService.setMembers(ROOM, ["claude", "codex"]);
+      diskService.join("codex", ROOM);
+      const savedRepair = diskService.handOff(
+        "claude",
+        joined.session_id,
+        readId,
+        "codex",
+      );
       diskService.markLeadRead(ROOM, [readId]);
       const savedCursor = diskService.roomState(ROOM).read_info.cursor;
       diskDb.prepare("UPDATE bridge_receipts SET created_at = 0").run();
@@ -324,6 +334,17 @@ describe("server and bridge", () => {
         turnTimeoutMs: 60000,
         maxMessageChars: 1000,
       });
+      expect(
+        restartedReadService.handOff(
+          "claude",
+          joined.session_id,
+          readId,
+          "codex",
+        ),
+      ).toEqual(savedRepair);
+      expect(restartedReadService.roomState(ROOM).routing.queued).toHaveLength(
+        1,
+      );
       expect(restartedReadService.roomState(ROOM).read_info).toMatchObject({
         cursor: savedCursor,
         unread_count: 0,
@@ -381,9 +402,37 @@ describe("server and bridge", () => {
     }
   });
 
+  it("repairs an unmentioned handoff through the bridge", async () => {
+    service.ensureAgent("codex", "Codex");
+    service.setMembers(ROOM, ["claude", "codex"]);
+    const target = service.join("codex", ROOM).session_id;
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    service.postUserMessage(ROOM, "@claude start");
+    const { value: turn } = await callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    const { value: posted } = await callTool("post_message", {
+      session_id: joined.session_id,
+      turn_id: turn.turn_id,
+      body: "@lead design approved",
+    });
+    expect(posted.routing_warning).toContain("hand_off");
+    const { value: repair } = await callTool("hand_off", {
+      session_id: joined.session_id,
+      source_message_id: posted.message_id,
+      to: "codex",
+    });
+    expect(service.poll("codex", target, true)).toMatchObject({
+      status: "turn",
+      turn_id: repair.turn_id,
+      handoff_repair: { source_message_id: posted.message_id },
+    });
+  });
+
   it("lists the Phase 0 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "hand_off",
       "join_room",
       "pass_turn",
       "post_message",

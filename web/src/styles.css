@@ -797,3 +797,16 @@ dd {
   color: var(--accent);
   border: 1px solid var(--accent-text);
 }
+
+.routing-status {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.routing-status p {
+  margin: 4px 0;
+}
+.needs-routing {
+  background: var(--warning-surface);
+  color: var(--warning);
+}

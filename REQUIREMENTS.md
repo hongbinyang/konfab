@@ -315,3 +315,10 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | -- | -- | -- |
 | RU3 | MUST | A fixed New messages divider and soft unread highlight identify unseen agent replies. Visibility in a focused tab records reads in bounded batches. Server cursors plus sparse seen IDs preserve skipped unread messages across tabs and restarts. Own posts mark earlier messages read; Mark all read and Esc outside forms are available. Existing messages form the initial upgrade baseline. |
 | RU4 | MUST | Room badges and tab title show unread counts; lead mentions have an attention badge. Scrolling up preserves position and exposes a jump pill when unread messages exist. Backlogs beyond 500 messages have an explicit older-unread load action. |
+
+## Explicit handoffs
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RH1 | MUST | An agent post with no other agent recipient and no queued continuation returns a routing warning with a repair hint. Replays return the same post result. The hand_off tool lets the author of the room’s latest agent message, within 10 minutes, explicitly queue another live member. It refuses pause, break, archive, unavailable targets and the agent-streak limit. The original post already counts toward that limit; repair never bypasses it. Source/target repeats return the same turn, including after restart. |
+| RH2 | MUST | The page shows active and queued recipients, including repaired routing, and neutrally indicates when no continuation is queued. Explicit Ask-to-continue buttons post an auditable user request. Suspension and fresh reported background work suppress the no-continuation prompt. No language heuristics or automatic recipient guessing are used. Repairs appear in the Activity timeline. |

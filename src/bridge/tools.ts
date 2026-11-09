@@ -1,3 +1,4 @@
+import { BRIDGE_PROTOCOL_VERSION } from "../protocol.js";
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -117,7 +118,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           {
             headers: {
               Authorization: `Bearer ${options.token}`,
-              "X-Konfab-Protocol": "1",
+              "X-Konfab-Protocol": String(BRIDGE_PROTOCOL_VERSION),
             },
             signal:
               signal ?? AbortSignal.timeout(Math.max(1, deadline - Date.now())),
@@ -138,8 +139,12 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         }
         const version = (await capability.json()) as {
           durable_receipts?: number;
+          bridge_protocol?: number;
         };
-        if (version.durable_receipts !== 1)
+        if (
+          version.durable_receipts !== 1 ||
+          (version.bridge_protocol ?? 1) < BRIDGE_PROTOCOL_VERSION
+        )
           throw new HttpError(
             409,
             "Incompatible server protocol; update Konfab",
@@ -150,7 +155,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         method: "POST",
         headers: {
           "X-Konfab-Request-Id": requestKey,
-          "X-Konfab-Protocol": "1",
+          "X-Konfab-Protocol": String(BRIDGE_PROTOCOL_VERSION),
           Authorization: `Bearer ${options.token}`,
           "Content-Type": "application/json",
         },
@@ -170,6 +175,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "/agent/report",
       "/agent/post",
       "/agent/pass",
+      "/agent/hand-off",
       "/agent/wait",
       "/agent/wait-finished",
       "/agent/history",
@@ -322,7 +328,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     "post_message",
     {
       description:
-        "Post your reply to the room. This ends your turn. Use @name to ask another member to respond. Afterward, call wait_for_turn again.",
+        "Post your reply to the room. This ends your turn. Use @name to hand work to another member. If the result warns that no continuation is queued and someone should act next, use hand_off with the returned message ID. Then call wait_for_turn again.",
       inputSchema: {
         session_id: z.string(),
         turn_id: z.number().int().positive(),
@@ -335,6 +341,32 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           await call(
             "/agent/post",
             { session_id, turn_id, body },
+            extra.signal,
+          ),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "hand_off",
+    {
+      description:
+        "Repair a missed handoff after posting: explicitly queue another live room member using your latest agent message from the last 10 minutes. Repeats for the same source and target are deduplicated. Use only when work should continue; then call wait_for_turn.",
+      inputSchema: {
+        session_id: z.string(),
+        source_message_id: z.number().int().positive(),
+        to: z.string().min(1).describe("Member agent who should act next"),
+      },
+    },
+    async ({ session_id, source_message_id, to }, extra) => {
+      try {
+        return asToolResult(
+          await call(
+            "/agent/hand-off",
+            { session_id, source_message_id, to },
             extra.signal,
           ),
         );

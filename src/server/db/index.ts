@@ -245,6 +245,16 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX messages_unread ON messages(room_id, sender_type, id);
   `,
+  `
+  ALTER TABLE turns ADD COLUMN post_result_json TEXT;
+  ALTER TABLE turns ADD COLUMN repair_source_message_id INTEGER REFERENCES messages(id);
+  CREATE TABLE handoffs (
+    source_message_id INTEGER NOT NULL REFERENCES messages(id),
+    target_agent_id TEXT NOT NULL REFERENCES agents(id),
+    turn_id INTEGER NOT NULL REFERENCES turns(id),
+    PRIMARY KEY(source_message_id, target_agent_id)
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {
