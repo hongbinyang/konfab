@@ -340,6 +340,8 @@ Agent calls again with request_id until approved or denied
 - A pre-approved action still calls the tool, so that it is logged (P5). GitHub pushes use `recipient: github.com/OWNER/REPO` and `data: code_push`.
 - An approval applies only to that request, unless the user adds a pre-approval.
 
+Permission requests appear in the conversation as well as the existing side panel. Both use the same authenticated decision route and persistent record. Push requests require a recipient-matching repository, branch, and full 40- or 64-character base and head commit IDs. The approval result returns this exact scope and instructs the agent to recheck it before pushing; pre-approved pushes still record their scope. Legacy approvals without a scope are displayed as legacy and cannot be used as scoped push approvals.
+
 Konfab cannot observe or block what the apps send, so this flow depends on agents following the rule (L6).
 
 ## 11. Web API and page

@@ -17,11 +17,21 @@ export interface RoomSummary {
 
 export interface Permission {
   id: number;
+  room_id: number;
   room: string;
   agent_id: string;
   recipient: string;
   data_description: string;
   reason: string;
+  data_type: string | null;
+  state: "pending" | "approved" | "denied";
+  decided_by: string | null;
+  created_at: number;
+  decided_at: number | null;
+  push_repository: string | null;
+  push_branch: string | null;
+  push_base: string | null;
+  push_head: string | null;
 }
 
 export interface Report {
@@ -101,6 +111,7 @@ export interface RoomState {
   messages: Message[];
   passes?: Pass[];
   activity: ActivityEvent[];
+  permissions: Permission[];
 }
 
 export class UnauthorizedError extends Error {}

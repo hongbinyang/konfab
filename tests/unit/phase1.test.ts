@@ -605,6 +605,12 @@ describe("Phase 1 behavior", () => {
         data_description: "Commits",
         reason: "Push the fix",
         data_type: "code_push",
+        push_scope: {
+          repository: "GitHub.com/me/repo",
+          branch: "feature",
+          base: "a".repeat(40),
+          head: "b".repeat(40),
+        },
       });
       expect(approved).toMatchObject({
         state: "approved",
@@ -612,7 +618,16 @@ describe("Phase 1 behavior", () => {
       });
 
       for (const details of [
-        { recipient: "github.com/me/other", data_type: "code_push" },
+        {
+          recipient: "github.com/me/other",
+          data_type: "code_push",
+          push_scope: {
+            repository: "github.com/me/other",
+            branch: "feature",
+            base: "a".repeat(40),
+            head: "b".repeat(40),
+          },
+        },
         { recipient: "github.com/me/repo", data_type: "file_upload" },
         { recipient: "github.com/me/repo" },
       ]) {
@@ -624,6 +639,70 @@ describe("Phase 1 behavior", () => {
         expect(request.state).toBe("pending");
       }
       expect(service.listPermissions()).toHaveLength(4);
+    });
+
+    it("requires an exact code-push scope, including for pre-approvals", () => {
+      const common = {
+        recipient: "github.com/me/repo",
+        data_description: "commits",
+        reason: "push",
+        data_type: "code_push",
+      };
+      const scope = {
+        repository: common.recipient,
+        branch: "feature",
+        base: "a".repeat(40),
+        head: "b".repeat(40),
+      };
+      for (const push_scope of [
+        undefined,
+        { ...scope, branch: " " },
+        { ...scope, repository: "github.com/me/other" },
+        { ...scope, head: "abcd" },
+        { ...scope, head: "c".repeat(64) },
+      ]) {
+        expect(() =>
+          service.requestPermission("claude", claude, {
+            ...common,
+            push_scope,
+          }),
+        ).toThrow("code push needs");
+      }
+      const approved = service.requestPermission("claude", claude, {
+        ...common,
+        push_scope: scope,
+      });
+      expect(approved).toMatchObject({
+        state: "approved",
+        decided_by: "pre_approval",
+        push_repository: scope.repository,
+        push_branch: scope.branch,
+        push_base: scope.base,
+        push_head: scope.head,
+      });
+      expect(service.roomState(ROOM).permissions).toContainEqual(approved);
+      const alternate = service.requestPermission("claude", claude, {
+        ...common,
+        data_type: " Code_Push ",
+        push_scope: { ...scope, repository: "https://GITHUB.com/me/repo.git/" },
+      });
+      expect(alternate).toMatchObject({
+        data_type: "code_push",
+        push_repository: "https://GITHUB.com/me/repo.git/",
+      });
+      expect(() =>
+        service.requestPermission("claude", claude, {
+          ...common,
+          push_scope: { ...scope, repository: "http://github.com/me/repo" },
+        }),
+      ).toThrow("code push needs");
+      expect(() =>
+        service.requestPermission("claude", claude, {
+          ...common,
+          recipient: "example.com/Case/repo",
+          push_scope: { ...scope, repository: "example.com/case/repo" },
+        }),
+      ).toThrow("code push needs");
     });
 
     it("does not let an agent read another agent's request", () => {
@@ -741,7 +820,7 @@ describe("database migration", () => {
         .run();
       old.close();
       const upgraded = openDatabase(file);
-      expect(upgraded.pragma("user_version", { simple: true })).toBe(5);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(6);
       expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
         name: "existing",
         brief: "kept",
@@ -784,7 +863,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(5);
+      expect(db.pragma("user_version", { simple: true })).toBe(6);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });

@@ -275,6 +275,39 @@ describe("page API", () => {
     );
   });
 
+  it("shows and decides a room permission using the authenticated route", async () => {
+    const room = service.createRoom("requests", "", ["claude"]);
+    const joined = service.join("claude", "requests");
+    const pending = service.requestPermission("claude", joined.session_id, {
+      recipient: "example.com",
+      data_description: "diagnostic",
+      reason: "debug",
+    });
+    const state = (await call("GET", `/api/rooms/${room.id}`)).json();
+    expect(state.permissions[0]).toMatchObject({
+      id: pending.id,
+      state: "pending",
+      recipient: "example.com",
+    });
+    const unauthorized = await app.inject({
+      method: "POST",
+      url: `/api/permissions/${pending.id}/decision`,
+      headers: { host: HOST },
+      payload: { decision: "approved" },
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    expect(
+      (
+        await call("POST", `/api/permissions/${pending.id}/decision`, {
+          decision: "approved",
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (await call("GET", `/api/rooms/${room.id}`)).json().permissions[0],
+    ).toMatchObject({ state: "approved", decided_by: "user" });
+  });
+
   it("paginates room activity without leaking other rooms", async () => {
     const one = service.createRoom("first", "", ["claude"]);
     const two = service.createRoom("second", "", ["codex"]);

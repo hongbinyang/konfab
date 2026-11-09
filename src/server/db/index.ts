@@ -162,6 +162,13 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX events_by_room ON events(room_id, id);
   `,
+  `
+  ALTER TABLE permission_requests ADD COLUMN push_repository TEXT;
+  ALTER TABLE permission_requests ADD COLUMN push_branch TEXT;
+  ALTER TABLE permission_requests ADD COLUMN push_base TEXT;
+  ALTER TABLE permission_requests ADD COLUMN push_head TEXT;
+  CREATE INDEX permission_requests_by_room ON permission_requests(room_id, id);
+  `,
 ];
 
 export function openDatabase(path: string): Db {

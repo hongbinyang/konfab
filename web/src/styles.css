@@ -517,3 +517,14 @@ dd {
 .activity time {
   color: var(--muted);
 }
+
+.messages li.permission-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.permission-card p {
+  margin: 6px 0;
+}
