@@ -223,6 +223,9 @@ describe("server and bridge", () => {
     diskService.createRoom(ROOM, "Topic", ["claude"]);
     diskService.setAgentToken("claude", token);
     const joined = diskService.join("claude", ROOM);
+    diskService.postUserMessage(ROOM, "Please respond after restart");
+    const activeTurn = diskService.poll("claude", joined.session_id, true);
+    if (activeTurn.status !== "turn") throw new Error("Expected active turn");
     let diskApp = await buildApp({ service: diskService, port: PORT });
     const headers = {
       host: `127.0.0.1:${PORT}`,
@@ -251,7 +254,36 @@ describe("server and bridge", () => {
         turnTimeoutMs: 60000,
         maxMessageChars: 1000,
       });
+      diskService.recoverAfterRestart();
       diskApp = await buildApp({ service: diskService, port: PORT });
+      const postPayload = {
+        session_id: joined.session_id,
+        turn_id: activeTurn.turn_id,
+        body: "Resumed original work",
+      };
+      const postHeaders = {
+        host: `127.0.0.1:${PORT}`,
+        authorization: `Bearer ${token}`,
+      };
+      const post = await diskApp.inject({
+        method: "POST",
+        url: "/agent/post",
+        headers: postHeaders,
+        payload: postPayload,
+      });
+      expect(post.statusCode).toBe(200);
+      const duplicate = await diskApp.inject({
+        method: "POST",
+        url: "/agent/post",
+        headers: postHeaders,
+        payload: postPayload,
+      });
+      expect(duplicate.json()).toEqual(post.json());
+      expect(
+        diskDb
+          .prepare("SELECT COUNT(*) AS count FROM messages WHERE body = ?")
+          .get(postPayload.body),
+      ).toEqual({ count: 1 });
       const replay = await diskApp.inject({
         method: "POST",
         url: "/agent/permission",
