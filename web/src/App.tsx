@@ -318,11 +318,15 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
   const [brief, setBrief] = useState(room.brief);
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
-  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}`;
+  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
   // On a time tie, a message comes first, because a pass follows what it answers.
   const timeline = [
     ...messages.map((message) => ({ kind: "message" as const, ...message })),
     ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
+    ...state.permissions.map((permission) => ({
+      kind: "permission" as const,
+      ...permission,
+    })),
   ].sort((a, b) => a.created_at - b.created_at);
   const [olderActivity, setOlderActivity] = useState<ActivityEvent[]>([]);
   const [hasOlderActivity, setHasOlderActivity] = useState(true);
@@ -557,7 +561,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             list.scrollHeight - list.scrollTop - list.clientHeight < 80;
         }}
       >
-        {messages.length === 0 && (
+        {messages.length === 0 && state.permissions.length === 0 && (
           <li className="hint">
             No messages yet. Post one to give each agent a turn, or use
             @mentions to choose who responds.
@@ -569,6 +573,68 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               {displayName(item.agent_id)} passed
               {item.reason ? `: ${item.reason}` : ""}
               <span className="time">{formatTime(item.created_at)}</span>
+            </li>
+          ) : item.kind === "permission" ? (
+            <li key={`permission-${item.id}`} className="permission-card">
+              <strong>
+                Permission request from {displayName(item.agent_id)}
+              </strong>
+              <span className="time">{formatTime(item.created_at)}</span>
+              <p>
+                Recipient: {item.recipient}
+                <br />
+                Data: {item.data_description}
+                <br />
+                Reason: {item.reason}
+              </p>
+              {item.data_type === "code_push" &&
+                (item.push_repository ? (
+                  <p>
+                    Repository: {item.push_repository}
+                    <br />
+                    Branch: {item.push_branch}
+                    <br />
+                    Commits:{" "}
+                    <code>
+                      {item.push_base}..{item.push_head}
+                    </code>
+                  </p>
+                ) : (
+                  <p>Legacy request: no recorded commit scope.</p>
+                ))}
+              {item.state === "pending" ? (
+                <div className="row">
+                  {(["approved", "denied"] as const).map((decision) => (
+                    <button
+                      key={decision}
+                      type="button"
+                      className={
+                        decision === "denied" ? "secondary" : undefined
+                      }
+                      onClick={() =>
+                        void act(() =>
+                          request(`/api/permissions/${item.id}/decision`, {
+                            method: "POST",
+                            body: { decision },
+                          }),
+                        )
+                      }
+                    >
+                      {decision === "approved" ? "Approve" : "Deny"}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p>
+                  {item.state === "approved" ? "Approved" : "Denied"}{" "}
+                  {item.decided_by === "pre_approval"
+                    ? "automatically (pre-approval)"
+                    : "by you"}
+                  {item.decided_at !== null
+                    ? ` at ${new Date(item.decided_at).toLocaleString()}`
+                    : ""}
+                </p>
+              )}
             </li>
           ) : (
             <li key={`message-${item.id}`}>

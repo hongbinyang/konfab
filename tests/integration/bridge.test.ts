@@ -196,6 +196,49 @@ describe("server and bridge", () => {
     expect((await waiting).value.state).toBe("denied");
   });
 
+  it("returns the approved push scope through the bridge", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const scope = {
+      repository: "github.com/me/repo",
+      branch: "feature",
+      base: "a".repeat(40),
+      head: "b".repeat(40),
+    };
+    const waiting = callTool("request_permission", {
+      session_id: joined.session_id,
+      recipient: scope.repository,
+      data_description: "commits",
+      reason: "push",
+      data_type: "code_push",
+      push_scope: scope,
+    });
+    setTimeout(() => {
+      const pending = service.listPermissions("pending")[0];
+      if (pending) service.decidePermission(pending.id, "approved");
+    }, 100);
+    const { value } = await waiting;
+    expect(value).toMatchObject({ state: "approved", push_scope: scope });
+    expect(value.instruction).toContain("if anything changed, request again");
+  });
+
+  it("does not present a legacy unscoped push approval as approved", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const legacy = service.requestPermission("claude", joined.session_id, {
+      recipient: "github.com/me/repo",
+      data_description: "old commits",
+      reason: "push",
+    });
+    db.prepare(
+      "UPDATE permission_requests SET data_type = 'code_push', state = 'approved' WHERE id = ?",
+    ).run(legacy.id);
+    const { value } = await callTool("request_permission", {
+      session_id: joined.session_id,
+      request_id: legacy.id,
+    });
+    expect(value.state).toBe("scope_required");
+    expect(value.instruction).toContain("Request a new approval");
+  });
+
   it("rejects an incomplete new permission request", async () => {
     const { value: joined } = await callTool("join_room", { room: ROOM });
     const result = (await client.callTool({

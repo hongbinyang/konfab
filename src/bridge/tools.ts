@@ -23,8 +23,53 @@ class HttpError extends Error {
   }
 }
 
-function toPermission(request: { id: number; state: string }) {
-  return { request_id: request.id, state: request.state };
+function toPermission(request: {
+  id: number;
+  state: string;
+  recipient?: string;
+  data_description?: string;
+  data_type?: string | null;
+  push_repository?: string | null;
+  push_branch?: string | null;
+  push_base?: string | null;
+  push_head?: string | null;
+}) {
+  const scope =
+    request.push_repository &&
+    request.push_branch &&
+    request.push_base &&
+    request.push_head
+      ? {
+          repository: request.push_repository,
+          branch: request.push_branch,
+          base: request.push_base,
+          head: request.push_head,
+        }
+      : null;
+  return {
+    request_id: request.id,
+    state:
+      request.data_type?.toLowerCase() === "code_push" &&
+      request.state === "approved" &&
+      !scope
+        ? "scope_required"
+        : request.state,
+    recipient: request.recipient,
+    data_description: request.data_description,
+    ...(scope
+      ? {
+          push_scope: scope,
+          instruction:
+            "Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.",
+        }
+      : request.data_type?.toLowerCase() === "code_push" &&
+          request.state === "approved"
+        ? {
+            instruction:
+              "This legacy approval has no recorded push scope. Request a new approval before pushing.",
+          }
+        : {}),
+  };
 }
 
 function asToolResult(value: unknown) {
@@ -281,7 +326,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     "request_permission",
     {
       description:
-        'Ask the user before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI. Do not send anything unless the state is "approved". If the state is "pending", call this again with the same session_id and the request_id you received. An approval covers only this recipient and data.',
+        'Ask the user before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI. Do not send anything unless the state is "approved". If the state is "pending", call this again with the same session_id and the request_id you received. An approval covers only this recipient and data. For code_push provide push_scope with repository, branch, and full base and head commit IDs. Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.',
       inputSchema: {
         session_id: z.string(),
         recipient: z
@@ -296,6 +341,17 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           .string()
           .optional()
           .describe("Optional category, such as code_push"),
+        push_scope: z
+          .object({
+            repository: z.string(),
+            branch: z.string(),
+            base: z.string(),
+            head: z.string(),
+          })
+          .optional()
+          .describe(
+            "Required for code_push: repository matching recipient, branch, and full base and head commit IDs",
+          ),
         request_id: z
           .number()
           .int()
@@ -329,12 +385,30 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
 
         const started = Date.now();
         let waitSeconds = DEFAULT_WAIT_SECONDS;
-        let latest: { id: number; state: string; wait_seconds: number };
+        let latest: {
+          id: number;
+          state: string;
+          data_type?: string | null;
+          wait_seconds: number;
+          recipient?: string;
+          data_description?: string;
+          push_repository?: string | null;
+          push_branch?: string | null;
+          push_base?: string | null;
+          push_head?: string | null;
+        };
         do {
           latest = await call<{
             id: number;
             state: string;
+            data_type?: string | null;
             wait_seconds: number;
+            recipient?: string;
+            data_description?: string;
+            push_repository?: string | null;
+            push_branch?: string | null;
+            push_base?: string | null;
+            push_head?: string | null;
           }>(
             "/agent/permission/wait",
             {

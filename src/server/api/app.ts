@@ -41,6 +41,14 @@ const permissionBody = z.object({
   data_description: z.string().trim().min(1).max(2000),
   reason: z.string().trim().min(1).max(2000),
   data_type: z.string().trim().min(1).max(100).optional(),
+  push_scope: z
+    .object({
+      repository: z.string().trim().min(1).max(500),
+      branch: z.string().trim().min(1).max(500),
+      base: z.string().max(64),
+      head: z.string().max(64),
+    })
+    .optional(),
 });
 const permissionWaitBody = z.object({
   ...session,
