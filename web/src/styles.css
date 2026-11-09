@@ -608,3 +608,121 @@ dd {
 .state.waiting_approval {
   color: var(--warning);
 }
+
+/* Keep room details secondary to the conversation. */
+.layout:has(.panel-collapsed) {
+  grid-template-columns: 240px minmax(0, 1fr) 48px;
+}
+.panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.panel-content[hidden],
+.panel-section > div[hidden] {
+  display: none;
+}
+.panel-collapsed {
+  padding: 12px 5px;
+}
+.panel-toggle {
+  align-self: flex-end;
+  min-width: 36px;
+}
+.panel-toggle:disabled,
+.section-toggle:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.section-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 600;
+}
+.panel-section > div {
+  padding-top: 8px;
+}
+.compact-agent {
+  padding: 10px;
+}
+.compact-agent p {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.compact-agent .panel-section {
+  margin-block: 6px;
+}
+.compact-agent .section-toggle {
+  font-size: 13px;
+  padding: 4px 0;
+}
+.agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.agent-actions button {
+  font-size: 12px;
+  padding: 4px 7px;
+}
+.decision-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.decision-body.clipped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 900px) {
+  .panel-toggle {
+    align-self: stretch;
+  }
+  .panel-collapsed {
+    padding: 8px 12px;
+  }
+}
+
+.agent-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 13px;
+}
+.agent-heading .check {
+  margin: 0;
+}
+.agent-heading .state {
+  font-size: 12px;
+  padding: 1px 5px;
+}
+
+.rail-warning {
+  display: block;
+  color: var(--warning);
+  font-size: 11px;
+  white-space: nowrap;
+}
