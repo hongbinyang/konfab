@@ -436,16 +436,28 @@ describe("KonfabService", () => {
     expect(service.poll("codex", codex, true).status).toBe("turn");
   });
 
-  it("requeues active turns after a restart", () => {
+  it("preserves active turns and their original timeout after a restart", () => {
     service.postUserMessage(ROOM, "@claude hi");
-    expectTurn(service.poll("claude", claude, true));
-
+    const original = expectTurn(service.poll("claude", claude, true));
     const restarted = createService();
     restarted.recoverAfterRestart();
     const turn = expectTurn(restarted.poll("claude", claude, true));
-    expect(turn.messages.map((message) => message.body)).toEqual([
-      "@claude hi",
-    ]);
+    expect(turn.turn_id).toBe(original.turn_id);
+    now += TURN_TIMEOUT_MS + 1;
+    restarted.tick();
+    expect(
+      db.prepare("SELECT state FROM turns WHERE id = ?").get(original.turn_id),
+    ).toEqual({ state: "skipped" });
+  });
+
+  it("requeues an active turn whose owning session ended", () => {
+    service.postUserMessage(ROOM, "@claude hi");
+    const original = expectTurn(service.poll("claude", claude, true));
+    db.prepare("UPDATE sessions SET state = 'ended' WHERE id = ?").run(claude);
+    createService().recoverAfterRestart();
+    expect(
+      db.prepare("SELECT state FROM turns WHERE id = ?").get(original.turn_id),
+    ).toEqual({ state: "abandoned" });
   });
 
   it("reports agent state and idle call measurements", () => {

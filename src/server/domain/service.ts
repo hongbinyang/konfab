@@ -1761,13 +1761,20 @@ export class KonfabService {
 
   // Time-based rules and recovery
 
-  /** Requeues work left active by a previous server process. */
+  /** Preserve work owned by surviving sessions; requeue orphaned turns. */
   recoverAfterRestart(): void {
     this.db.transaction(() => {
       const active = this.db
         .prepare("SELECT * FROM turns WHERE state = 'active'")
         .all() as TurnRow[];
-      for (const turn of active) this.abandonAndRequeue(turn);
+      for (const turn of active) {
+        const owner = this.db
+          .prepare(
+            "SELECT 1 FROM sessions WHERE id = ? AND room_id = ? AND agent_id = ? AND state = 'active'",
+          )
+          .get(turn.session_id, turn.room_id, turn.agent_id);
+        if (!owner) this.abandonAndRequeue(turn);
+      }
     })();
   }
 
