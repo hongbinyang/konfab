@@ -67,7 +67,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | ID | Priority | Requirement |
 |---|---|---|
 | U1 | MUST | A local web page shows a room list and each room's live conversation, and lets the user post messages. |
-| U2 | MUST | The page shows each participant's status in the room. Agents: working, waiting for approval, idle, queued, on break, outside hours, not responding, or not joined. The lead: online or away. |
+| U2 | MUST | The page shows each participant's status in the room. Agents: working, waiting for approval, idle, queued, on break, run window ended, not responding, or not joined. The lead: page connected or disconnected. |
 | U3 | MUST | Each room has a ready-to-copy join prompt for each agent. |
 | U4 | MUST | The user can pause and resume one room or all rooms, which stops or restarts new turns. |
 | U5 | MUST | The page displays permission requests, and the user can approve or deny each one. |
@@ -99,9 +99,9 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 
 | ID | Priority | Requirement |
 |---|---|---|
-| M1 | MUST | **Daily Hours is the only v1 mode.** An agent takes turns only during its configured hours, by default 09:00 to 18:00 local time, every day. |
-| M2 | MUST | When an agent's hours end, it receives no new turns. A turn already in progress may finish. |
-| M3 | MUST | The user's messages are always accepted. Messages for an agent outside its hours stay queued until its hours next begin. |
+| M1 | MUST | **Run window.** When an agent joins a room, at any time of day, it starts a run window of 5 hours by default. The length is configurable for all agents and for each agent. A restart of Konfab keeps the window; rejoining starts a new one. |
+| M2 | MUST | When an agent's run window ends, it receives no new turns. A turn already in progress may finish, and the agent then stops so it uses no allowance. The user can extend the window by 1 hour from the page. |
+| M3 | MUST | The user's messages are always accepted. Messages for an agent whose window has ended stay queued until it rejoins. |
 | M4 | LATER | Continuous, Daily Message Limit, On Mention, and Scheduled modes, set per agent. |
 | M5 | MUST | The user can start a break for one room or all rooms. Agents stop and use no allowance until the user rejoins them. Pause alone does not save allowance. |
 | W1 | MUST | Konfab does not measure token use. |
@@ -205,7 +205,7 @@ One local server holds all state, and each app starts a small bridge process. Se
   - The user creates two rooms with different topics and members, and agents join each using the copied prompts.
   - Both agents complete a real code review through a room.
   - Agents reply in order to an unaddressed message, and only the named agent replies to an @mention.
-  - An agent stops receiving new turns when its hours end, and its queued messages arrive when its hours next begin.
+  - An agent stops receiving new turns when its run window ends, and its queued messages arrive when it rejoins.
   - Pause stops new turns in one room and in all rooms.
   - A test request for third-party data appears on the page, and the send waits for the user's answer.
   - An agent that stops responding triggers a warning, and it rejoins without duplicate turns.
@@ -222,7 +222,7 @@ One local server holds all state, and each app starts a small bridge process. Se
 |---|---|---|
 | D1 | What is the app called? | Konfab. On 2026-11-06, the npm name looked unused, but `konfab.com` and `konfab.io` responded, and one small GitHub project uses the name. No trademark search has been done. |
 | D2 | Which language is used? | TypeScript |
-| D3 | Does v1 keep Daily Hours now that joining is manual? | Yes, since the check is small |
+| D3 | Does v1 keep Daily Hours now that joining is manual? | Replaced on 2026-11-08 by the user with a run window of 5 hours by default that starts when an agent joins (M1). |
 | D4 | How long are history and logs kept? | Until the user deletes them |
 | D5 | What is in v1.1? | Emoji input, activity timeline, inline approval cards, and a decisions log, built in that order. Approved by the user on 2026-11-08. Reactions stay LATER. |
 | D6 | What is the limit on consecutive agent messages? | 50 by default, raised from 5 to 20 and then to 50 by the user on 2026-11-08, so milestones and critical decisions still return to the lead. |

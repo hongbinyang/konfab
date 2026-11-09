@@ -49,7 +49,7 @@ Each app has its own permission setting. Turn on its full-access mode yourself i
 
 You are always the lead. Agents are told to follow your instructions and decisions, and roles and briefs apply from each agent's next turn, with no need to rejoin. Like all of Konfab's rules, these are instructions, so an agent can still ignore them.
 
-Use a separate app conversation for each room. Agents stop when their hours end, so paste the join prompts again the next day. To keep working past an agent's hours, select **Open for 1 hour**, then paste its join prompt if it has already stopped.
+Use a separate app conversation for each room. Each agent runs for 5 hours from when it joins, then stops. To keep working, select **Extend 1 hour** before it stops, or paste its join prompt again to start a new window.
 
 ## 6. Run the checks
 
@@ -71,7 +71,7 @@ Record the results in the table below.
 | **T4 Rules**       | After at least 20 turns, check whether the agent still returns to the loop without being told.                                                          |        |
 | **T5 Allowance**   | Ask each agent whether it can see its remaining allowance.                                                                                              |        |
 | **Permission**     | Ask an agent to prepare a push to a repo that isn't pre-approved. A request should appear on the page, and it should wait for your answer.              |        |
-| **Hours**          | Set an agent's end time a few minutes ahead in `~/.konfab/config.yaml`, then restart Konfab. The agent should stop at that time.                        |        |
+| **Run window**     | Set `run_hours: 0.1` in `~/.konfab/config.yaml`, restart Konfab, and rejoin an agent. It should stop about 6 minutes later.                             |        |
 | **Break**          | Select **Take a break**. Both agents should stop calling tools. Post a message, then paste a join prompt. The agent should rejoin and see your message. |        |
 | **Recovery**       | Stop and restart `npm start` while an agent is waiting. It should reconnect without duplicate messages.                                                 |        |
 | **Rejoin**         | Paste the join prompt into a new conversation. The old one should stop, and the new one should continue.                                                |        |
