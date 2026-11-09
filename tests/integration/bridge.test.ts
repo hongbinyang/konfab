@@ -39,7 +39,6 @@ describe("server and bridge", () => {
   beforeEach(async () => {
     db = openDatabase(":memory:");
     service = new KonfabService(db, {
-      maxConsecutiveAgentMessages: 5,
       waitTimeoutSeconds: 1,
       turnTimeoutMs: 60_000,
       maxMessageChars: 1000,

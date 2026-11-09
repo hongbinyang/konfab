@@ -2,6 +2,8 @@ export type AgentState =
   | "not_joined"
   | "waiting"
   | "working"
+  | "queued"
+  | "waiting_approval"
   | "outside_hours"
   | "on_break"
   | "not_responding";
@@ -66,6 +68,7 @@ export interface Message {
   body: string;
   created_at: number;
   attachments?: Attachment[];
+  mentions?: string[];
 }
 
 export interface Pass {
