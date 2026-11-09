@@ -19,6 +19,8 @@ Conventions for AI agents (and people) changing this repo. Konfab room rules and
 - Copy commit hashes from git output (`git log -1 --format=%H`); don't retype them.
 - Say what you verified and how, and what you didn't verify.
 - Post a design note before larger changes, and wait for review before committing.
+- When you hand work off, @mention whoever acts next (a name without `@` doesn't give them a turn), and say what comes next.
+- When you start work outside your turn, call `report_status` with kind `working` and a short detail first.
 
 ## Pushing
 
