@@ -32,6 +32,7 @@ const defaultsSchema = z.object({
   wait_timeout_seconds: z.number().int().min(1).default(50),
   turn_timeout_minutes: z.number().int().min(1).default(30),
   max_message_chars: z.number().int().min(1).default(20000),
+  max_decision_chars: z.number().int().min(1).default(4000),
 });
 
 const configSchema = z.object({
@@ -70,6 +71,7 @@ defaults:
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
   max_message_chars: 20000
+  max_decision_chars: 4000
 
 agents:
   claude:

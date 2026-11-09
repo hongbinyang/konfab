@@ -169,6 +169,28 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE permission_requests ADD COLUMN push_head TEXT;
   CREATE INDEX permission_requests_by_room ON permission_requests(room_id, id);
   `,
+  `
+  ALTER TABLE room_members ADD COLUMN decision_seen_event_id INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE turns ADD COLUMN decision_snapshot_event_id INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    proposer TEXT NOT NULL,
+    proposal_key TEXT UNIQUE,
+    source_message_id INTEGER REFERENCES messages(id),
+    status TEXT NOT NULL CHECK(status IN ('proposed','confirmed','rejected','retired')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX decisions_by_room ON decisions(room_id, id);
+  CREATE TABLE decision_versions (
+    decision_id INTEGER NOT NULL REFERENCES decisions(id),
+    version INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(decision_id, version)
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

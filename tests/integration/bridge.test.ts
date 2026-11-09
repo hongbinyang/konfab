@@ -74,11 +74,31 @@ describe("server and bridge", () => {
       "join_room",
       "pass_turn",
       "post_message",
+      "propose_decision",
+      "read_decisions",
       "read_history",
       "report_status",
       "request_permission",
       "wait_for_turn",
     ]);
+  });
+
+  it("lets agents propose and read confirmed decisions", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    const { value: proposal } = await callTool("propose_decision", {
+      session_id: joined.session_id,
+      body: "Ship Wednesday",
+    });
+    expect(proposal.status).toBe("proposed");
+    expect(
+      (await callTool("read_decisions", { session_id: joined.session_id }))
+        .value.decisions,
+    ).toHaveLength(0);
+    service.updateDecision(ROOM, proposal.id, "confirm");
+    expect(
+      (await callTool("read_decisions", { session_id: joined.session_id }))
+        .value.decisions[0].body,
+    ).toBe("Ship Wednesday");
   });
 
   it("returns idle when the wait ends with nothing to do", async () => {

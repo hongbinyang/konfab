@@ -117,6 +117,95 @@ describe("KonfabService", () => {
     expect(service.exportRoom(ROOM).markdown).toContain("## Activity");
   });
 
+  it("does not treat an agent named user as the lead", () => {
+    service.ensureAgent("user", "Agent User");
+    service.setMembers(ROOM, ["user"]);
+    const session = service.join("user", ROOM).session_id;
+    expect(
+      service.proposeDecision(
+        "user",
+        session,
+        "proposal",
+        "agent-user-proposal",
+      ).status,
+    ).toBe("proposed");
+  });
+
+  it("keeps decisions versioned, lead-controlled, and bounded on turns", () => {
+    const proposed = service.proposeDecision(
+      "claude",
+      claude,
+      "Ship Tuesday",
+      "proposal-one",
+    );
+    expect(
+      service.proposeDecision("claude", claude, "Ship Tuesday", "proposal-one")
+        .id,
+    ).toBe(proposed.id);
+    expect(proposed.status).toBe("proposed");
+    expect(service.readDecisions("claude", claude).decisions).toHaveLength(0);
+    service.updateDecision(ROOM, proposed.id, "confirm");
+    service.updateDecision(ROOM, proposed.id, "revise", "Ship Wednesday");
+    expect(service.decisionVersions(ROOM, proposed.id)).toMatchObject([
+      { version: 2, body: "Ship Wednesday" },
+      { version: 1, body: "Ship Tuesday" },
+    ]);
+    const rejected = service.proposeDecision(
+      "claude",
+      claude,
+      "Ship Friday",
+      "proposal-two",
+    );
+    service.updateDecision(ROOM, rejected.id, "reject");
+    service.createDecision(
+      ROOM,
+      "x".repeat(1999),
+      "user",
+      undefined,
+      undefined,
+      true,
+    );
+    service.createDecision(
+      ROOM,
+      "y".repeat(1999),
+      "user",
+      undefined,
+      undefined,
+      true,
+    );
+    service.postUserMessage(ROOM, "@claude work");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    expect(turn.decisions_total).toBe(3);
+    expect(turn.decisions_truncated).toBe(true);
+    expect(turn.decisions.map((d) => d.body)).toEqual([
+      "x".repeat(1999),
+      "y".repeat(1999),
+    ]);
+    expect(turn.decision_updates).toContainEqual({
+      id: rejected.id,
+      status: "rejected",
+    });
+    service.passTurn("claude", claude, turn.turn_id);
+    service.postUserMessage(ROOM, "@claude next");
+    const nextTurn = expectTurn(service.poll("claude", claude, true));
+    expect(nextTurn.decision_updates).toEqual([]);
+    const first = service.readDecisions("claude", claude, undefined, 1);
+    expect(first.next_after_id).toBe(proposed.id);
+    expect(
+      service.readDecisions("claude", claude, first.next_after_id!, 10)
+        .decisions,
+    ).toHaveLength(2);
+    service.updateDecision(ROOM, proposed.id, "retire");
+    expect(
+      service
+        .readDecisions("claude", claude)
+        .decisions.some((d) => d.id === proposed.id),
+    ).toBe(false);
+    expect(service.exportRoom(ROOM).markdown).toContain(
+      "Version 1 (superseded): Ship Tuesday",
+    );
+  });
+
   it("authenticates only valid tokens", () => {
     const token = generateToken();
     service.setAgentToken("claude", token);

@@ -344,6 +344,12 @@ Permission requests appear in the conversation as well as the existing side pane
 
 Konfab cannot observe or block what the apps send, so this flow depends on agents following the rule (L6).
 
+### Confirmed decisions
+
+Room decisions have a stable ID, an optional source message, a status, and immutable text versions. Agents may propose decisions and read confirmed decisions through room-scoped tools; only the authenticated lead can confirm, reject, revise, retire, or directly create one. A revision appends a version, and previous versions remain visible and are included in exports. Proposal creation uses an idempotency key so bridge retries do not duplicate it.
+
+Turns include current confirmed decisions up to `defaults.max_decision_chars` (default 4000 characters), plus the total and an overflow flag; `read_decisions` pages through the complete current set. An agent's recent resolved proposals are included as status updates. Confirmed decisions reflect prior lead choices and do not override later instructions from the lead.
+
 ## 11. Web API and page
 
 ### REST routes

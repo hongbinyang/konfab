@@ -22,6 +22,7 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
     waitTimeoutSeconds: config.defaults.wait_timeout_seconds,
     turnTimeoutMs: config.defaults.turn_timeout_minutes * 60_000,
     maxMessageChars: config.defaults.max_message_chars,
+    maxDecisionChars: config.defaults.max_decision_chars,
     hoursFor: (agentId) =>
       config.agents[agentId]?.hours ?? config.defaults.hours,
     preApprovals: config.pre_approvals,

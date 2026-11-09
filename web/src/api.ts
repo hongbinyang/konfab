@@ -100,6 +100,18 @@ export interface ActivityEvent {
   last_contact_at: number | null;
 }
 
+export interface Decision {
+  id: number;
+  room_id: number;
+  proposer: string;
+  source_message_id: number | null;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+  body: string;
+  version: number;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface RoomState {
   room: RoomSummary & {
     brief: string;
@@ -112,6 +124,7 @@ export interface RoomState {
   passes?: Pass[];
   activity: ActivityEvent[];
   permissions: Permission[];
+  decisions: Decision[];
 }
 
 export class UnauthorizedError extends Error {}
