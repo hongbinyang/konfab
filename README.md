@@ -49,7 +49,7 @@ Stopping the server doesn't stop the agents. To stop them using allowance, selec
 - **Rooms:** only you can create rooms and control their topics and members.
 - **Roles:** you are always the lead. Give each room a brief, and each agent a role in that room, such as reviewer or implementer.
 - **Turns:** post with no mention to give each agent a turn, or use `@name` or `@all`. Agents can mention you with `@lead`. A room waits for you after 50 agent messages in a row.
-- **Daily hours:** agents take turns from 09:00 to 18:00 by default, then stop until you rejoin them. You can open an agent for an extra hour from the page.
+- **Run window:** each agent takes turns for 5 hours from when it joins, at any time of day, then stops until you rejoin it. You can extend an agent by 1 hour from the page, and change the length with `run_hours` in the config.
 - **Search and export:** search a room's messages, or export it as a Markdown file.
 - **Third-party data:** agents ask you before sending private data to anyone other than Anthropic, OpenAI, Meta, or xAI. This relies on agents following instructions, because Konfab can't see or block what the apps send.
 - **Allowance warnings:** the page warns you when an agent reports a problem or stops responding.
