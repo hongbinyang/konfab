@@ -1531,6 +1531,7 @@ function AgentDetails({
           It may be out of allowance, so check its app.
         </p>
       )}
+      {agent.bridge_outdated && <p className="warning">Reload connector</p>}
       {agent.closes_at !== null && (
         <p
           className={

@@ -1,7 +1,10 @@
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBridgeServer } from "../../src/bridge/tools.js";
 import { buildApp } from "../../src/server/api/app.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
@@ -62,9 +65,237 @@ describe("server and bridge", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await client.close();
     await app.close();
     db.close();
+  });
+
+  it("recovers a post after a transient startup outage", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    service.postUserMessage(ROOM, "Please respond");
+    const { value: turn } = await callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    const originalFetch = globalThis.fetch;
+    let failures = 0;
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      if (String(args[0]).endsWith("/agent/post") && failures++ < 2)
+        return new Response(JSON.stringify({ message: "Starting" }), {
+          status: 503,
+        });
+      return originalFetch(...args);
+    });
+    const result = (await client.callTool({
+      name: "post_message",
+      arguments: {
+        session_id: joined.session_id,
+        turn_id: turn.turn_id,
+        body: "Recovered",
+      },
+    })) as ToolResult;
+    expect(result.isError).not.toBe(true);
+  });
+
+  it("does not duplicate a post when its successful response is lost", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    service.postUserMessage(ROOM, "Please respond");
+    const { value: turn } = await callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    const originalFetch = globalThis.fetch;
+    let lost = false;
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      const response = await originalFetch(...args);
+      if (String(args[0]).endsWith("/agent/post") && !lost) {
+        lost = true;
+        await response.text();
+        throw new TypeError("Connection lost after commit");
+      }
+      return response;
+    });
+    const result = await callTool("post_message", {
+      session_id: joined.session_id,
+      turn_id: turn.turn_id,
+      body: "Exactly once",
+    });
+    expect(result.isError).not.toBe(true);
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM messages WHERE body = ?")
+        .get("Exactly once"),
+    ).toEqual({ count: 1 });
+  });
+
+  it("replays joins and permissions without repeating mutations", async () => {
+    const headers = {
+      host: `127.0.0.1:${PORT}`,
+      authorization: `Bearer ${token}`,
+      "x-konfab-request-id": "12345678-1234-4234-8234-123456789abc",
+    };
+    const first = await app.inject({
+      method: "POST",
+      url: "/agent/join",
+      headers,
+      payload: { room: ROOM },
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/agent/join",
+      headers,
+      payload: { room: ROOM },
+    });
+    expect(second.json()).toEqual(first.json());
+    const permissionHeaders = {
+      ...headers,
+      "x-konfab-request-id": "12345678-1234-4234-8234-123456789abd",
+    };
+    const payload = {
+      session_id: first.json().session_id,
+      recipient: "example.com",
+      data_description: "test",
+      reason: "test",
+    };
+    const permission = await app.inject({
+      method: "POST",
+      url: "/agent/permission",
+      headers: permissionHeaders,
+      payload,
+    });
+    const replay = await app.inject({
+      method: "POST",
+      url: "/agent/permission",
+      headers: permissionHeaders,
+      payload,
+    });
+    expect(replay.json()).toEqual(permission.json());
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM permission_requests").get(),
+    ).toEqual({ count: 1 });
+    const conflict = await app.inject({
+      method: "POST",
+      url: "/agent/permission",
+      headers: permissionHeaders,
+      payload: { ...payload, reason: "changed" },
+    });
+    expect(conflict.statusCode).toBe(409);
+  });
+
+  it("marks old bridges for connector reload and clears the marker on refresh", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/agent/join",
+      headers: { host: `127.0.0.1:${PORT}`, authorization: `Bearer ${token}` },
+      payload: { room: ROOM },
+    });
+    expect(service.roomState(ROOM).agents[0]?.bridge_outdated).toBe(true);
+    await callTool("join_room", { room: ROOM });
+    expect(service.roomState(ROOM).agents[0]?.bridge_outdated).toBe(false);
+  });
+
+  it("refuses receipt-dependent mutations against an old server", async () => {
+    const originalFetch = globalThis.fetch;
+    let mutations = 0;
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      if (String(args[0]).endsWith("/agent/protocol"))
+        return new Response("{}", { status: 404 });
+      mutations++;
+      return originalFetch(...args);
+    });
+    const result = (await client.callTool({
+      name: "join_room",
+      arguments: { room: ROOM },
+    })) as ToolResult;
+    expect(result.isError).toBe(true);
+    expect(mutations).toBe(0);
+  });
+
+  it("replays a permission after reopening the database and server", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "konfab-replay-"));
+    const filename = join(directory, "state.db");
+    let diskDb = openDatabase(filename);
+    let diskService = new KonfabService(diskDb, {
+      waitTimeoutSeconds: 1,
+      turnTimeoutMs: 60000,
+      maxMessageChars: 1000,
+    });
+    diskService.ensureAgent("claude", "Claude");
+    diskService.createRoom(ROOM, "Topic", ["claude"]);
+    diskService.setAgentToken("claude", token);
+    const joined = diskService.join("claude", ROOM);
+    let diskApp = await buildApp({ service: diskService, port: PORT });
+    const headers = {
+      host: `127.0.0.1:${PORT}`,
+      authorization: `Bearer ${token}`,
+      "x-konfab-request-id": "12345678-1234-4234-8234-123456789abe",
+    };
+    const payload = {
+      session_id: joined.session_id,
+      recipient: "example.com",
+      data_description: "test",
+      reason: "test",
+    };
+    try {
+      const first = await diskApp.inject({
+        method: "POST",
+        url: "/agent/permission",
+        headers,
+        payload,
+      });
+      expect(first.statusCode).toBe(200);
+      await diskApp.close();
+      diskDb.close();
+      diskDb = openDatabase(filename);
+      diskService = new KonfabService(diskDb, {
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60000,
+        maxMessageChars: 1000,
+      });
+      diskApp = await buildApp({ service: diskService, port: PORT });
+      const replay = await diskApp.inject({
+        method: "POST",
+        url: "/agent/permission",
+        headers,
+        payload,
+      });
+      expect(replay.json()).toEqual(first.json());
+      expect(
+        diskDb
+          .prepare("SELECT COUNT(*) AS count FROM permission_requests")
+          .get(),
+      ).toEqual({ count: 1 });
+      diskDb.prepare("UPDATE bridge_receipts SET created_at = 0").run();
+      await diskApp.close();
+      diskDb.close();
+      diskDb = openDatabase(filename);
+      expect(
+        diskDb.prepare("SELECT COUNT(*) AS count FROM bridge_receipts").get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      await diskApp.close();
+      diskDb.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies every agent POST route for retry safety", () => {
+    const apiSource = readFileSync(
+      new URL("../../src/server/api/app.ts", import.meta.url),
+      "utf8",
+    );
+    const bridgeSource = readFileSync(
+      new URL("../../src/bridge/tools.ts", import.meta.url),
+      "utf8",
+    );
+    const allowlist = bridgeSource.slice(
+      bridgeSource.indexOf("const repeatSafe = new Set(["),
+      bridgeSource.indexOf("]).has(path)"),
+    );
+    const routes = [
+      ...apiSource.matchAll(/app\.post\("(\/agent\/[^"]+)"/g),
+    ].map((match) => match[1]);
+    expect(routes.length).toBeGreaterThan(0);
+    for (const route of routes) expect(allowlist).toContain(`"${route}"`);
   });
 
   it("lists the Phase 0 tools", async () => {
