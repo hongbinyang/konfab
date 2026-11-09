@@ -33,6 +33,7 @@ const defaultsSchema = z.object({
   turn_timeout_minutes: z.number().int().min(1).default(30),
   max_message_chars: z.number().int().min(1).default(20000),
   max_decision_chars: z.number().int().min(1).default(4000),
+  max_attachment_mb: z.number().int().min(1).max(100).default(10),
 });
 
 const configSchema = z.object({
@@ -72,6 +73,7 @@ defaults:
   turn_timeout_minutes: 30
   max_message_chars: 20000
   max_decision_chars: 4000
+  max_attachment_mb: 10
 
 agents:
   claude:

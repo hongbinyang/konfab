@@ -1,4 +1,7 @@
 import { Writable } from "node:stream";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/server/api/app.js";
@@ -13,6 +16,7 @@ describe("page API", () => {
   let service: KonfabService;
   let app: FastifyInstance;
   let cookie: string;
+  let attachmentDir: string;
 
   type Method = "GET" | "POST" | "PATCH" | "PUT";
   const call = (method: Method, url: string, payload?: object) =>
@@ -25,11 +29,14 @@ describe("page API", () => {
 
   beforeEach(async () => {
     db = openDatabase(":memory:");
+    attachmentDir = mkdtempSync(join(tmpdir(), "konfab-attachments-"));
     service = new KonfabService(db, {
       maxConsecutiveAgentMessages: 5,
       waitTimeoutSeconds: 1,
       turnTimeoutMs: 60_000,
       maxMessageChars: 1000,
+      attachmentDir,
+      maxAttachmentBytes: 1024,
     });
     service.ensureAgent("claude", "Claude");
     service.ensureAgent("codex", "Codex");
@@ -46,6 +53,7 @@ describe("page API", () => {
   afterEach(async () => {
     await app.close();
     db.close();
+    rmSync(attachmentDir, { recursive: true, force: true });
   });
 
   describe("sign-in", () => {
@@ -273,6 +281,122 @@ describe("page API", () => {
     expect(overview.rooms.every((r: { on_break: boolean }) => r.on_break)).toBe(
       true,
     );
+  });
+
+  it("stores authenticated attachments, sends image-only messages and exposes local metadata", async () => {
+    const room = service.createRoom("files", "", ["claude"]);
+    const session = service.join("claude", "files").session_id;
+    const uploadUrl = `/api/rooms/${room.id}/attachments?name=diagram.png`;
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2,
+    ]);
+    const denied = await app.inject({
+      method: "POST",
+      url: uploadUrl,
+      headers: { host: HOST, "content-type": "application/octet-stream" },
+      payload: png,
+    });
+    expect(denied.statusCode).toBe(401);
+    const upload = await app.inject({
+      method: "POST",
+      url: uploadUrl,
+      headers: {
+        host: HOST,
+        cookie,
+        "content-type": "application/octet-stream",
+      },
+      payload: png,
+    });
+    expect(upload.statusCode).toBe(201);
+    const attachment = upload.json();
+    expect(attachment.media_type).toBe("image/png");
+    expect(attachment.path).toMatch(/\.png$/);
+    expect(existsSync(attachment.path)).toBe(true);
+    const downloadUrl = `/api/rooms/${room.id}/attachments/${attachment.id}`;
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: downloadUrl,
+          headers: { host: HOST },
+        })
+      ).statusCode,
+    ).toBe(401);
+    const download = await call("GET", downloadUrl);
+    expect(download.headers["content-disposition"]).toContain("attachment;");
+    expect(download.rawPayload).toEqual(png);
+    const inline = await call("GET", `${downloadUrl}?inline=1`);
+    expect(inline.headers["content-disposition"]).toContain("inline;");
+    expect(
+      (
+        await call("POST", `/api/rooms/${room.id}/messages`, {
+          body: "",
+          attachment_ids: [attachment.id],
+        })
+      ).statusCode,
+    ).toBe(200);
+    const result = service.poll("claude", session, true);
+    expect(result.status).toBe("turn");
+    if (result.status !== "turn") throw new Error("Expected turn");
+    expect(result.messages[0]?.attachments?.[0]).toMatchObject({
+      path: attachment.path,
+      filename: "diagram.png",
+      size: png.length,
+    });
+    expect(
+      (await call("GET", `/api/rooms/${room.id}/search?q=diagram`)).json()
+        .messages[0].attachments[0].id,
+    ).toBe(attachment.id);
+    expect((await call("GET", `/api/rooms/${room.id}/export`)).body).toContain(
+      "[diagram.png](file://",
+    );
+    expect(
+      (
+        await call("POST", `/api/rooms/${room.id}/messages`, {
+          body: "",
+          attachment_ids: [attachment.id],
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+
+  it("limits upload sizes and never serves SVG inline", async () => {
+    const room = service.createRoom("safe-files", "", ["claude"]);
+    const headers = {
+      host: HOST,
+      cookie,
+      "content-type": "application/octet-stream",
+    };
+    const tooLarge = await app.inject({
+      method: "POST",
+      url: `/api/rooms/${room.id}/attachments?name=large`,
+      headers,
+      payload: Buffer.alloc(1025),
+    });
+    expect(tooLarge.statusCode).toBe(413);
+    expect(tooLarge.json().message).toContain("size limit");
+    const svg = await app.inject({
+      method: "POST",
+      url: `/api/rooms/${room.id}/attachments?name=picture.svg`,
+      headers,
+      payload: Buffer.from("<svg onload=alert(1) />"),
+    });
+    const attachment = svg.json();
+    expect(attachment.media_type).toBe("application/octet-stream");
+    expect(attachment.path).toMatch(/\.svg$/);
+    const response = await call(
+      "GET",
+      `/api/rooms/${room.id}/attachments/${attachment.id}?inline=1`,
+    );
+    expect(response.headers["content-disposition"]).toContain("attachment;");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/rooms/${room.id}/attachments/${attachment.id}`,
+      headers: { host: HOST, cookie },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(existsSync(attachment.path)).toBe(false);
   });
 
   it("limits decision confirmation and revisions to the authenticated lead", async () => {

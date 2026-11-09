@@ -74,7 +74,10 @@ const memberParams = z.object({
 const roleBody = z.object({ role: z.string(), can_edit: z.boolean() });
 const membersBody = z.object({ members: z.array(z.string()) });
 const pauseBody = z.object({ paused: z.boolean() });
-const userMessageBody = z.object({ body: z.string() });
+const userMessageBody = z.object({
+  body: z.string(),
+  attachment_ids: z.array(z.string().uuid()).max(20).default([]),
+});
 const decisionBody = z.object({ decision: z.enum(["approved", "denied"]) });
 const loginQuery = z.object({ code: z.string().min(1) });
 const searchQuery = z.object({ q: z.string().trim().min(1).max(200) });
@@ -114,6 +117,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       : false,
     forceCloseConnections: true,
   });
+
+  app.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer" },
+    (_request, body, done) => done(null, body),
+  );
 
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const allowedOrigins = new Set(
@@ -155,6 +164,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         .code(error.statusCode)
         .send({ code: error.code, message: error.message });
     }
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 413
+    )
+      return reply.code(413).send({
+        code: "attachment_too_large",
+        message: "File exceeds the attachment size limit",
+      });
     if (error instanceof ZodError) {
       return reply
         .code(400)
@@ -423,10 +442,68 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.post("/api/rooms/:id/messages", async (request) => {
     const { id } = idParams.parse(request.params);
-    return service.postUserMessage(
-      id,
-      userMessageBody.parse(request.body).body,
-    );
+    const body = userMessageBody.parse(request.body);
+    return service.postUserMessage(id, body.body, body.attachment_ids);
+  });
+
+  app.post(
+    "/api/rooms/:id/attachments",
+    { bodyLimit: service.maxAttachmentBytes },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const { name } = z
+        .object({ name: z.string().min(1).max(1000) })
+        .parse(request.query);
+      if (!Buffer.isBuffer(request.body))
+        throw new KonfabError("invalid_attachment", 400, "Expected file data");
+      return reply
+        .code(201)
+        .send(service.uploadAttachment(id, name, request.body));
+    },
+  );
+
+  app.get(
+    "/api/rooms/:id/attachments/:attachmentId",
+    async (request, reply) => {
+      const { id, attachmentId } = z
+        .object({
+          id: z.coerce.number().int().positive(),
+          attachmentId: z.string().uuid(),
+        })
+        .parse(request.params);
+      const { inline } = z
+        .object({ inline: z.enum(["1"]).optional() })
+        .parse(request.query);
+      const attachment = service.getAttachment(id, attachmentId);
+      const allowInline =
+        inline === "1" &&
+        ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+          attachment.media_type,
+        );
+      const filename = encodeURIComponent(attachment.filename).replace(
+        /['()*]/g,
+        (value) => `%${value.charCodeAt(0).toString(16).toUpperCase()}`,
+      );
+      return reply
+        .header("Content-Type", attachment.media_type)
+        .header(
+          "Content-Disposition",
+          `${allowInline ? "inline" : "attachment"}; filename*=UTF-8''${filename}`,
+        )
+        .header("X-Content-Type-Options", "nosniff")
+        .send(attachment.data);
+    },
+  );
+
+  app.delete("/api/rooms/:id/attachments/:attachmentId", async (request) => {
+    const { id, attachmentId } = z
+      .object({
+        id: z.coerce.number().int().positive(),
+        attachmentId: z.string().uuid(),
+      })
+      .parse(request.params);
+    service.removeStagedAttachment(id, attachmentId);
+    return { ok: true };
   });
 
   app.get("/api/rooms/:id/search", async (request) => {

@@ -286,3 +286,16 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | DL6 | SHOULD | Decisions are included in the room export. |
 
 **Done when** the user confirms an agent's proposal, revises it later, and each agent's next turn shows only the revised decision.
+
+
+### V5. Local file attachments
+
+| ID | Priority | Requirement |
+|---|---|---|
+| AT1 | MUST | The lead can paste an image, drop files, or use an attachment button, preview and remove files, then send with or without text. |
+| AT2 | MUST | Files remain local under the Konfab data directory, with a configurable per-file limit of 10 MB by default. |
+| AT3 | MUST | Messages show safe raster previews and downloadable files; filenames are searchable and exports link to local files. |
+| AT4 | MUST | Room members receive attachment paths, detected type, and size in message metadata; file contents are not embedded in the bridge messages. |
+| AT5 | MUST | Only the lead can upload attachments. Downloads require the authenticated page, and unsafe types are downloads rather than inline content. |
+
+**Done when** a pasted image and an attached file survive sending and reload, and a room member can locate each file.

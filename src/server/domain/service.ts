@@ -1,5 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Db } from "../db/index.js";
 import { currentEnd, isWithinHours, nextStart, type Hours } from "./hours.js";
 
@@ -27,8 +30,18 @@ export interface ServiceOptions {
   liveWindowMs?: number;
   maxTurnChars?: number;
   maxDecisionChars?: number;
+  maxAttachmentBytes?: number;
+  attachmentDir?: string;
   hoursFor?: (agentId: string) => Hours | undefined;
   preApprovals?: readonly PreApproval[];
+}
+
+export interface AttachmentView {
+  id: string;
+  filename: string;
+  media_type: string;
+  size: number;
+  path: string;
 }
 
 export interface MessageView {
@@ -37,6 +50,7 @@ export interface MessageView {
   sender_id: string;
   body: string;
   created_at: number;
+  attachments?: AttachmentView[];
 }
 
 export type WaitResult =
@@ -574,7 +588,7 @@ export class KonfabService {
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
-      messages,
+      messages: this.withAttachments(room.id, messages),
       activity: this.activity(room.id),
       permissions: this.roomPermissions(room.id, messages[0]?.created_at ?? 0),
       decisions: this.decisions(room.id),
@@ -653,7 +667,10 @@ export class KonfabService {
       topic: room.topic,
       rules: this.instructionsFor(room.id, agentId),
       members: this.memberIds(room.id),
-      recent_messages: this.recentMessages(room.id, 20),
+      recent_messages: this.withAttachments(
+        room.id,
+        this.recentMessages(room.id, 20),
+      ),
     };
   }
 
@@ -838,11 +855,202 @@ export class KonfabService {
         beforeId ?? Number.MAX_SAFE_INTEGER,
         limit,
       ) as MessageView[];
-    return { messages: rows.reverse() };
+    return { messages: this.withAttachments(session.room_id, rows.reverse()) };
   }
 
-  postUserMessage(ref: RoomRef, body: string) {
-    this.validateBody(body);
+  get maxAttachmentBytes(): number {
+    return this.options.maxAttachmentBytes ?? 10 * 1024 * 1024;
+  }
+
+  private attachmentPath(
+    roomId: number,
+    id: string,
+    filename: string,
+    mediaType: string,
+  ): string {
+    if (
+      !this.options.attachmentDir ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)
+    )
+      throw new KonfabError(
+        "attachment_not_found",
+        404,
+        "Attachment not found",
+      );
+    const imageExtensions: Record<string, string> = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/gif": "gif",
+      "image/webp": "webp",
+    };
+    const original = /\.([a-z0-9]{1,10})$/i.exec(filename)?.[1]?.toLowerCase();
+    const extension = imageExtensions[mediaType] ?? original;
+    return join(
+      resolve(this.options.attachmentDir),
+      String(roomId),
+      `${id}${extension ? `.${extension}` : ""}`,
+    );
+  }
+
+  uploadAttachment(
+    ref: RoomRef,
+    filename: string,
+    data: Buffer,
+  ): AttachmentView {
+    const room = this.room(ref);
+    if (room.archived_at !== null)
+      throw new KonfabError("room_archived", 409, "Room is archived");
+    if (data.length > this.maxAttachmentBytes)
+      throw new KonfabError(
+        "attachment_too_large",
+        413,
+        "File exceeds the attachment size limit",
+      );
+    if (data.length === 0)
+      throw new KonfabError("empty_attachment", 400, "File is empty");
+    const name =
+      Array.from(filename, (char) =>
+        char === "/" ||
+        char === "\\" ||
+        char.charCodeAt(0) < 32 ||
+        char.charCodeAt(0) === 127 ||
+        (char.length === 1 &&
+          char.charCodeAt(0) >= 0xd800 &&
+          char.charCodeAt(0) <= 0xdfff)
+          ? "_"
+          : char,
+      )
+        .slice(0, 255)
+        .join("") || "attachment";
+    const type = data
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      ? "image/png"
+      : data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
+        ? "image/jpeg"
+        : ["GIF87a", "GIF89a"].includes(data.subarray(0, 6).toString("ascii"))
+          ? "image/gif"
+          : data.subarray(0, 4).toString("ascii") === "RIFF" &&
+              data.subarray(8, 12).toString("ascii") === "WEBP"
+            ? "image/webp"
+            : "application/octet-stream";
+    const id = randomUUID();
+    const path = this.attachmentPath(room.id, id, name, type);
+    mkdirSync(join(resolve(this.options.attachmentDir!), String(room.id)), {
+      recursive: true,
+      mode: 0o700,
+    });
+    writeFileSync(path, data, { flag: "wx", mode: 0o600 });
+    try {
+      this.db
+        .prepare(
+          "INSERT INTO attachments (id, room_id, filename, media_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(id, room.id, name, type, data.length, this.now());
+    } catch (error) {
+      unlinkSync(path);
+      throw error;
+    }
+    return { id, filename: name, media_type: type, size: data.length, path };
+  }
+
+  getAttachment(ref: RoomRef, id: string): AttachmentView & { data: Buffer } {
+    const room = this.room(ref);
+    const row = this.db
+      .prepare(
+        "SELECT id, filename, media_type, size FROM attachments WHERE id = ? AND room_id = ?",
+      )
+      .get(id, room.id) as Omit<AttachmentView, "path"> | undefined;
+    if (!row)
+      throw new KonfabError(
+        "attachment_not_found",
+        404,
+        "Attachment not found",
+      );
+    const path = this.attachmentPath(room.id, id, row.filename, row.media_type);
+    try {
+      return { ...row, path, data: readFileSync(path) };
+    } catch {
+      throw new KonfabError(
+        "attachment_not_found",
+        404,
+        "Attachment file not found",
+      );
+    }
+  }
+
+  removeStagedAttachment(ref: RoomRef, id: string): void {
+    const room = this.room(ref);
+    const staged = this.db
+      .prepare(
+        "SELECT filename, media_type FROM attachments WHERE id = ? AND room_id = ? AND message_id IS NULL",
+      )
+      .get(id, room.id) as { filename: string; media_type: string } | undefined;
+    if (!staged)
+      throw new KonfabError(
+        "attachment_not_found",
+        404,
+        "Staged attachment not found",
+      );
+    try {
+      unlinkSync(
+        this.attachmentPath(room.id, id, staged.filename, staged.media_type),
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    this.db
+      .prepare(
+        "DELETE FROM attachments WHERE id = ? AND room_id = ? AND message_id IS NULL",
+      )
+      .run(id, room.id);
+  }
+
+  private withAttachments(
+    roomId: number,
+    messages: MessageView[],
+  ): MessageView[] {
+    if (!messages.length) return messages;
+    const ids = messages.map((message) => message.id);
+    const rows = this.db
+      .prepare(
+        `SELECT id, message_id, filename, media_type, size FROM attachments WHERE room_id = ? AND message_id IN (${ids.map(() => "?").join(",")}) ORDER BY rowid`,
+      )
+      .all(roomId, ...ids) as (Omit<AttachmentView, "path"> & {
+      message_id: number;
+    })[];
+    const byMessage = new Map<number, AttachmentView[]>();
+    for (const { message_id, ...row } of rows) {
+      const list = byMessage.get(message_id) ?? [];
+      list.push({
+        ...row,
+        path: this.attachmentPath(roomId, row.id, row.filename, row.media_type),
+      });
+      byMessage.set(message_id, list);
+    }
+    return messages.map((message) => ({
+      ...message,
+      attachments: byMessage.get(message.id) ?? [],
+    }));
+  }
+
+  postUserMessage(ref: RoomRef, body: string, attachmentIds: string[] = []) {
+    if (body.trim() || attachmentIds.length === 0) this.validateBody(body);
+    else if (body.length > this.options.maxMessageChars)
+      throw new KonfabError(
+        "message_too_long",
+        413,
+        "Message exceeds size limit",
+      );
+    if (
+      attachmentIds.length > 20 ||
+      new Set(attachmentIds).size !== attachmentIds.length
+    )
+      throw new KonfabError(
+        "invalid_attachments",
+        400,
+        "Choose up to 20 distinct attachments",
+      );
     const room = this.room(ref);
     if (room.archived_at !== null) {
       throw new KonfabError("room_archived", 409, "This room is archived");
@@ -857,6 +1065,19 @@ export class KonfabService {
           : members;
 
       const id = this.insertMessage(room.id, "user", "user", body, targets);
+      for (const attachmentId of attachmentIds) {
+        const bound = this.db
+          .prepare(
+            "UPDATE attachments SET message_id = ? WHERE id = ? AND room_id = ? AND message_id IS NULL",
+          )
+          .run(id, attachmentId, room.id);
+        if (!bound.changes)
+          throw new KonfabError(
+            "invalid_attachment",
+            400,
+            "Attachment is unavailable or already sent",
+          );
+      }
       this.db
         .prepare("UPDATE rooms SET agent_streak = 0 WHERE id = ?")
         .run(room.id);
@@ -1291,11 +1512,11 @@ export class KonfabService {
     const rows = this.db
       .prepare(
         `SELECT id, sender_type, sender_id, body, created_at FROM messages
-         WHERE room_id = ? AND body LIKE ? ESCAPE '\\'
+         WHERE room_id = ? AND (body LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = messages.id AND a.filename LIKE ? ESCAPE '\\'))
          ORDER BY id DESC LIMIT ?`,
       )
-      .all(room.id, pattern, limit) as MessageView[];
-    return rows.reverse();
+      .all(room.id, pattern, pattern, limit) as MessageView[];
+    return this.withAttachments(room.id, rows.reverse());
   }
 
   activity(ref: RoomRef, beforeId?: number, limit = 200) {
@@ -1351,7 +1572,14 @@ export class KonfabService {
         const time = new Date(row.created_at).toISOString();
         return {
           at: row.created_at,
-          text: `## ${sender} (${time})\n\n${row.body}`,
+          text:
+            `## ${sender} (${time})\n\n${row.body}` +
+            this.withAttachments(room.id, [row])[0]!
+              .attachments!.map(
+                (a) =>
+                  `\n\n[${a.filename.replaceAll("[", "_").replaceAll("]", "_").replaceAll("\\", "_")}](${pathToFileURL(a.path).href})`,
+              )
+              .join(""),
         };
       }),
       ...this.listPasses(room.id, 0).map((pass) => ({
@@ -1433,6 +1661,37 @@ export class KonfabService {
 
   /** Applies time-based rules. Called periodically by the server. */
   tick(): void {
+    if (this.options.attachmentDir) {
+      const stale = this.db
+        .prepare(
+          "SELECT id, room_id, filename, media_type FROM attachments WHERE message_id IS NULL AND created_at < ?",
+        )
+        .all(this.now() - 24 * 60 * 60_000) as {
+        id: string;
+        room_id: number;
+        filename: string;
+        media_type: string;
+      }[];
+      for (const item of stale) {
+        try {
+          unlinkSync(
+            this.attachmentPath(
+              item.room_id,
+              item.id,
+              item.filename,
+              item.media_type,
+            ),
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
+        }
+        this.db
+          .prepare(
+            "DELETE FROM attachments WHERE id = ? AND message_id IS NULL",
+          )
+          .run(item.id);
+      }
+    }
     const cutoff = this.now() - this.options.turnTimeoutMs;
     this.db.transaction(() => {
       const expired = this.db
@@ -1936,7 +2195,7 @@ export class KonfabService {
       room: room.name,
       topic: room.topic,
       rules: this.instructionsFor(room.id, turn.agent_id),
-      messages,
+      messages: this.withAttachments(room.id, messages),
       truncated,
       wait_seconds: this.options.waitTimeoutSeconds,
     };
