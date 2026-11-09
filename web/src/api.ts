@@ -83,6 +83,12 @@ export interface RoomAgent {
   display_name: string;
   state: AgentState;
   bridge_outdated?: boolean;
+  working?: {
+    detail: string;
+    updated_at: number;
+    stale_after_ms: number;
+    stale: boolean;
+  } | null;
   closes_at: number | null;
   join_prompt: string;
   role: string;

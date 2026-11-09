@@ -217,6 +217,10 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY(agent_id, request_key)
   );
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN working_detail TEXT;
+  ALTER TABLE sessions ADD COLUMN working_updated_at INTEGER;
+  `,
 ];
 
 export function openDatabase(path: string): Db {
