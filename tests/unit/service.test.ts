@@ -266,11 +266,11 @@ describe("KonfabService", () => {
     };
   }
 
-  it("allows twenty consecutive messages, then waits for the lead", () => {
+  it("allows fifty consecutive messages, then waits for the lead", () => {
     const sessions = setupParticipants();
     service.postUserMessage("participants", "@first start");
     let agent: "first" | "second" = "first";
-    for (let count = 0; count < 20; count += 1) {
+    for (let count = 0; count < 50; count += 1) {
       const other: "first" | "second" = agent === "first" ? "second" : "first";
       const turn = expectTurn(service.poll(agent, sessions[agent], true));
       service.postAgentMessage(

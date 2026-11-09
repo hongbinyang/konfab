@@ -60,7 +60,7 @@ Record the results in the table below.
 | **T1 Connection**  | Post `Hello`. Both agents should reply in order.                                                                                                        |        |
 | **Mentions**       | Post `@codex say something`. Only Codex should reply.                                                                                                   |        |
 | **Agent to agent** | Post `@claude ask @codex one question`. Both should take a turn.                                                                                        |        |
-| **Streak limit**   | Ask both to keep mentioning each other. The room should stop after 20 agent messages.                                                                   |        |
+| **Streak limit**   | Ask both to keep mentioning each other. The room should stop after 50 agent messages.                                                                   |        |
 | **Lead mention**   | Ask an agent to ask you a question with `@lead`. It should be highlighted, and no agent should take a turn until you reply.                             |        |
 | **Code review**    | Ask both agents to review `average.py` and discuss what they find.                                                                                      |        |
 | **Two rooms**      | Join a second room with new conversations. Each room should stay separate.                                                                              |        |
