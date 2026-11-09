@@ -12,6 +12,7 @@ import {
   request,
   UnauthorizedError,
   type ActivityEvent,
+  type Decision,
   type AgentState,
   type Overview,
   type RoomAgent,
@@ -639,7 +640,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               )}
             </li>
           ) : (
-            <li key={`message-${item.id}`}>
+            <li id={`message-${item.id}`} key={`message-${item.id}`}>
               <span className="sender">
                 {item.sender_type === "user"
                   ? "You (Lead)"
@@ -649,6 +650,26 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               <div className="body">
                 <Markdown>{item.body}</Markdown>
               </div>
+              {!room.archived && (
+                <button
+                  type="button"
+                  className="quiet"
+                  disabled={
+                    item.body.trim().length === 0 ||
+                    item.body.trim().length > 2000
+                  }
+                  onClick={() =>
+                    void act(() =>
+                      request(`/api/rooms/${room.id}/decisions`, {
+                        method: "POST",
+                        body: { body: item.body, source_message_id: item.id },
+                      }),
+                    )
+                  }
+                >
+                  Mark as decision
+                </button>
+              )}
             </li>
           ),
         )}
@@ -766,6 +787,21 @@ function Panel({
                 <dd>{permission.data_description}</dd>
                 <dt>Reason</dt>
                 <dd>{permission.reason}</dd>
+                {permission.data_type === "code_push" &&
+                  permission.push_repository && (
+                    <>
+                      <dt>Repository</dt>
+                      <dd>{permission.push_repository}</dd>
+                      <dt>Branch</dt>
+                      <dd>{permission.push_branch}</dd>
+                      <dt>Commits</dt>
+                      <dd>
+                        <code>
+                          {permission.push_base}..{permission.push_head}
+                        </code>
+                      </dd>
+                    </>
+                  )}
               </dl>
               <div className="row">
                 {(["approved", "denied"] as const).map((decision) => (
@@ -790,8 +826,202 @@ function Panel({
           ))}
         </section>
       )}
+      {room && <Decisions key={room.room.id} room={room} act={act} />}
       {room && <Agents overview={overview} room={room} act={act} />}
     </aside>
+  );
+}
+
+function Decisions({ room, act }: { room: RoomState; act: Act }) {
+  const [body, setBody] = useState("");
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!body.trim()) return;
+    void act(async () => {
+      await request(`/api/rooms/${room.room.id}/decisions`, {
+        method: "POST",
+        body: { body },
+      });
+      setBody("");
+    });
+  };
+  return (
+    <section aria-label="Decisions">
+      <h2>Decisions</h2>
+      {!room.room.archived && (
+        <form className="stack" onSubmit={submit}>
+          <label>
+            New decision
+            <textarea
+              rows={2}
+              maxLength={2000}
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={!body.trim()}>
+            Add decision
+          </button>
+        </form>
+      )}
+      {room.decisions.length === 0 && <p className="muted">No decisions yet</p>}
+      {room.decisions.map((decision) => (
+        <DecisionCard
+          key={decision.id}
+          decision={decision}
+          roomId={room.room.id}
+          archived={room.room.archived}
+          act={act}
+        />
+      ))}
+    </section>
+  );
+}
+
+function DecisionCard({
+  decision,
+  roomId,
+  archived,
+  act,
+}: {
+  decision: Decision;
+  roomId: number;
+  archived: boolean;
+  act: Act;
+}) {
+  const [revising, setRevising] = useState(false);
+  const [draft, setDraft] = useState(decision.body);
+  const [versions, setVersions] = useState<
+    { version: number; body: string; created_at: number }[] | null
+  >(null);
+  const path = `/api/rooms/${roomId}/decisions/${decision.id}`;
+  const change = (
+    action: "confirm" | "reject" | "revise" | "retire",
+    body?: string,
+  ) =>
+    void act(async () => {
+      await request(path, {
+        method: "POST",
+        body: { action, ...(body ? { body } : {}) },
+      });
+      setRevising(false);
+      setVersions(null);
+    });
+  return (
+    <div className="card decision-card">
+      <p>
+        <strong>
+          {decision.status === "confirmed"
+            ? "Confirmed"
+            : decision.status === "proposed"
+              ? `Proposed by ${decision.proposer}`
+              : decision.status === "rejected"
+                ? "Rejected"
+                : "Retired"}
+        </strong>{" "}
+        · v{decision.version}
+      </p>
+      <p>{decision.body}</p>
+      {decision.source_message_id !== null && (
+        <a href={`#message-${decision.source_message_id}`}>Source message</a>
+      )}
+      {!archived && decision.status === "proposed" && (
+        <div className="row">
+          <button type="button" onClick={() => change("confirm")}>
+            Confirm
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => change("reject")}
+          >
+            Reject
+          </button>
+        </div>
+      )}
+      {!archived &&
+        decision.status === "confirmed" &&
+        (revising ? (
+          <form
+            className="stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              change("revise", draft);
+            }}
+          >
+            <label>
+              Revised decision
+              <textarea
+                value={draft}
+                maxLength={2000}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </label>
+            <div className="row">
+              <button type="submit" disabled={!draft.trim()}>
+                Save
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setRevising(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="row">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                setDraft(decision.body);
+                setRevising(true);
+              }}
+            >
+              Revise
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => change("retire")}
+            >
+              Retire
+            </button>
+          </div>
+        ))}
+      {decision.version > 1 && (
+        <details
+          onToggle={(event) => {
+            if (event.currentTarget.open && !versions)
+              void act(async () => {
+                const result = await request<{
+                  versions: {
+                    version: number;
+                    body: string;
+                    created_at: number;
+                  }[];
+                }>(`${path}/versions`);
+                setVersions(result.versions);
+              });
+          }}
+        >
+          <summary>Version history</summary>
+          <ol>
+            {versions?.map((version) => (
+              <li key={version.version}>
+                v{version.version}
+                {version.version !== decision.version
+                  ? " (superseded)"
+                  : " (current)"}
+                : {version.body}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+    </div>
   );
 }
 

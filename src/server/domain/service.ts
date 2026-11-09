@@ -26,6 +26,7 @@ export interface ServiceOptions {
   maxMessageChars: number;
   liveWindowMs?: number;
   maxTurnChars?: number;
+  maxDecisionChars?: number;
   hoursFor?: (agentId: string) => Hours | undefined;
   preApprovals?: readonly PreApproval[];
 }
@@ -47,6 +48,11 @@ export type WaitResult =
       rules: string;
       messages: MessageView[];
       truncated: boolean;
+      decisions: DecisionView[];
+      decisions_total: number;
+      decisions_truncated: boolean;
+      decisions_overflow_hint?: string;
+      decision_updates: { id: number; status: string }[];
       wait_seconds: number;
     }
   | { status: "idle"; wait_seconds: number }
@@ -86,6 +92,18 @@ export interface PermissionView {
   push_branch: string | null;
   push_base: string | null;
   push_head: string | null;
+}
+
+export interface DecisionView {
+  id: number;
+  room_id: number;
+  proposer: string;
+  source_message_id: number | null;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+  created_at: number;
+  updated_at: number;
+  version: number;
+  body: string;
 }
 
 export interface PassView {
@@ -154,6 +172,7 @@ interface TurnRow {
   reason: "user" | "agent_mention";
   state: string;
   last_message_id: number | null;
+  decision_snapshot_event_id: number;
   result_message_id: number | null;
   started_at: number | null;
 }
@@ -161,6 +180,7 @@ interface TurnRow {
 interface MemberRow {
   agent_id: string;
   last_seen_message_id: number;
+  decision_seen_event_id: number;
 }
 
 export type RoomRef = number | string;
@@ -185,6 +205,7 @@ const RULES = [
   "other than Anthropic, OpenAI, Meta, or xAI, call request_permission and wait for approval.",
   "Pushes to a GitHub repo also need request_permission, with data_type code_push and the repository, branch, and full base and head commit IDs.",
   "Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.",
+  "Confirmed decisions reflect the lead's earlier choices; follow the lead's current instructions and propose a change rather than silently acting against a decision.",
   "When you change code, commit it to your own git branch.",
   "If you know you are low on or out of allowance, call report_status.",
   "When your work is done, call post_message or pass_turn, then call wait_for_turn again.",
@@ -556,6 +577,7 @@ export class KonfabService {
       messages,
       activity: this.activity(room.id),
       permissions: this.roomPermissions(room.id, messages[0]?.created_at ?? 0),
+      decisions: this.decisions(room.id),
       passes: this.listPasses(room.id, messages[0]?.created_at ?? 0),
     };
   }
@@ -1017,6 +1039,208 @@ export class KonfabService {
       .all(roomId, since) as PermissionView[];
   }
 
+  decisions(
+    ref: RoomRef,
+    options: { afterId?: number; limit?: number; confirmedOnly?: boolean } = {},
+  ): DecisionView[] {
+    const room = this.room(ref);
+    return this.db
+      .prepare(
+        `SELECT d.id, d.room_id, d.proposer, d.source_message_id, d.status, d.created_at, d.updated_at, v.version, v.body FROM decisions d JOIN decision_versions v ON v.decision_id = d.id AND v.version = (SELECT MAX(version) FROM decision_versions WHERE decision_id = d.id) WHERE d.room_id = ? AND d.id > ? AND (? = 0 OR d.status = 'confirmed') ORDER BY d.id LIMIT ?`,
+      )
+      .all(
+        room.id,
+        options.afterId ?? 0,
+        options.confirmedOnly ? 1 : 0,
+        options.limit ?? Number.MAX_SAFE_INTEGER,
+      ) as DecisionView[];
+  }
+
+  decisionVersions(ref: RoomRef, id: number) {
+    const room = this.room(ref);
+    const decision = this.db
+      .prepare("SELECT id FROM decisions WHERE id = ? AND room_id = ?")
+      .get(id, room.id);
+    if (!decision)
+      throw new KonfabError("decision_not_found", 404, "Unknown decision");
+    return this.db
+      .prepare(
+        "SELECT version, body, created_at FROM decision_versions WHERE decision_id = ? ORDER BY version DESC",
+      )
+      .all(id);
+  }
+
+  createDecision(
+    ref: RoomRef,
+    body: string,
+    proposer: string,
+    sourceMessageId?: number,
+    proposalKey?: string,
+    confirmedByLead = false,
+  ) {
+    const room = this.room(ref);
+    if (room.archived_at !== null)
+      throw new KonfabError("room_archived", 409, "Room is archived");
+    const text = body.trim();
+    if (!text || text.length > 2000)
+      throw new KonfabError(
+        "invalid_decision",
+        400,
+        "Decision must contain 1 to 2000 characters",
+      );
+    if (
+      sourceMessageId &&
+      !this.db
+        .prepare("SELECT 1 FROM messages WHERE id = ? AND room_id = ?")
+        .get(sourceMessageId, room.id)
+    )
+      throw new KonfabError("message_not_found", 404, "Unknown room message");
+    const id = this.db.transaction(() => {
+      if (proposalKey) {
+        const existing = this.db
+          .prepare(
+            "SELECT id, room_id, proposer FROM decisions WHERE proposal_key = ?",
+          )
+          .get(proposalKey) as
+          { id: number; room_id: number; proposer: string } | undefined;
+        if (existing) {
+          if (existing.room_id !== room.id || existing.proposer !== proposer)
+            throw new KonfabError(
+              "invalid_proposal",
+              409,
+              "Proposal key already used",
+            );
+          return existing.id;
+        }
+      }
+      const now = this.now();
+      const result = this.db
+        .prepare(
+          "INSERT INTO decisions (room_id, proposer, proposal_key, source_message_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          room.id,
+          proposer,
+          proposalKey ?? null,
+          sourceMessageId ?? null,
+          confirmedByLead ? "confirmed" : "proposed",
+          now,
+          now,
+        );
+      const id = Number(result.lastInsertRowid);
+      this.db
+        .prepare(
+          "INSERT INTO decision_versions (decision_id, version, body, created_at) VALUES (?, 1, ?, ?)",
+        )
+        .run(id, text, now);
+      this.logEvent(
+        "decision_created",
+        room.id,
+        confirmedByLead ? null : proposer,
+        { decision_id: id },
+      );
+      return id;
+    })();
+    this.notify();
+    return this.decisions(room.id).find((item) => item.id === id)!;
+  }
+
+  proposeDecision(
+    agentId: string,
+    sessionId: string,
+    body: string,
+    proposalKey: string,
+    sourceMessageId?: number,
+  ) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    this.requireMember(session.room_id, agentId);
+    return this.createDecision(
+      session.room_id,
+      body,
+      agentId,
+      sourceMessageId,
+      proposalKey,
+    );
+  }
+
+  readDecisions(
+    agentId: string,
+    sessionId: string,
+    afterId?: number,
+    limit = 50,
+  ) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    this.requireMember(session.room_id, agentId);
+    const items = this.decisions(session.room_id, {
+      afterId,
+      limit: limit + 1,
+      confirmedOnly: true,
+    });
+    return {
+      decisions: items.slice(0, limit),
+      next_after_id:
+        items.length > limit ? (items[limit - 1]?.id ?? null) : null,
+    };
+  }
+
+  updateDecision(
+    ref: RoomRef,
+    id: number,
+    action: "confirm" | "reject" | "revise" | "retire",
+    body?: string,
+  ) {
+    const room = this.room(ref);
+    if (room.archived_at !== null)
+      throw new KonfabError("room_archived", 409, "Room is archived");
+    this.db.transaction(() => {
+      const row = this.db
+        .prepare("SELECT * FROM decisions WHERE id = ? AND room_id = ?")
+        .get(id, room.id) as { status: string } | undefined;
+      if (!row)
+        throw new KonfabError("decision_not_found", 404, "Unknown decision");
+      if (
+        ((action === "confirm" || action === "reject") &&
+          row.status !== "proposed") ||
+        ((action === "revise" || action === "retire") &&
+          row.status !== "confirmed")
+      )
+        throw new KonfabError(
+          "invalid_decision_state",
+          409,
+          "Action is not valid for this decision",
+        );
+      const now = this.now();
+      if (action === "revise") {
+        const text = body?.trim() ?? "";
+        if (!text || text.length > 2000)
+          throw new KonfabError(
+            "invalid_decision",
+            400,
+            "Decision must contain 1 to 2000 characters",
+          );
+        this.db
+          .prepare(
+            "INSERT INTO decision_versions (decision_id, version, body, created_at) SELECT ?, COALESCE(MAX(version), 0) + 1, ?, ? FROM decision_versions WHERE decision_id = ?",
+          )
+          .run(id, text, now, id);
+      }
+      const status =
+        action === "confirm"
+          ? "confirmed"
+          : action === "reject"
+            ? "rejected"
+            : action === "retire"
+              ? "retired"
+              : "confirmed";
+      this.db
+        .prepare("UPDATE decisions SET status = ?, updated_at = ? WHERE id = ?")
+        .run(status, now, id);
+      this.logEvent("decision_" + action, room.id, null, { decision_id: id });
+    })();
+    this.notify();
+    return this.decisions(room.id).find((item) => item.id === id)!;
+  }
+
   // Allowance reports
 
   reportStatus(
@@ -1138,6 +1362,26 @@ export class KonfabService {
       })),
     ].sort((a, b) => a.at - b.at);
     sections.push(...entries.map((entry) => entry.text));
+    const decisions = this.decisions(room.id);
+    if (decisions.length)
+      sections.push(
+        "## Decisions",
+        ...decisions.map((decision) => {
+          const versions = this.decisionVersions(room.id, decision.id) as {
+            version: number;
+            body: string;
+          }[];
+          return (
+            `### Decision ${decision.id} (${decision.status})\n\n` +
+            versions
+              .map(
+                (v) =>
+                  `Version ${v.version}${v.version === decision.version ? "" : " (superseded)"}: ${v.body}`,
+              )
+              .join("\n\n")
+          );
+        }),
+      );
     const activity = this.activity(
       room.id,
       undefined,
@@ -1590,12 +1834,24 @@ export class KonfabService {
         "SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE room_id = ?",
       )
       .get(roomId) as { id: number };
+    const latestEvent = this.db
+      .prepare(
+        "SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE room_id = ?",
+      )
+      .get(roomId) as { id: number };
     this.db
       .prepare(
-        `UPDATE turns SET state = 'active', session_id = ?, last_message_id = ?, started_at = ?, first_started_at = COALESCE(first_started_at, ?)
+        `UPDATE turns SET state = 'active', session_id = ?, last_message_id = ?, started_at = ?, first_started_at = COALESCE(first_started_at, ?), decision_snapshot_event_id = ?
          WHERE id = ?`,
       )
-      .run(sessionId, latest.id, this.now(), this.now(), turnId);
+      .run(
+        sessionId,
+        latest.id,
+        this.now(),
+        this.now(),
+        latestEvent.id,
+        turnId,
+      );
     const turn = this.db
       .prepare("SELECT * FROM turns WHERE id = ?")
       .get(turnId) as TurnRow;
@@ -1607,7 +1863,7 @@ export class KonfabService {
   private buildTurn(room: RoomRow, turn: TurnRow): WaitResult {
     const member = this.db
       .prepare(
-        "SELECT agent_id, last_seen_message_id FROM room_members WHERE room_id = ? AND agent_id = ?",
+        "SELECT agent_id, last_seen_message_id, decision_seen_event_id FROM room_members WHERE room_id = ? AND agent_id = ?",
       )
       .get(room.id, turn.agent_id) as MemberRow;
     const unseen = this.db
@@ -1638,8 +1894,44 @@ export class KonfabService {
       messages.unshift(message);
     }
 
+    const currentDecisions = this.decisions(room.id, { confirmedOnly: true });
+    const decisions: DecisionView[] = [];
+    let decisionChars = 0;
+    for (const item of [...currentDecisions].sort(
+      (a, b) => b.updated_at - a.updated_at || b.id - a.id,
+    )) {
+      if (
+        decisionChars + item.body.length >
+        (this.options.maxDecisionChars ?? 4000)
+      )
+        break;
+      decisions.push(item);
+      decisionChars += item.body.length;
+    }
+    decisions.reverse();
+    const decisionUpdates = this.db
+      .prepare(
+        `SELECT d.id, CASE e.type WHEN 'decision_confirm' THEN 'confirmed' ELSE 'rejected' END AS status FROM events e JOIN decisions d ON d.id = json_extract(e.payload, '$.decision_id') WHERE e.room_id = ? AND e.id > ? AND e.id <= ? AND e.type IN ('decision_confirm', 'decision_reject') AND d.proposer = ? ORDER BY e.id`,
+      )
+      .all(
+        room.id,
+        member.decision_seen_event_id,
+        turn.decision_snapshot_event_id,
+        turn.agent_id,
+      ) as { id: number; status: string }[];
+    const decisionsTruncated = decisions.length < currentDecisions.length;
     return {
       status: "turn",
+      decisions,
+      decisions_total: currentDecisions.length,
+      decisions_truncated: decisionsTruncated,
+      ...(decisionsTruncated
+        ? {
+            decisions_overflow_hint:
+              "Call read_decisions for all current decisions.",
+          }
+        : {}),
+      decision_updates: decisionUpdates,
       turn_id: turn.id,
       room: room.name,
       topic: room.topic,
@@ -1658,9 +1950,14 @@ export class KonfabService {
       .run(resultMessageId, this.now(), turn.id);
     this.db
       .prepare(
-        "UPDATE room_members SET last_seen_message_id = ? WHERE room_id = ? AND agent_id = ?",
+        "UPDATE room_members SET last_seen_message_id = ?, decision_seen_event_id = ? WHERE room_id = ? AND agent_id = ?",
       )
-      .run(turn.last_message_id ?? 0, turn.room_id, turn.agent_id);
+      .run(
+        turn.last_message_id ?? 0,
+        turn.decision_snapshot_event_id,
+        turn.room_id,
+        turn.agent_id,
+      );
   }
 
   private abandonAndRequeue(turn: TurnRow): void {

@@ -238,6 +238,42 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     );
   });
 
+  app.post("/agent/decisions/propose", async (request) => {
+    const agent = requireAgent(request);
+    const body = z
+      .object({
+        ...session,
+        body: z.string().trim().min(1).max(2000),
+        proposal_key: z.string().uuid(),
+        source_message_id: z.number().int().positive().optional(),
+      })
+      .parse(request.body);
+    return service.proposeDecision(
+      agent,
+      body.session_id,
+      body.body,
+      body.proposal_key,
+      body.source_message_id,
+    );
+  });
+
+  app.post("/agent/decisions/read", async (request) => {
+    const agent = requireAgent(request);
+    const body = z
+      .object({
+        ...session,
+        after_id: z.number().int().positive().optional(),
+        limit: z.number().int().min(1).max(100).default(50),
+      })
+      .parse(request.body);
+    return service.readDecisions(
+      agent,
+      body.session_id,
+      body.after_id,
+      body.limit,
+    );
+  });
+
   app.post("/agent/history", async (request) => {
     const agentId = requireAgent(request);
     const body = historyBody.parse(request.body);
@@ -300,6 +336,54 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .object({ before_id: z.coerce.number().int().positive().optional() })
       .parse(request.query);
     return { events: service.activity(id, before_id) };
+  });
+
+  app.post("/api/rooms/:id/decisions", async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const body = z
+      .object({
+        body: z.string().trim().min(1).max(2000),
+        source_message_id: z.number().int().positive().optional(),
+      })
+      .parse(request.body);
+    return reply
+      .code(201)
+      .send(
+        service.createDecision(
+          id,
+          body.body,
+          "user",
+          body.source_message_id,
+          undefined,
+          true,
+        ),
+      );
+  });
+
+  app.get("/api/rooms/:id/decisions/:decisionId/versions", async (request) => {
+    const { id, decisionId } = z
+      .object({
+        id: z.coerce.number().int().positive(),
+        decisionId: z.coerce.number().int().positive(),
+      })
+      .parse(request.params);
+    return { versions: service.decisionVersions(id, decisionId) };
+  });
+
+  app.post("/api/rooms/:id/decisions/:decisionId", async (request) => {
+    const { id, decisionId } = z
+      .object({
+        id: z.coerce.number().int().positive(),
+        decisionId: z.coerce.number().int().positive(),
+      })
+      .parse(request.params);
+    const body = z
+      .object({
+        action: z.enum(["confirm", "reject", "revise", "retire"]),
+        body: z.string().trim().min(1).max(2000).optional(),
+      })
+      .parse(request.body);
+    return service.updateDecision(id, decisionId, body.action, body.body);
   });
 
   app.patch("/api/rooms/:id", async (request) => {

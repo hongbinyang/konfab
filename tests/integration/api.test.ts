@@ -275,6 +275,46 @@ describe("page API", () => {
     );
   });
 
+  it("limits decision confirmation and revisions to the authenticated lead", async () => {
+    const room = service.createRoom("decisions", "", ["claude"]);
+    const joined = service.join("claude", "decisions");
+    const proposed = service.proposeDecision(
+      "claude",
+      joined.session_id,
+      "Deploy Monday",
+      "one",
+    );
+    const url = `/api/rooms/${room.id}/decisions/${proposed.id}`;
+    const unauthenticated = await app.inject({
+      method: "POST",
+      url,
+      headers: { host: HOST },
+      payload: { action: "confirm" },
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect((await call("POST", url, { action: "confirm" })).json().status).toBe(
+      "confirmed",
+    );
+    expect(
+      (
+        await call("POST", url, { action: "revise", body: "Deploy Tuesday" })
+      ).json().version,
+    ).toBe(2);
+    const versions = (await call("GET", `${url}/versions`)).json().versions;
+    expect(versions.map((v: { body: string }) => v.body)).toEqual([
+      "Deploy Tuesday",
+      "Deploy Monday",
+    ]);
+    const other = service.createRoom("other", "", ["codex"]);
+    expect(
+      (
+        await call("POST", `/api/rooms/${other.id}/decisions/${proposed.id}`, {
+          action: "retire",
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
   it("shows and decides a room permission using the authenticated route", async () => {
     const room = service.createRoom("requests", "", ["claude"]);
     const joined = service.join("claude", "requests");

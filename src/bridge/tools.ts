@@ -266,6 +266,59 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   );
 
   server.registerTool(
+    "propose_decision",
+    {
+      description:
+        "Propose a room decision for the lead to confirm or reject. Proposals do not apply until confirmed.",
+      inputSchema: {
+        session_id: z.string(),
+        body: z.string().min(1).max(2000),
+        source_message_id: z.number().int().positive().optional(),
+      },
+    },
+    async ({ session_id, body, source_message_id }) => {
+      try {
+        return asToolResult(
+          await call("/agent/decisions/propose", {
+            session_id,
+            body,
+            proposal_key: randomUUID(),
+            ...(source_message_id ? { source_message_id } : {}),
+          }),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "read_decisions",
+    {
+      description:
+        "Read current confirmed decisions for your room. Use next_after_id to fetch more.",
+      inputSchema: {
+        session_id: z.string(),
+        after_id: z.number().int().positive().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    async ({ session_id, after_id, limit }) => {
+      try {
+        return asToolResult(
+          await call("/agent/decisions/read", {
+            session_id,
+            ...(after_id ? { after_id } : {}),
+            ...(limit ? { limit } : {}),
+          }),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "read_history",
     {
       description:
