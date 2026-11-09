@@ -206,6 +206,17 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE sessions ADD COLUMN run_ends_at INTEGER;
   `,
+  `
+  ALTER TABLE agents ADD COLUMN bridge_protocol INTEGER;
+  CREATE TABLE bridge_receipts (
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    request_key TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    result TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(agent_id, request_key)
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {
@@ -214,6 +225,9 @@ export function openDatabase(path: string): Db {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   migrate(db);
+  db.prepare("DELETE FROM bridge_receipts WHERE created_at < ?").run(
+    Date.now() - 24 * 60 * 60 * 1000,
+  );
   return db;
 }
 

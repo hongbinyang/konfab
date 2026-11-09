@@ -12,6 +12,8 @@ export interface BridgeOptions {
   token: string;
   /** How long to wait if the server cannot be reached to provide its setting. */
   defaultWaitSeconds?: number;
+  /** Recovery budget for repeat-safe requests during a server outage. */
+  retryTimeoutMs?: number;
 }
 
 class HttpError extends Error {
@@ -101,31 +103,117 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     body: object,
     signal?: AbortSignal,
   ): Promise<T> => {
-    const send = () =>
-      fetch(new URL(path, options.baseUrl), {
+    const requestKey = randomUUID();
+    const receiptProtected = [
+      "/agent/join",
+      "/agent/permission",
+      "/agent/report",
+    ].includes(path);
+    let protocolChecked = !receiptProtected;
+    const send = async () => {
+      if (!protocolChecked) {
+        const capability = await fetch(
+          new URL("/agent/protocol", options.baseUrl),
+          {
+            headers: {
+              Authorization: `Bearer ${options.token}`,
+              "X-Konfab-Protocol": "1",
+            },
+            signal:
+              signal ?? AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+          },
+        );
+        if ([502, 503, 504].includes(capability.status))
+          throw new TypeError("Server starting");
+        if (!capability.ok) {
+          const error = (await capability.json().catch(() => ({}))) as {
+            message?: string;
+          };
+          throw new HttpError(
+            capability.status,
+            capability.status === 404
+              ? "Server upgrade required for safe bridge retries; update Konfab before rejoining"
+              : (error.message ?? `Request failed: ${capability.status}`),
+          );
+        }
+        const version = (await capability.json()) as {
+          durable_receipts?: number;
+        };
+        if (version.durable_receipts !== 1)
+          throw new HttpError(
+            409,
+            "Incompatible server protocol; update Konfab",
+          );
+        protocolChecked = true;
+      }
+      return fetch(new URL(path, options.baseUrl), {
         method: "POST",
         headers: {
+          "X-Konfab-Request-Id": requestKey,
+          "X-Konfab-Protocol": "1",
           Authorization: `Bearer ${options.token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
+        signal: signal
+          ? AbortSignal.any([
+              signal,
+              AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+            ])
+          : AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       });
-    // A pooled connection can be stale after a server restart, so retry once.
-    // Every agent route is safe to repeat.
-    const response = await send().catch(async (error: unknown) => {
-      if (signal?.aborted) throw error;
-      await new Promise((resolve) => setTimeout(resolve, CONNECTION_RETRY_MS));
-      return send();
-    });
-    const payload = (await response.json()) as { message?: string };
-    if (!response.ok) {
-      throw new HttpError(
-        response.status,
-        payload.message ?? `Request failed: ${response.status}`,
-      );
+    };
+    // Mutations use stable turn/proposal IDs or durable server receipts.
+    const repeatSafe = new Set([
+      "/agent/join",
+      "/agent/permission",
+      "/agent/report",
+      "/agent/post",
+      "/agent/pass",
+      "/agent/wait",
+      "/agent/wait-finished",
+      "/agent/history",
+      "/agent/decisions/read",
+      "/agent/decisions/propose",
+      "/agent/permission/wait",
+    ]).has(path);
+    const deadline =
+      Date.now() +
+      (path === "/agent/wait" ? 25_000 : (options.retryTimeoutMs ?? 60_000));
+    let retryDelay = CONNECTION_RETRY_MS;
+    while (true) {
+      try {
+        const response = await send();
+        if (repeatSafe && [502, 503, 504].includes(response.status)) {
+          await response.body?.cancel();
+          throw new TypeError(
+            `Server temporarily unavailable (${response.status})`,
+          );
+        }
+        const payload = (await response.json()) as { message?: string };
+        if (!response.ok) {
+          throw new HttpError(
+            response.status,
+            payload.message ?? `Request failed: ${response.status}`,
+          );
+        }
+        return payload as T;
+      } catch (error) {
+        if (
+          !repeatSafe ||
+          path === "/agent/wait" ||
+          error instanceof HttpError ||
+          signal?.aborted ||
+          Date.now() >= deadline
+        )
+          throw error;
+        await delay(
+          Math.min(retryDelay, Math.max(0, deadline - Date.now())),
+          signal ?? new AbortController().signal,
+        );
+        retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MS);
+      }
     }
-    return payload as T;
   };
 
   const server = new McpServer({ name: "konfab", version: "0.1.0" });
@@ -137,9 +225,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         "Join a Konfab room. Returns a session_id to use with the other tools, plus the room topic, rules, members, and recent messages.",
       inputSchema: { room: z.string().describe("Room name") },
     },
-    async ({ room }) => {
+    async ({ room }, extra) => {
       try {
-        return asToolResult(await call("/agent/join", { room }));
+        return asToolResult(await call("/agent/join", { room }, extra.signal));
       } catch (error) {
         return asToolError(error);
       }
@@ -228,10 +316,14 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         body: z.string().describe("Message text"),
       },
     },
-    async ({ session_id, turn_id, body }) => {
+    async ({ session_id, turn_id, body }, extra) => {
       try {
         return asToolResult(
-          await call("/agent/post", { session_id, turn_id, body }),
+          await call(
+            "/agent/post",
+            { session_id, turn_id, body },
+            extra.signal,
+          ),
         );
       } catch (error) {
         return asToolError(error);
@@ -250,14 +342,18 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         reason: z.string().optional(),
       },
     },
-    async ({ session_id, turn_id, reason }) => {
+    async ({ session_id, turn_id, reason }, extra) => {
       try {
         return asToolResult(
-          await call("/agent/pass", {
-            session_id,
-            turn_id,
-            ...(reason ? { reason } : {}),
-          }),
+          await call(
+            "/agent/pass",
+            {
+              session_id,
+              turn_id,
+              ...(reason ? { reason } : {}),
+            },
+            extra.signal,
+          ),
         );
       } catch (error) {
         return asToolError(error);
@@ -430,6 +526,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           const created = await call<{ id: number; state: string }>(
             "/agent/permission",
             { session_id, ...details },
+            extra.signal,
           );
           if (created.state !== "pending")
             return asToolResult(toPermission(created));

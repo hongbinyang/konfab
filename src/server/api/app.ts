@@ -207,9 +207,39 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return agentId;
   };
 
+  app.addHook("preHandler", async (request) => {
+    if (!request.url.startsWith("/agent/")) return;
+    const agentId = requireAgent(request);
+    const protocol = request.headers["x-konfab-protocol"] === "1" ? 1 : 0;
+    service.recordBridgeProtocol(agentId, protocol);
+  });
+
+  app.get("/agent/protocol", async (request) => {
+    requireAgent(request);
+    return { durable_receipts: 1 };
+  });
+
+  const repeatMutation = <T>(
+    request: FastifyRequest,
+    agentId: string,
+    action: () => T,
+  ): T => {
+    const rawKey = request.headers["x-konfab-request-id"];
+    if (rawKey === undefined) return action(); // Older bridges remain compatible.
+    const key = z.string().uuid().parse(rawKey);
+    return service.repeatRequest(
+      agentId,
+      key,
+      JSON.stringify({ path: request.url, body: request.body }),
+      action,
+    );
+  };
+
   app.post("/agent/join", async (request) => {
     const agentId = requireAgent(request);
-    return service.join(agentId, joinBody.parse(request.body).room);
+    return repeatMutation(request, agentId, () =>
+      service.join(agentId, joinBody.parse(request.body).room),
+    );
   });
 
   app.post("/agent/wait", async (request) => {
@@ -306,11 +336,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.post("/agent/report", async (request) => {
     const agentId = requireAgent(request);
     const body = reportBody.parse(request.body);
-    return service.reportStatus(
-      agentId,
-      body.session_id,
-      body.kind,
-      body.detail,
+    return repeatMutation(request, agentId, () =>
+      service.reportStatus(agentId, body.session_id, body.kind, body.detail),
     );
   });
 
@@ -319,7 +346,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const { session_id: sessionId, ...details } = permissionBody.parse(
       request.body,
     );
-    return service.requestPermission(agentId, sessionId, details);
+    return repeatMutation(request, agentId, () =>
+      service.requestPermission(agentId, sessionId, details),
+    );
   });
 
   app.post("/agent/permission/wait", async (request) => {

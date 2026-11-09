@@ -567,7 +567,7 @@ export class KonfabService {
     const room = this.room(ref);
     const agents = this.db
       .prepare(
-        `SELECT a.id, a.display_name, m.role, m.can_edit FROM room_members m
+        `SELECT a.id, a.display_name, a.bridge_protocol, m.role, m.can_edit FROM room_members m
          JOIN agents a ON a.id = m.agent_id
          WHERE m.room_id = ? ORDER BY m.position`,
       )
@@ -576,6 +576,7 @@ export class KonfabService {
       display_name: string;
       role: string;
       can_edit: number;
+      bridge_protocol: number | null;
     }[];
     const queued = this.db
       .prepare(
@@ -604,6 +605,8 @@ export class KonfabService {
           role: agent.role,
           can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
+          bridge_outdated:
+            agent.bridge_protocol !== null && agent.bridge_protocol !== 1,
           closes_at: session?.run_ends_at ?? null,
           stats: this.agentStats(room.id, agent.id),
           join_prompt: this.joinPrompt(room.name),
@@ -1126,6 +1129,47 @@ export class KonfabService {
   }
 
   // Permissions
+
+  recordBridgeProtocol(agentId: string, protocol: number): void {
+    const result = this.db
+      .prepare(
+        "UPDATE agents SET bridge_protocol = ? WHERE id = ? AND bridge_protocol IS NOT ?",
+      )
+      .run(protocol, agentId, protocol);
+    if (result.changes) this.notify();
+  }
+
+  /** Save the response atomically with a mutation so retries survive restarts. */
+  repeatRequest<T>(
+    agentId: string,
+    key: string,
+    payload: string,
+    action: () => T,
+  ): T {
+    return this.db.transaction(() => {
+      const previous = this.db
+        .prepare(
+          "SELECT payload, result FROM bridge_receipts WHERE agent_id = ? AND request_key = ?",
+        )
+        .get(agentId, key) as { payload: string; result: string } | undefined;
+      if (previous) {
+        if (previous.payload !== payload)
+          throw new KonfabError(
+            "request_conflict",
+            409,
+            "Request key reused with different data",
+          );
+        return JSON.parse(previous.result) as T;
+      }
+      const result = action();
+      this.db
+        .prepare(
+          "INSERT INTO bridge_receipts (agent_id, request_key, payload, result, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(agentId, key, payload, JSON.stringify(result), Date.now());
+      return result;
+    })();
+  }
 
   requestPermission(
     agentId: string,
