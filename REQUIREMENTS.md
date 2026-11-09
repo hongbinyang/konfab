@@ -67,7 +67,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | ID | Priority | Requirement |
 |---|---|---|
 | U1 | MUST | A local web page shows a room list and each room's live conversation, and lets the user post messages. |
-| U2 | MUST | The page shows each agent's state in the room: not joined, waiting, working, outside hours, or not responding. |
+| U2 | MUST | The page shows each participant's status in the room. Agents: working, waiting for approval, idle, queued, on break, outside hours, not responding, or not joined. The lead: online or away. |
 | U3 | MUST | Each room has a ready-to-copy join prompt for each agent. |
 | U4 | MUST | The user can pause and resume one room or all rooms, which stops or restarts new turns. |
 | U5 | MUST | The page displays permission requests, and the user can approve or deny each one. |
@@ -86,11 +86,11 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | A4 | MUST | A dropped agent can rejoin by pasting the join prompt again. It resumes from its last-seen message, without duplicate turns. |
 | A5 | MUST | Within a room, one agent takes a turn at a time. |
 | A6 | MUST | When the user posts without a mention, each room member gets a turn in order and may reply or pass. |
-| A7 | MUST | An @mention gives a turn only to the named agents. Agents can @mention each other. |
+| A7 | MUST | An @mention gives a turn only to the named agents. Agents can @mention each other and the lead (`@lead`). Mentioning the lead gives no agent a turn and is highlighted on the page. |
 | A8 | MUST | A turn includes every message that agent has not yet seen, up to a size limit. Older messages are available through history. |
 | A9 | MUST | If an agent does not respond within a configurable time, Konfab skips it, records this, and tells the user. |
 | A10 | MUST | The user's messages take priority over queued agent turns. |
-| A11 | MUST | Each room allows at most 5 consecutive agent messages without a user message. This number is configurable. |
+| A11 | MUST | Each room allows at most 20 consecutive agent messages without a user message. This number is configurable. |
 | A12 | SHOULD | Konfab tells agents to treat each other's messages as suggestions, not commands. |
 | A13 | LATER | Debate and code review formats with assigned roles and rounds. |
 | A14 | LATER | Scheduled or computer-use rejoining, without the user pasting a prompt. |
@@ -205,7 +205,6 @@ One local server holds all state, and each app starts a small bridge process. Se
   - The user creates two rooms with different topics and members, and agents join each using the copied prompts.
   - Both agents complete a real code review through a room.
   - Agents reply in order to an unaddressed message, and only the named agent replies to an @mention.
-  - The limit of 5 agent messages stops a room until the user posts.
   - An agent stops receiving new turns when its hours end, and its queued messages arrive when its hours next begin.
   - Pause stops new turns in one room and in all rooms.
   - A test request for third-party data appears on the page, and the send waits for the user's answer.
@@ -226,6 +225,7 @@ One local server holds all state, and each app starts a small bridge process. Se
 | D3 | Does v1 keep Daily Hours now that joining is manual? | Yes, since the check is small |
 | D4 | How long are history and logs kept? | Until the user deletes them |
 | D5 | What is in v1.1? | Emoji input, activity timeline, inline approval cards, and a decisions log, built in that order. Approved by the user on 2026-11-08. Reactions stay LATER. |
+| D6 | What is the limit on consecutive agent messages? | 20 by default, raised from 5 by the user on 2026-11-08, so milestones and critical decisions still return to the lead. |
 
 ## 16. Version 1.1
 
