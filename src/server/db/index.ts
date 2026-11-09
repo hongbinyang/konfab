@@ -203,6 +203,9 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX attachments_by_message ON attachments(message_id);
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN run_ends_at INTEGER;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

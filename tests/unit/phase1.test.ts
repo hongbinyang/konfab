@@ -4,7 +4,6 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate, openDatabase, type Db } from "../../src/server/db/index.js";
-import type { Hours } from "../../src/server/domain/hours.js";
 import {
   KonfabService,
   type WaitResult,
@@ -12,11 +11,6 @@ import {
 
 const ROOM = "design";
 const TURN_TIMEOUT_MS = 30 * 60_000;
-const OFFICE: Hours = {
-  start: "09:00",
-  end: "18:00",
-  days: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"],
-};
 const at = (hour: number, minute = 0): number =>
   new Date(2026, 10, 6, hour, minute).getTime();
 
@@ -42,7 +36,6 @@ describe("Phase 1 behavior", () => {
       waitTimeoutSeconds: 1,
       turnTimeoutMs: TURN_TIMEOUT_MS,
       maxMessageChars: 1000,
-      hoursFor: (agentId) => (agentId === "claude" ? OFFICE : undefined),
       preApprovals: [{ recipient: "github.com/me/repo", data: "code_push" }],
     });
     service.ensureAgent("claude", "Claude");
@@ -169,96 +162,111 @@ describe("Phase 1 behavior", () => {
     });
   });
 
-  describe("daily hours", () => {
-    it("closes the session outside hours and gives the next start", () => {
-      now = at(19);
-      expect(service.poll("claude", claude, true)).toEqual({
+  describe("configurable run windows", () => {
+    const worker = () => {
+      service.ensureAgent("worker", "Worker");
+      service.createRoom("window-test", "", ["worker"]);
+      return service.join("worker", "window-test").session_id;
+    };
+
+    it("starts at any time and ends after five hours", () => {
+      now = at(23, 30);
+      const session = worker();
+      const end = now + 5 * 60 * 60_000;
+      expect(service.roomState("window-test").agents[0]?.closes_at).toBe(end);
+      now = end - 1;
+      expect(service.poll("worker", session, true).status).toBe("idle");
+      now = end;
+      service.tick();
+      expect(service.poll("worker", session, true)).toMatchObject({
         status: "closed",
-        reason: "outside_hours",
-        next_start: new Date(2026, 10, 7, 9).getTime(),
-        wait_seconds: 1,
+        reason: "run_window_ended",
       });
-      expect(service.roomState(ROOM).agents[0]?.state).toBe("outside_hours");
+      expect(service.roomState("window-test").agents[0]?.state).toBe(
+        "window_ended",
+      );
+      expect(
+        service.activity("window-test").map((item) => item.type),
+      ).toContain("run_window_ended");
     });
 
-    it("ends idle sessions on the timer when hours end", () => {
-      now = at(18);
+    it("allows an active turn to finish after expiry, then closes", () => {
+      const session = worker();
+      now += 5 * 60 * 60_000 - 60_000;
+      service.poll("worker", session, true);
+      service.postUserMessage("window-test", "@worker work");
+      const turn = expectTurn(service.poll("worker", session, true));
+      now += 120_000;
       service.tick();
-      expect(service.poll("claude", claude, true)).toMatchObject({
+      expect(service.poll("worker", session, true).status).toBe("turn");
+      service.postAgentMessage("worker", session, turn.turn_id, "Finished");
+      expect(service.poll("worker", session, true)).toMatchObject({
         status: "closed",
-        reason: "outside_hours",
-      });
-    });
-
-    it("shows not joined the next day, not a false warning", () => {
-      now = at(18);
-      service.tick();
-      now = new Date(2026, 10, 7, 9).getTime();
-      expect(service.roomState(ROOM).agents[0]?.state).toBe("not_joined");
-    });
-
-    it("lets a turn in progress finish after hours end", () => {
-      now = at(17, 50);
-      service.poll("claude", claude, true);
-      service.poll("codex", codex, true);
-      service.postUserMessage(ROOM, "@claude hi");
-      const turn = expectTurn(service.poll("claude", claude, true));
-      now = at(18, 10);
-      service.tick();
-      expect(service.poll("claude", claude, true).status).toBe("turn");
-      service.postAgentMessage("claude", claude, turn.turn_id, "Finished");
-      expect(service.poll("claude", claude, true)).toMatchObject({
-        status: "closed",
-      });
-    });
-
-    it("queues messages until hours next begin, without blocking others", () => {
-      now = at(19);
-      service.tick();
-      service.postUserMessage(ROOM, "Evening message");
-      const other = expectTurn(service.poll("codex", codex, true));
-      service.postAgentMessage("codex", codex, other.turn_id, "Codex reply");
-      expect(service.roomState(ROOM).queued).toEqual(["claude"]);
-
-      now = new Date(2026, 10, 7, 9).getTime();
-      const rejoined = service.join("claude", ROOM).session_id;
-      const turn = expectTurn(service.poll("claude", rejoined, true));
-      expect(turn.messages.map((message) => message.body)).toEqual([
-        "Evening message",
-        "Codex reply",
-      ]);
-    });
-  });
-
-  describe("extended hours", () => {
-    it("lets an agent take turns outside hours until the extension ends", () => {
-      now = at(19);
-      service.extendHours("claude", 60);
-      const session = service.join("claude", ROOM).session_id;
-      service.postUserMessage(ROOM, "@claude evening");
-      expect(service.poll("claude", session, true).status).toBe("turn");
-      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(20));
-    });
-
-    it("closes the session when the extension ends", () => {
-      now = at(19);
-      service.extendHours("claude", 60);
-      const session = service.join("claude", ROOM).session_id;
-      now = at(20);
-      service.tick();
-      expect(service.poll("claude", session, true)).toMatchObject({
-        status: "closed",
-        reason: "outside_hours",
+        reason: "run_window_ended",
       });
     });
 
-    it("reports the later of the scheduled end and the extension", () => {
-      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(18));
-      now = at(17, 30);
-      service.extendHours("claude", 60);
-      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(18, 30));
-      service.extendHours("claude", 0);
-      expect(service.roomState(ROOM).agents[0]?.closes_at).toBe(at(18));
+    it("keeps queued messages until rejoin, which starts a fresh window", () => {
+      const session = worker();
+      now += 5 * 60 * 60_000;
+      service.tick();
+      service.postUserMessage("window-test", "Waiting here");
+      expect(service.poll("worker", session, true).status).toBe("closed");
+      const next = service.join("worker", "window-test").session_id;
+      expect(service.roomState("window-test").agents[0]?.closes_at).toBe(
+        now + 5 * 60 * 60_000,
+      );
+      expect(
+        expectTurn(service.poll("worker", next, true)).messages[0]?.body,
+      ).toBe("Waiting here");
+    });
+
+    it("extends the selected room session and preserves its end across restart", () => {
+      const session = worker();
+      service.createRoom("other-window", "", ["worker"]);
+      service.join("worker", "other-window");
+      const oldEnd = now + 5 * 60 * 60_000;
+      service.extendRunWindow("window-test", "worker", 60);
+      expect(service.roomState("window-test").agents[0]?.closes_at).toBe(
+        oldEnd + 60 * 60_000,
+      );
+      expect(service.roomState("other-window").agents[0]?.closes_at).toBe(
+        oldEnd,
+      );
+      const restarted = new KonfabService(db, {
+        now: () => now,
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: TURN_TIMEOUT_MS,
+        maxMessageChars: 1000,
+      });
+      expect(restarted.roomState("window-test").agents[0]?.closes_at).toBe(
+        oldEnd + 60 * 60_000,
+      );
+      now = oldEnd;
+      expect(restarted.poll("worker", session, true).status).toBe("idle");
+      expect(
+        restarted.activity("window-test").map((item) => item.type),
+      ).toContain("run_window_extended");
+    });
+
+    it("uses per-agent duration overrides and rejects expired extension", () => {
+      const timed = new KonfabService(db, {
+        now: () => now,
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: TURN_TIMEOUT_MS,
+        maxMessageChars: 1000,
+        runHoursFor: () => 0.5,
+      });
+      timed.ensureAgent("short", "Short");
+      timed.createRoom("short-window", "", ["short"]);
+      timed.join("short", "short-window");
+      expect(timed.roomState("short-window").agents[0]?.closes_at).toBe(
+        now + 30 * 60_000,
+      );
+      now += 30 * 60_000;
+      expect(() => timed.extendRunWindow("short-window", "short", 60)).toThrow(
+        "rejoin",
+      );
     });
   });
 
@@ -805,6 +813,47 @@ describe("Phase 1 behavior", () => {
 });
 
 describe("database migration", () => {
+  it("gives existing active sessions a window once during upgrade", () => {
+    const db = new Database(":memory:");
+    try {
+      migrate(db, 8);
+      db.prepare(
+        "INSERT INTO agents (id, display_name, created_at) VALUES ('worker', 'Worker', 1)",
+      ).run();
+      db.prepare(
+        "INSERT INTO rooms (name, created_at) VALUES ('legacy', 1)",
+      ).run();
+      db.prepare(
+        "INSERT INTO room_members (room_id, agent_id, position) VALUES (1, 'worker', 0)",
+      ).run();
+      db.prepare(
+        "INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at) VALUES ('old', 1, 'worker', 'active', 1, 1)",
+      ).run();
+      migrate(db);
+      let now = 10_000;
+      const options = {
+        now: () => now,
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60_000,
+        maxMessageChars: 1000,
+        runHoursFor: () => 0.5,
+      };
+      const first = new KonfabService(db, options);
+      const end = first.roomState("legacy").agents[0]?.closes_at;
+      expect(end).toBe(now + 30 * 60_000);
+      now += 1000;
+      const restarted = new KonfabService(db, options);
+      expect(restarted.roomState("legacy").agents[0]?.closes_at).toBe(end);
+      expect(
+        restarted
+          .activity("legacy")
+          .filter((item) => item.type === "run_window_started"),
+      ).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("upgrades a version 4 database without changing existing data", () => {
     const folder = mkdtempSync(join(tmpdir(), "konfab-v4-"));
     const file = join(folder, "test.db");
@@ -818,7 +867,7 @@ describe("database migration", () => {
         .run();
       old.close();
       const upgraded = openDatabase(file);
-      expect(upgraded.pragma("user_version", { simple: true })).toBe(8);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(9);
       expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
         name: "existing",
         brief: "kept",
@@ -861,7 +910,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(8);
+      expect(db.pragma("user_version", { simple: true })).toBe(9);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });

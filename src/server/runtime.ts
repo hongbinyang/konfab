@@ -26,8 +26,8 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
     maxDecisionChars: config.defaults.max_decision_chars,
     maxAttachmentBytes: config.defaults.max_attachment_mb * 1024 * 1024,
     attachmentDir: join(dirname(databaseFile), "files"),
-    hoursFor: (agentId) =>
-      config.agents[agentId]?.hours ?? config.defaults.hours,
+    runHoursFor: (agentId) =>
+      config.agents[agentId]?.run_hours ?? config.defaults.run_hours,
     preApprovals: config.pre_approvals,
   });
   for (const [id, agent] of Object.entries(config.agents)) {

@@ -28,6 +28,7 @@ const DEFAULT_HOURS = {
 
 const defaultsSchema = z.object({
   hours: hoursSchema.default(DEFAULT_HOURS),
+  run_hours: z.number().positive().max(24).default(5),
   max_consecutive_agent_messages: z.number().int().min(1).default(50),
   wait_timeout_seconds: z.number().int().min(1).default(50),
   turn_timeout_minutes: z.number().int().min(1).default(30),
@@ -52,6 +53,7 @@ const configSchema = z.object({
       z.object({
         display_name: z.string().min(1),
         hours: hoursSchema.optional(),
+        run_hours: z.number().positive().max(24).optional(),
       }),
     )
     .default({
@@ -69,10 +71,7 @@ const DEFAULT_CONFIG = `server:
   port: 8787
 
 defaults:
-  hours:
-    start: "09:00"
-    end: "18:00"
-    days: [sun, mon, tue, wed, thu, fri, sat]
+  run_hours: 5
   max_consecutive_agent_messages: 50
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30

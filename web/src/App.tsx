@@ -28,7 +28,7 @@ const STATE_LABELS: Record<AgentState, string> = {
   working: "Working",
   queued: "Queued",
   waiting_approval: "Waiting for approval",
-  outside_hours: "Outside hours",
+  window_ended: "Run window ended",
   on_break: "On break",
   not_responding: "Not responding",
 };
@@ -61,7 +61,6 @@ const ROLE_PRESETS: Record<string, string> = {
     "Gather facts and sources, separate evidence from opinion, and summarize what you find.",
 };
 const CLOSING_SOON_MS = 15 * 60_000;
-const EXTEND_OFFER_MS = 60 * 60_000;
 
 function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
@@ -1532,21 +1531,6 @@ function AgentDetails({
           It may be out of allowance, so check its app.
         </p>
       )}
-      {agent.hours && (
-        <p className="muted">
-          Hours:{" "}
-          {agent.hours.start === agent.hours.end
-            ? "All day"
-            : `${agent.hours.start} to ${agent.hours.end}`}
-          {agent.state === "outside_hours" && agent.next_start
-            ? `. Next opens ${new Date(agent.next_start).toLocaleString([], {
-                weekday: "short",
-                hour: "numeric",
-                minute: "2-digit",
-              })}`
-            : ""}
-        </p>
-      )}
       {agent.closes_at !== null && (
         <p
           className={
@@ -1555,28 +1539,25 @@ function AgentDetails({
               : "muted"
           }
         >
-          Closes at {formatTime(agent.closes_at)}
+          Running · ends at {formatTime(agent.closes_at)}
         </p>
       )}
-      {!archived &&
-        (agent.state === "outside_hours" ||
-          (agent.closes_at !== null &&
-            agent.closes_at - Date.now() <= EXTEND_OFFER_MS)) && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() =>
-              void act(() =>
-                request(`/api/agents/${agent.id}/extend-hours`, {
-                  method: "POST",
-                  body: { minutes: 60 },
-                }),
-              )
-            }
-          >
-            Open for 1 hour
-          </button>
-        )}
+      {!archived && agent.closes_at !== null && (
+        <button
+          type="button"
+          className="secondary"
+          onClick={() =>
+            void act(() =>
+              request(`/api/rooms/${roomId}/members/${agent.id}/extend-run`, {
+                method: "POST",
+                body: { minutes: 60 },
+              }),
+            )
+          }
+        >
+          Extend 1 hour
+        </button>
+      )}
       {!archived && (
         <button
           type="button"
