@@ -136,7 +136,7 @@ All local data lives in `~/.konfab/`, with the folder set to `0700` and files to
 
 | File | Contents |
 |---|---|
-| `config.yaml` | Port, agents, hours, limits, and pre-approvals |
+| `config.yaml` | Port, agents, run durations, limits, and pre-approvals |
 | `konfab.db` | Rooms, messages, turns, and permission records, using SQLite WAL mode |
 | `logs/` | Server logs, with tokens redacted |
 
@@ -146,7 +146,7 @@ server:
   port: 8787
 
 defaults:
-  hours: { start: "09:00", end: "18:00", days: [mon, tue, wed, thu, fri, sat, sun] }
+  run_hours: 5
   max_consecutive_agent_messages: 50
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
@@ -207,7 +207,7 @@ The bridge offers these MCP tools. Each returns structured JSON.
 |---|---|---|
 | `turn` | Includes `turn_id`, topic, rules, and unseen messages | Works, then posts or passes |
 | `idle` | Nothing to do before the wait timeout | Calls again |
-| `closed` | Outside the agent's hours, or the room is archived | Tells the user and ends its work |
+| `closed` | The run window has ended, or the room is archived | Tells the user and ends its work |
 | `replaced` | A newer conversation joined for this agent and room | Stops |
 
 ### Join prompt
@@ -227,7 +227,7 @@ The rules are repeated with each turn, in case an agent loses them during a long
 
 ## 8. Turn scheduling
 
-Each room has at most one active turn. All scheduling runs in one module that the server calls on each relevant event, plus a 30-second timer for hours and timeouts.
+Each room has at most one active turn. All scheduling runs in one module that the server calls on each relevant event, plus a 30-second timer for run-window expiry and timeouts.
 
 ### Who gets a turn
 
@@ -251,10 +251,10 @@ The scheduler takes the first queued turn where all of these are true:
 - The room is not paused or archived.
 - The room has no active turn.
 - The consecutive-message limit has not been reached.
-- The agent is inside its hours.
+- The agent has an active run window.
 - The agent has a waiting session in that room.
 
-Turns for agents outside their hours or not yet joined stay queued (M3), and other agents can continue.
+Turns for agents whose run window ended or who have not joined stay queued, and other agents can continue.
 
 ### Turn states
 
@@ -300,7 +300,7 @@ A tool call can only wait until the app's timeout, which is commonly around 60 s
 Design response:
 
 1. **Longest safe wait:** the wait length is configurable. Phase 0 tests whether each app's timeout can be raised.
-2. **Stop outside hours:** agents get `closed` when their hours end instead of polling overnight. The user rejoins them the next day, which fits the manual joining decision.
+2. **Run window:** each session starts at join time and lasts five hours by default, configurable globally and per agent. An in-progress turn may finish after expiry; the session then closes so waiting stops. Rejoining starts a new window. The lead may extend an active window by one hour. A server restart preserves existing end times; pre-upgrade active sessions receive a window at upgrade.
 3. **Fewer idle agents:** the user joins agents only to rooms in active use.
 
 4. **Breaks:** **Take a break** tells agents to stop with a `closed` status, so they use no allowance. Agents cannot be woken again, so the user pastes each join prompt, and the first agent to rejoin ends the break. **Pause** differs because agents keep waiting, which uses allowance, and they continue automatically on Resume.
@@ -316,7 +316,7 @@ If idle cost is still too high after Phase 0, the fallback is to add `idle_stop_
 | Queued | Connected with a queued turn |
 | Waiting for approval | Has an unanswered permission request |
 | Working | Has an active turn |
-| Outside hours | Current time is outside its configured hours |
+| Run window ended | The session has expired and needs rejoining |
 | Not responding | No call within `wait_timeout + 60 seconds`, or the turn timed out |
 
 The lead's page connection is displayed as connected or disconnected; it does not establish whether the person is present. "Not responding" also shows the W3 warning that the agent may be out of allowance. Reports sent through `report_status` appear on the page, since Konfab has no way to read an app's allowance directly.
@@ -406,14 +406,14 @@ Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Event
 
 | Level | Tool | Covers |
 |---|---|---|
-| Unit | Vitest | Scheduler rules, hours including past midnight, permission matching |
+| Unit | Vitest | Scheduler rules, run-window expiry, permission matching |
 | Integration | Vitest with temporary SQLite | API, auth, migrations, restart recovery, no lost or duplicate messages |
 | Bridge | Vitest with an MCP client | Each tool over real stdio, including long waits |
 | Smoke | Vitest with real processes | Main paths through the built setup command, server, and bridge |
 | Browser | Manual, then Playwright | Page behavior and safe message display |
 | End to end | Real apps | Connection and long-session behavior, which automated tests cannot prove. Deferred. |
 
-Tests use a fake clock for hours and timeouts, and a scripted agent in place of a real model. The full approach, rules, and results are in the [test plan](docs/test-plan.md).
+Tests use a fake clock for run windows and timeouts, and a scripted agent in place of a real model. The full approach, rules, and results are in the [test plan](docs/test-plan.md).
 
 ## 14. Delivery plan
 
@@ -442,7 +442,7 @@ Build in this order, so that each step can be used and tested:
 1. Rooms, membership, and topics
 2. Full scheduler and pause
 3. Rejoining and recovery
-4. Daily hours
+4. Configurable run windows
 5. Permissions and pre-approvals
 6. Allowance warnings
 7. Security hardening
@@ -458,7 +458,7 @@ Phase 1 is done when the acceptance list in the requirements passes.
 | R1 to R9 Rooms and messages | 6, 8, 11 |
 | U1 to U6 User interface | 9, 10, 11 |
 | A1 to A12 Joining and turns | 7, 8, 12 |
-| M1 to M3 Daily hours | 5, 8, 9 |
+| M1 to M3 Run windows | 5, 8, 9 |
 | W1 to W3 Allowance | 9 |
 | F1 to F5 Local access | 2, 7, and the user guide |
 | P1 to P7 Third-party data | 10, 12 |
@@ -469,6 +469,6 @@ Phase 1 is done when the acceptance list in the requirements passes.
 
 | ID | Decision | Proposed |
 |---|---|---|
-| X1 | Should agents stop at the end of their hours and rejoin the next day? | Built this way, to avoid overnight allowance use |
+| X1 | When do agents stop waiting? | At the end of a configurable run window; rejoining starts another window. |
 | X2 | Should all agents use the stdio bridge, rather than local HTTP? | Built this way, for one tested connection path |
 | X3 | Should the project stay on Node 24, rather than Node 26? | Built this way, until native dependencies are proven on Node 26 |

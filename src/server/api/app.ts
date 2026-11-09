@@ -81,8 +81,7 @@ const userMessageBody = z.object({
 const decisionBody = z.object({ decision: z.enum(["approved", "denied"]) });
 const loginQuery = z.object({ code: z.string().min(1) });
 const searchQuery = z.object({ q: z.string().trim().min(1).max(200) });
-const agentParams = z.object({ id: z.string().min(1) });
-const extendBody = z.object({ minutes: z.number().int().min(0).max(1440) });
+const extendBody = z.object({ minutes: z.number().int().min(1).max(1440) });
 
 export interface AppOptions {
   service: KonfabService;
@@ -531,9 +530,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .send(markdown);
   });
 
-  app.post("/api/agents/:id/extend-hours", async (request) => {
-    service.extendHours(
-      agentParams.parse(request.params).id,
+  app.post("/api/rooms/:id/members/:agentId/extend-run", async (request) => {
+    const { id, agentId } = memberParams.parse(request.params);
+    service.extendRunWindow(
+      id,
+      agentId,
       extendBody.parse(request.body).minutes,
     );
     return { ok: true };

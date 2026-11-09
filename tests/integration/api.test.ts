@@ -538,7 +538,7 @@ describe("page API", () => {
     expect(older.json().events.length).toBe(5);
     expect(
       (await call("GET", `/api/rooms/${two.id}/activity`)).json().events,
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it("searches and exports a room", async () => {
@@ -562,19 +562,24 @@ describe("page API", () => {
     expect(exported.body).toContain("Find this 100% 👍🏽 🎉");
   });
 
-  it("extends an agent's hours and rejects unknown agents", async () => {
-    const ok = await call("POST", "/api/agents/claude/extend-hours", {
-      minutes: 60,
-    });
-    expect(ok.statusCode).toBe(200);
-    const missing = await call("POST", "/api/agents/ghost/extend-hours", {
-      minutes: 60,
-    });
-    expect(missing.statusCode).toBe(404);
-    const invalid = await call("POST", "/api/agents/claude/extend-hours", {
-      minutes: 5000,
-    });
-    expect(invalid.statusCode).toBe(400);
+  it("extends the selected session and rejects unknown members", async () => {
+    service.ensureAgent("worker", "Worker");
+    const room = service.createRoom("run-window", "", ["worker"]);
+    service.join("worker", "run-window");
+    const url = `/api/rooms/${room.id}/members/worker/extend-run`;
+    const before = service.roomState(room.id).agents[0]!.closes_at!;
+    expect((await call("POST", url, { minutes: 60 })).statusCode).toBe(200);
+    expect(service.roomState(room.id).agents[0]?.closes_at).toBe(
+      before + 60 * 60_000,
+    );
+    expect(
+      (
+        await call("POST", `/api/rooms/${room.id}/members/ghost/extend-run`, {
+          minutes: 60,
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect((await call("POST", url, { minutes: 5000 })).statusCode).toBe(400);
   });
 
   it("keeps sign-in codes and credentials out of the logs", async () => {

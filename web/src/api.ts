@@ -4,7 +4,7 @@ export type AgentState =
   | "working"
   | "queued"
   | "waiting_approval"
-  | "outside_hours"
+  | "window_ended"
   | "on_break"
   | "not_responding";
 
@@ -82,8 +82,6 @@ export interface RoomAgent {
   id: string;
   display_name: string;
   state: AgentState;
-  hours: { start: string; end: string; days: string[] } | null;
-  next_start: number | null;
   closes_at: number | null;
   join_prompt: string;
   role: string;

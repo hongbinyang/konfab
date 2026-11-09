@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Db } from "../db/index.js";
-import { currentEnd, isWithinHours, nextStart, type Hours } from "./hours.js";
 
 export class KonfabError extends Error {
   constructor(
@@ -32,7 +31,7 @@ export interface ServiceOptions {
   maxDecisionChars?: number;
   maxAttachmentBytes?: number;
   attachmentDir?: string;
-  hoursFor?: (agentId: string) => Hours | undefined;
+  runHoursFor?: (agentId: string) => number;
   preApprovals?: readonly PreApproval[];
 }
 
@@ -86,7 +85,7 @@ export type AgentState =
   | "working"
   | "queued"
   | "waiting_approval"
-  | "outside_hours"
+  | "window_ended"
   | "on_break"
   | "not_responding";
 
@@ -168,6 +167,7 @@ interface SessionRow {
   started_at: number;
   last_call_at: number;
   contact_lost_at: number | null;
+  run_ends_at: number | null;
 }
 
 interface RoomRow {
@@ -274,6 +274,26 @@ export class KonfabService {
     this.liveWindowMs = options.liveWindowMs ?? DEFAULT_LIVE_WINDOW_MS;
     this.maxTurnChars = options.maxTurnChars ?? DEFAULT_MAX_TURN_CHARS;
     this.changes.setMaxListeners(0);
+    const legacy = this.db
+      .prepare(
+        "SELECT id, room_id, agent_id FROM sessions WHERE state = 'active' AND run_ends_at IS NULL",
+      )
+      .all() as { id: string; room_id: number; agent_id: string }[];
+    this.db.transaction(() => {
+      for (const session of legacy) {
+        const endsAt =
+          this.now() +
+          (this.options.runHoursFor?.(session.agent_id) ?? 5) * 3_600_000;
+        this.db
+          .prepare(
+            "UPDATE sessions SET run_ends_at = ? WHERE id = ? AND run_ends_at IS NULL",
+          )
+          .run(endsAt, session.id);
+        this.logEvent("run_window_started", session.room_id, session.agent_id, {
+          ends_at: endsAt,
+        });
+      }
+    })();
   }
 
   get waitSeconds(): number {
@@ -577,16 +597,14 @@ export class KonfabService {
         streak_limit: this.options.maxConsecutiveAgentMessages ?? 50,
       },
       agents: agents.map((agent) => {
-        const hours = this.options.hoursFor?.(agent.id);
+        const session = this.activeSession(room.id, agent.id);
         return {
           id: agent.id,
           display_name: agent.display_name,
           role: agent.role,
           can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
-          hours: hours ?? null,
-          next_start: hours ? nextStart(new Date(this.now()), hours) : null,
-          closes_at: this.closesAt(agent.id),
+          closes_at: session?.run_ends_at ?? null,
           stats: this.agentStats(room.id, agent.id),
           join_prompt: this.joinPrompt(room.name),
         };
@@ -646,10 +664,20 @@ export class KonfabService {
       }
       this.db
         .prepare(
-          `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at)
-           VALUES (?, ?, ?, 'active', ?, ?)`,
+          `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at)
+           VALUES (?, ?, ?, 'active', ?, ?, ?)`,
         )
-        .run(sessionId, room.id, agentId, now, now);
+        .run(
+          sessionId,
+          room.id,
+          agentId,
+          now,
+          now,
+          now + (this.options.runHoursFor?.(agentId) ?? 5) * 3_600_000,
+        );
+      this.logEvent("run_window_started", room.id, agentId, {
+        ends_at: now + (this.options.runHoursFor?.(agentId) ?? 5) * 3_600_000,
+      });
       const earlierSession = this.db
         .prepare(
           "SELECT 1 FROM sessions WHERE room_id = ? AND agent_id = ? AND id <> ? LIMIT 1",
@@ -686,14 +714,10 @@ export class KonfabService {
     if (session.state === "replaced") {
       return { status: "replaced", wait_seconds: waitSeconds };
     }
-    const hours = this.options.hoursFor?.(agentId);
     const closed = (reason: string): WaitResult => ({
       status: "closed",
       reason,
-      next_start:
-        reason === "outside_hours" && hours
-          ? nextStart(new Date(this.now()), hours)
-          : null,
+      next_start: null,
       ...(reason === "on_break" ? { instructions: BREAK_INSTRUCTIONS } : {}),
       wait_seconds: waitSeconds,
     });
@@ -726,10 +750,10 @@ export class KonfabService {
         notifyAfter.value = true;
         return closed("on_break");
       }
-      if (!this.isInsideHours(agentId)) {
-        this.endSession(session.id, "outside_hours");
+      if (!this.isWindowActive(session)) {
+        this.endSession(session.id, "run_window_ended");
         notifyAfter.value = true;
-        return closed("outside_hours");
+        return closed("run_window_ended");
       }
       if (active) return { status: "idle", wait_seconds: waitSeconds };
 
@@ -1546,7 +1570,7 @@ export class KonfabService {
       .prepare(
         `SELECT id, type, agent_id, created_at, payload FROM events
       WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
-      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','contact_lost','contact_restored')
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended')
       AND id < ? ORDER BY id DESC LIMIT ?`,
       )
       .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
@@ -1651,20 +1675,43 @@ export class KonfabService {
     };
   }
 
-  // Hours
+  // Run windows
 
-  /** Keeps an agent open for this many minutes from now, or clears it with 0. */
-  extendHours(agentId: string, minutes: number): void {
-    if (!this.db.prepare("SELECT 1 FROM agents WHERE id = ?").get(agentId)) {
-      throw new KonfabError("agent_not_found", 404, "Unknown agent");
-    }
+  extendRunWindow(ref: RoomRef, agentId: string, minutes: number): void {
+    const room = this.room(ref);
+    this.requireMember(room.id, agentId);
+    const session = this.activeSession(room.id, agentId);
+    if (!session || session.run_ends_at === null)
+      throw new KonfabError(
+        "session_not_active",
+        409,
+        "Agent must rejoin before its run window can be extended",
+      );
+    const activeTurn = this.db
+      .prepare("SELECT 1 FROM turns WHERE session_id = ? AND state = 'active'")
+      .get(session.id);
+    if (!this.isWindowActive(session) && !activeTurn)
+      throw new KonfabError(
+        "session_not_active",
+        409,
+        "Run window ended; rejoin before extending",
+      );
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
+      throw new KonfabError(
+        "invalid_extension",
+        400,
+        "Extension must be from 1 to 1440 minutes",
+      );
+    const endsAt = Math.max(this.now(), session.run_ends_at) + minutes * 60_000;
     this.db
       .prepare(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        "UPDATE sessions SET run_ends_at = ? WHERE id = ? AND state = 'active'",
       )
-      .run(`hours_until:${agentId}`, String(this.now() + minutes * 60_000));
-    this.logEvent("hours_extended", null, agentId, { minutes });
+      .run(endsAt, session.id);
+    this.logEvent("run_window_extended", room.id, agentId, {
+      ends_at: endsAt,
+      minutes,
+    });
     this.notify();
   }
 
@@ -1751,7 +1798,7 @@ export class KonfabService {
           session.contact_lost_at === null &&
           this.now() - session.last_call_at >
             this.options.waitTimeoutSeconds * 1000 + 60_000 &&
-          this.isInsideHours(session.agent_id) &&
+          this.isWindowActive(session) &&
           this.roomById(session.room_id).on_break !== 1
         ) {
           this.db
@@ -1761,8 +1808,8 @@ export class KonfabService {
             last_contact_at: session.last_call_at,
           });
         }
-        if (!working && !this.isInsideHours(session.agent_id)) {
-          this.endSession(session.id, "outside_hours");
+        if (!working && !this.isWindowActive(session)) {
+          this.endSession(session.id, "run_window_ended");
         }
       }
     })();
@@ -1885,41 +1932,21 @@ export class KonfabService {
     this.logEvent("members_changed", roomId, null, { members: unique });
   }
 
-  private isInsideHours(agentId: string): boolean {
-    const hours = this.options.hoursFor?.(agentId);
-    return (
-      !hours ||
-      isWithinHours(new Date(this.now()), hours) ||
-      this.extendedUntil(agentId) > this.now()
-    );
-  }
-
-  private extendedUntil(agentId: string): number {
-    const row = this.db
-      .prepare("SELECT value FROM settings WHERE key = ?")
-      .get(`hours_until:${agentId}`) as { value: string } | undefined;
-    return row ? Number(row.value) : 0;
-  }
-
-  private closesAt(agentId: string): number | null {
-    const hours = this.options.hoursFor?.(agentId);
-    if (!hours) return null;
-    const now = new Date(this.now());
-    const scheduledEnd = currentEnd(now, hours);
-    const extended = this.extendedUntil(agentId);
-    if (isWithinHours(now, hours)) {
-      if (scheduledEnd === null) return null;
-      return Math.max(scheduledEnd, extended);
-    }
-    return extended > this.now() ? extended : null;
+  private isWindowActive(session: SessionRow): boolean {
+    return session.run_ends_at !== null && this.now() < session.run_ends_at;
   }
 
   private endSession(sessionId: string, reason: string): void {
-    this.db
+    const session = this.db
+      .prepare("SELECT * FROM sessions WHERE id = ?")
+      .get(sessionId) as SessionRow | undefined;
+    const updated = this.db
       .prepare(
-        "UPDATE sessions SET state = 'ended', end_reason = ?, ended_at = ? WHERE id = ?",
+        "UPDATE sessions SET state = 'ended', end_reason = ?, ended_at = ? WHERE id = ? AND state = 'active'",
       )
       .run(reason, this.now(), sessionId);
+    if (updated.changes && reason === "run_window_ended" && session)
+      this.logEvent("run_window_ended", session.room_id, session.agent_id, {});
   }
 
   private isPreApproved(recipient: string, dataType?: string): boolean {
@@ -1959,9 +1986,18 @@ export class KonfabService {
     if (pending) return "waiting_approval";
     if (active) return "working";
     if (this.roomById(roomId).on_break === 1) return "on_break";
-    if (!this.isInsideHours(agentId)) return "outside_hours";
     const session = this.activeSession(roomId, agentId);
-    if (!session) return "not_joined";
+    if (!session) {
+      const latest = this.db
+        .prepare(
+          "SELECT end_reason FROM sessions WHERE room_id = ? AND agent_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+        )
+        .get(roomId, agentId) as { end_reason: string | null } | undefined;
+      return latest?.end_reason === "run_window_ended"
+        ? "window_ended"
+        : "not_joined";
+    }
+    if (!this.isWindowActive(session)) return "window_ended";
     if (!this.isLive(session)) return "not_responding";
     const queued = this.db
       .prepare(
@@ -2108,9 +2144,9 @@ export class KonfabService {
       if (turn.agent_id === agentId) {
         return this.startTurn(room.id, turn.id, sessionId);
       }
-      if (!this.isInsideHours(turn.agent_id)) continue;
       const other = this.activeSession(room.id, turn.agent_id);
-      if (other && this.isLive(other)) return null;
+      if (other && this.isWindowActive(other) && this.isLive(other))
+        return null;
     }
     return null;
   }
@@ -2249,6 +2285,11 @@ export class KonfabService {
         turn.room_id,
         turn.agent_id,
       );
+    if (turn.session_id) {
+      const session = this.requireSession(turn.agent_id, turn.session_id);
+      if (session.state === "active" && !this.isWindowActive(session))
+        this.endSession(session.id, "run_window_ended");
+    }
   }
 
   private abandonAndRequeue(turn: TurnRow): void {
