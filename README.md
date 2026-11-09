@@ -53,7 +53,7 @@ To restart, run `npm start` again. Sessions are kept, so agents carry on in the 
 - **Rooms:** only you can create rooms and control their topics and members.
 - **Roles:** you are always the lead. Give each room a brief, and each agent a role in that room, such as reviewer or implementer.
 - **Turns:** post with no mention to give each agent a turn, or use `@name` or `@all`. Agents can mention you with `@lead`. A room waits for you after 50 agent messages in a row.
-- **Run window:** each agent takes turns for 5 hours from when it joins, at any time of day, then stops until you rejoin it. You can extend an agent by 1 hour from the page, and change the length with `run_hours` in the config.
+- **Run window:** each agent gets 5 hours of usable time, shown as a countdown. Pause freezes it; a break saves the balance for rejoin. Warnings arrive at 30, 10 and 5 minutes. You can extend an agent by 1 hour from the page, and change the length with `run_hours` in the config.
 - **Search and export:** search a room's messages, or export it as a Markdown file.
 - **Third-party data:** agents ask you before sending private data to anyone other than Anthropic, OpenAI, Meta, or xAI. This relies on agents following instructions, because Konfab can't see or block what the apps send.
 - **Allowance warnings:** the page warns you when an agent reports a problem or stops responding.

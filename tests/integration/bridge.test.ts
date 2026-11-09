@@ -232,6 +232,9 @@ describe("server and bridge", () => {
     diskService.postUserMessage(ROOM, "Please respond after restart");
     const activeTurn = diskService.poll("claude", joined.session_id, true);
     if (activeTurn.status !== "turn") throw new Error("Expected active turn");
+    diskService.setRoomPaused(ROOM, true);
+    const frozenBudget =
+      diskService.roomState(ROOM).agents[0]!.run_clock!.remaining_ms;
     let diskApp = await buildApp({ service: diskService, port: PORT });
     const headers = {
       host: `127.0.0.1:${PORT}`,
@@ -261,6 +264,10 @@ describe("server and bridge", () => {
         maxMessageChars: 1000,
       });
       diskService.recoverAfterRestart();
+      expect(diskService.roomState(ROOM).agents[0]!.run_clock).toMatchObject({
+        remaining_ms: frozenBudget,
+        paused: true,
+      });
       expect(diskService.roomState(ROOM).agents[0]?.working?.detail).toBe(
         "Restart test",
       );

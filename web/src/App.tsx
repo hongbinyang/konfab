@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type ReactNode,
   useId,
+  useMemo,
   type KeyboardEvent,
 } from "react";
 import Markdown from "react-markdown";
@@ -20,6 +21,7 @@ import {
   type Permission,
   type AgentState,
   type Overview,
+  type RunWarning,
   type RoomAgent,
   type RoomState,
 } from "./api";
@@ -62,7 +64,6 @@ const ROLE_PRESETS: Record<string, string> = {
   Researcher:
     "Gather facts and sources, separate evidence from opinion, and summarize what you find.",
 };
-const CLOSING_SOON_MS = 15 * 60_000;
 
 function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
@@ -157,6 +158,7 @@ export function App() {
         act={act}
       />
       <main className="chat">
+        <RunWarningToasts overview={overview} act={act} />
         {error && (
           <p className="banner error" role="alert">
             {error}
@@ -1074,6 +1076,186 @@ function MessageAttachments({
   );
 }
 
+function formatRemaining(ms: number): string {
+  if (ms < 60_000) return `${Math.max(0, Math.ceil(ms / 1000))} s left`;
+  const minutes = Math.ceil(ms / 60_000);
+  return minutes >= 60
+    ? `${Math.floor(minutes / 60)} h ${minutes % 60} min left`
+    : `${minutes} min left`;
+}
+
+function RunCountdown({ agent }: { agent: RoomAgent }) {
+  const snapshot = useMemo(
+    () => ({ clock: agent.run_clock, receivedAt: performance.now() }),
+    [agent.run_clock],
+  );
+  const [, repaint] = useState(0);
+  const remaining = snapshot.clock
+    ? Math.max(
+        0,
+        snapshot.clock.remaining_ms -
+          (snapshot.clock.paused ? 0 : performance.now() - snapshot.receivedAt),
+      )
+    : agent.saved_run_ms;
+  const interval =
+    remaining !== null && remaining !== undefined && remaining < 60_000
+      ? 1000
+      : 30_000;
+  useEffect(() => {
+    if (!snapshot.clock || snapshot.clock.paused) return;
+    const timer = setInterval(() => repaint((value) => value + 1), interval);
+    return () => clearInterval(timer);
+  }, [snapshot, interval]);
+  if (remaining === null || remaining === undefined) return null;
+  const paused = snapshot.clock?.paused ?? true;
+  return (
+    <span
+      className={
+        remaining <= 5 * 60_000
+          ? "countdown critical"
+          : remaining <= 30 * 60_000
+            ? "countdown warning-text"
+            : "countdown muted"
+      }
+      title={
+        !paused && agent.closes_at !== null
+          ? `Ends at ${new Date(agent.closes_at).toLocaleString()}`
+          : "Remaining time is frozen"
+      }
+    >
+      {!snapshot.clock
+        ? `On break · ${formatRemaining(remaining).replace(/left$/, "saved")}`
+        : remaining <= 0 && !paused
+          ? "Run window ended"
+          : `${paused ? "Paused · " : ""}${formatRemaining(remaining)}`}
+    </span>
+  );
+}
+
+function NotificationSetting() {
+  const [permission, setPermission] = useState(() =>
+    "Notification" in window ? Notification.permission : "unsupported",
+  );
+  if (permission === "unsupported")
+    return (
+      <p className="muted">
+        Desktop notifications are unavailable in this browser.
+      </p>
+    );
+  return (
+    <>
+      <button
+        className="secondary"
+        type="button"
+        disabled={permission === "granted" || permission === "denied"}
+        onClick={() => {
+          void Notification.requestPermission()
+            .then(setPermission)
+            .catch(() => undefined);
+        }}
+      >
+        {permission === "granted"
+          ? "Notifications enabled"
+          : permission === "denied"
+            ? "Notifications blocked in browser"
+            : "Enable notifications"}
+      </button>
+    </>
+  );
+}
+
+function RunWarningToasts({ overview, act }: { overview: Overview; act: Act }) {
+  const [toasts, setToasts] = useState<RunWarning[]>([]);
+  const seen = useRef(new Set<number>());
+  useEffect(() => {
+    const latest = new Map<string, RunWarning>();
+    for (const warning of overview.run_warnings ?? [])
+      latest.set(warning.session_id, warning);
+    for (const warning of latest.values()) {
+      if (seen.current.has(warning.id)) continue;
+      seen.current.add(warning.id);
+      const deliver = () => {
+        const key = `konfab.ui.v1.run-warning.${warning.session_id}.${warning.id}`;
+        try {
+          if (localStorage.getItem(key)) return;
+          localStorage.setItem(key, "seen");
+        } catch {
+          /* Session-local deduplication still applies. */
+        }
+        setToasts((previous) => [
+          ...previous.filter((item) => item.session_id !== warning.session_id),
+          warning,
+        ]);
+        if (
+          document.hidden &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
+          try {
+            new Notification(
+              `${warning.agent_id}: ${warning.threshold} min left in #${warning.room}`,
+              { tag: `run-window-${warning.session_id}` },
+            );
+          } catch {
+            /* The page toast remains available. */
+          }
+        }
+      };
+      if (navigator.locks)
+        void navigator.locks.request("konfab-run-warning", deliver);
+      else deliver();
+    }
+  }, [overview.run_warnings]);
+  const active = new Set(
+    (overview.run_warnings ?? []).map((warning) => warning.id),
+  );
+  return (
+    <div className="run-toasts" aria-live="polite">
+      {toasts
+        .filter((warning) => active.has(warning.id))
+        .map((warning) => (
+          <div className="banner warning" key={warning.id}>
+            <span>
+              {warning.agent_id}: {warning.threshold} min left in #
+              {warning.room}
+            </span>
+            <button
+              className="quiet"
+              type="button"
+              onClick={() =>
+                void act(async () => {
+                  await request(
+                    `/api/rooms/${warning.room_id}/members/${warning.agent_id}/extend-run`,
+                    { method: "POST", body: { minutes: 60 } },
+                  );
+                  setToasts((previous) =>
+                    previous.filter(
+                      (item) => item.session_id !== warning.session_id,
+                    ),
+                  );
+                })
+              }
+            >
+              Extend 1 hour
+            </button>
+            <button
+              className="quiet"
+              type="button"
+              aria-label={`Dismiss ${warning.agent_id} time warning`}
+              onClick={() =>
+                setToasts((previous) =>
+                  previous.filter((item) => item.id !== warning.id),
+                )
+              }
+            >
+              Dismiss
+            </button>
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function usePanelPreference(
   key: string,
   fallback: boolean,
@@ -1232,6 +1414,7 @@ function Panel({
           <p title="This status reflects the page connection, not whether a person is present.">
             {pageConnected ? "Page connected" : "Page disconnected"}
           </p>
+          <NotificationSetting />
         </CollapsibleSection>
         {overview.permissions.length > 0 && (
           <CollapsibleSection
@@ -1609,17 +1792,7 @@ function Agents({
                         min ago
                       </span>
                     )}
-                  {member.closes_at !== null && (
-                    <span
-                      className={
-                        member.closes_at - Date.now() <= CLOSING_SOON_MS
-                          ? "warning-text"
-                          : "muted"
-                      }
-                    >
-                      ends {formatTime(member.closes_at)}
-                    </span>
-                  )}
+                  <RunCountdown agent={member} />
                 </>
               )}
             </div>
@@ -1835,22 +2008,26 @@ function AgentDetails({
             Edit role
           </button>
         )}
-        {!archived && agent.closes_at !== null && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() =>
-              void act(() =>
-                request(`/api/rooms/${roomId}/members/${agent.id}/extend-run`, {
-                  method: "POST",
-                  body: { minutes: 60 },
-                }),
-              )
-            }
-          >
-            Extend 1 hour
-          </button>
-        )}
+        {!archived &&
+          (agent.closes_at !== null || agent.saved_run_ms != null) && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() =>
+                void act(() =>
+                  request(
+                    `/api/rooms/${roomId}/members/${agent.id}/extend-run`,
+                    {
+                      method: "POST",
+                      body: { minutes: 60 },
+                    },
+                  ),
+                )
+              }
+            >
+              Extend 1 hour
+            </button>
+          )}
         {!archived && (
           <button
             type="button"

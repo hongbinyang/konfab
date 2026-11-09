@@ -264,6 +264,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       let waitSeconds = options.defaultWaitSeconds ?? DEFAULT_WAIT_SECONDS;
       let first = true;
       let progress = 0;
+      let runWindowNotice: string | undefined;
       const progressToken = extra._meta?.progressToken;
 
       try {
@@ -273,11 +274,16 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           const timeout = Math.min(SERVER_POLL_SECONDS, remaining);
 
           try {
-            const result = await call<{ status: string; wait_seconds: number }>(
+            const result = await call<{
+              status: string;
+              wait_seconds: number;
+              run_window_notice?: string;
+            }>(
               "/agent/wait",
               { session_id, first, call_id: callId, timeout_seconds: timeout },
               extra.signal,
             );
+            runWindowNotice = result.run_window_notice;
             first = false;
             waitSeconds = result.wait_seconds;
             if (result.status !== "idle") {
@@ -302,7 +308,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           }
         }
         if (!extra.signal.aborted) await finish();
-        return asToolResult({ status: "idle" });
+        return asToolResult({
+          status: "idle",
+          ...(runWindowNotice ? { run_window_notice: runWindowNotice } : {}),
+        });
       } catch (error) {
         return asToolError(error);
       }

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../../src/server/config.js";
 
+it("accepts small and fractional run warning thresholds", () => {
+  expect(
+    parseConfig("defaults:\n  run_warnings_minutes: [5, 3, 0.5]\n").defaults
+      .run_warnings_minutes,
+  ).toEqual([5, 3, 0.5]);
+});
+
 describe("parseConfig", () => {
   it("uses the agreed defaults for an empty file", () => {
     const config = parseConfig("");

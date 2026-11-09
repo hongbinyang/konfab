@@ -726,3 +726,19 @@ dd {
   font-size: 11px;
   white-space: nowrap;
 }
+
+.countdown {
+  display: inline-block;
+}
+.countdown.critical {
+  color: var(--error);
+  font-weight: 600;
+}
+.run-toasts {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.run-toasts .banner {
+  flex-wrap: wrap;
+}

@@ -249,6 +249,102 @@ describe("Phase 1 behavior", () => {
       ).toContain("run_window_extended");
     });
 
+    it("freezes overlapping pauses, extends frozen time and thaws once", () => {
+      worker();
+      now += 60_000;
+      const before =
+        service.roomState("window-test").agents[0]!.run_clock!.remaining_ms;
+      service.setRoomPaused("window-test", true);
+      service.setAllPaused(true);
+      now += 8 * 60 * 60_000;
+      service.tick();
+      expect(
+        service.roomState("window-test").agents[0]!.run_clock,
+      ).toMatchObject({ remaining_ms: before, paused: true });
+      service.setRoomPaused("window-test", false);
+      expect(
+        service.roomState("window-test").agents[0]!.run_clock!.paused,
+      ).toBe(true);
+      service.extendRunWindow("window-test", "worker", 60);
+      service.setAllPaused(false);
+      expect(
+        service.roomState("window-test").agents[0]!.run_clock,
+      ).toMatchObject({ remaining_ms: before + 3_600_000, paused: false });
+      now += 60_000;
+      expect(
+        service.roomState("window-test").agents[0]!.run_clock!.remaining_ms,
+      ).toBe(before + 3_600_000 - 60_000);
+    });
+
+    it("restores each member's break budget once and joins paused rooms frozen", () => {
+      worker();
+      service.ensureAgent("second", "Second");
+      service.setMembers("window-test", ["worker", "second"]);
+      service.join("second", "window-test");
+      now += 60_000;
+      const budget =
+        service.roomState("window-test").agents[0]!.run_clock!.remaining_ms;
+      service.takeBreak("window-test");
+      now += 8 * 60 * 60_000;
+      service.join("worker", "window-test");
+      expect(
+        service.roomState("window-test").agents[0]!.run_clock!.remaining_ms,
+      ).toBe(budget);
+      service.join("second", "window-test");
+      expect(
+        service.roomState("window-test").agents[1]!.run_clock!.remaining_ms,
+      ).toBe(budget);
+      service.setRoomPaused("window-test", true);
+      service.join("worker", "window-test");
+      now += 60_000;
+      expect(
+        service.roomState("window-test").agents[0]!.run_clock,
+      ).toMatchObject({ remaining_ms: 5 * 3_600_000, paused: true });
+    });
+
+    it("deduplicates warning thresholds and rearms them after extension", () => {
+      const session = worker();
+      now += 5 * 3_600_000 - 30 * 60_000;
+      service.tick();
+      service.tick();
+      expect(
+        service
+          .overview()
+          .run_warnings.filter((w) => w.agent_id === "worker")
+          .map((w) => w.threshold),
+      ).toEqual([30]);
+      service.setRoomPaused("window-test", true);
+      now += 3_600_000;
+      service.tick();
+      expect(
+        service.overview().run_warnings.filter((w) => w.agent_id === "worker"),
+      ).toHaveLength(1);
+      service.setRoomPaused("window-test", false);
+      now += 20 * 60_000;
+      service.tick();
+      expect(
+        service
+          .overview()
+          .run_warnings.filter((w) => w.agent_id === "worker")
+          .map((w) => w.threshold),
+      ).toEqual([30, 10]);
+      expect(service.poll("worker", session, true).run_window_notice).toContain(
+        "10 min left",
+      );
+      service.extendRunWindow("window-test", "worker", 60);
+      expect(
+        service.overview().run_warnings.filter((w) => w.agent_id === "worker"),
+      ).toHaveLength(0);
+      now += 40 * 60_000;
+      service.tick();
+      expect(
+        service
+          .overview()
+          .run_warnings.filter((w) => w.agent_id === "worker")
+          .map((w) => w.threshold),
+      ).toEqual([30]);
+    });
+
     it("uses per-agent duration overrides and rejects expired extension", () => {
       const timed = new KonfabService(db, {
         now: () => now,
@@ -867,7 +963,7 @@ describe("database migration", () => {
         .run();
       old.close();
       const upgraded = openDatabase(file);
-      expect(upgraded.pragma("user_version", { simple: true })).toBe(11);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(12);
       expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
         name: "existing",
         brief: "kept",
@@ -910,7 +1006,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(11);
+      expect(db.pragma("user_version", { simple: true })).toBe(12);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });
