@@ -44,7 +44,18 @@ export interface Report {
   detail: string;
 }
 
+export interface RunWarning {
+  id: number;
+  threshold: number;
+  created_at: number;
+  session_id: string;
+  room_id: number;
+  agent_id: string;
+  room: string;
+}
+
 export interface Overview {
+  run_warnings?: RunWarning[];
   paused_all: boolean;
   rooms: RoomSummary[];
   agents: { id: string; display_name: string }[];
@@ -89,6 +100,12 @@ export interface RoomAgent {
     stale_after_ms: number;
     stale: boolean;
   } | null;
+  run_clock?: {
+    remaining_ms: number;
+    paused: boolean;
+    server_now: number;
+  } | null;
+  saved_run_ms?: number | null;
   closes_at: number | null;
   join_prompt: string;
   role: string;

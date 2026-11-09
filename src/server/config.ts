@@ -29,6 +29,10 @@ const DEFAULT_HOURS = {
 const defaultsSchema = z.object({
   hours: hoursSchema.default(DEFAULT_HOURS),
   run_hours: z.number().positive().max(24).default(5),
+  run_warnings_minutes: z
+    .array(z.number().positive().max(1440))
+    .max(20)
+    .default([30, 10, 5]),
   max_consecutive_agent_messages: z.number().int().min(1).default(50),
   wait_timeout_seconds: z.number().int().min(1).default(50),
   turn_timeout_minutes: z.number().int().min(1).default(30),
@@ -72,6 +76,7 @@ const DEFAULT_CONFIG = `server:
 
 defaults:
   run_hours: 5
+  run_warnings_minutes: [30, 10, 5]
   max_consecutive_agent_messages: 50
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30

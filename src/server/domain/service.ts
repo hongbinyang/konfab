@@ -31,6 +31,7 @@ export interface ServiceOptions {
   maxDecisionChars?: number;
   maxAttachmentBytes?: number;
   attachmentDir?: string;
+  runWarningsMinutes?: readonly number[];
   runHoursFor?: (agentId: string) => number;
   preApprovals?: readonly PreApproval[];
 }
@@ -53,7 +54,7 @@ export interface MessageView {
   mentions?: string[];
 }
 
-export type WaitResult =
+export type WaitResult = (
   | {
       status: "turn";
       turn_id: number;
@@ -77,7 +78,8 @@ export type WaitResult =
       instructions?: string;
       wait_seconds: number;
     }
-  | { status: "replaced"; wait_seconds: number };
+  | { status: "replaced"; wait_seconds: number }
+) & { run_window_notice?: string };
 
 export type AgentState =
   | "not_joined"
@@ -169,6 +171,8 @@ interface SessionRow {
   last_call_at: number;
   contact_lost_at: number | null;
   run_ends_at: number | null;
+  run_remaining_ms: number | null;
+  run_break_pending: number;
   working_detail: string | null;
   working_updated_at: number | null;
 }
@@ -298,6 +302,23 @@ export class KonfabService {
         });
       }
     })();
+    const activeWindows = this.db
+      .prepare("SELECT * FROM sessions WHERE state = 'active'")
+      .all() as SessionRow[];
+    for (const session of activeWindows)
+      for (const threshold of new Set(
+        this.options.runWarningsMinutes ?? [30, 10, 5],
+      )) {
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO run_warning_state (session_id, threshold, fired) VALUES (?, ?, ?)",
+          )
+          .run(
+            session.id,
+            threshold,
+            this.remainingRunMs(session) > threshold * 60000 ? 0 : 1,
+          );
+      }
   }
 
   get waitSeconds(): number {
@@ -490,9 +511,12 @@ export class KonfabService {
 
   setRoomPaused(ref: RoomRef, paused: boolean): void {
     const room = this.room(ref);
-    this.db
-      .prepare("UPDATE rooms SET paused = ? WHERE id = ?")
-      .run(paused ? 1 : 0, room.id);
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE rooms SET paused = ? WHERE id = ?")
+        .run(paused ? 1 : 0, room.id);
+      this.syncRunPauses();
+    })();
     this.logEvent(paused ? "room_paused" : "room_resumed", room.id, null, {});
     this.notify();
   }
@@ -518,12 +542,15 @@ export class KonfabService {
   }
 
   setAllPaused(paused: boolean): void {
-    this.db
-      .prepare(
-        `INSERT INTO settings (key, value) VALUES ('paused_all', ?)
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO settings (key, value) VALUES ('paused_all', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      )
-      .run(paused ? "1" : "0");
+        )
+        .run(paused ? "1" : "0");
+      this.syncRunPauses();
+    })();
     this.logEvent(paused ? "all_paused" : "all_resumed", null, null, {});
     this.notify();
   }
@@ -563,6 +590,7 @@ export class KonfabService {
       agents,
       permissions: this.listPermissions("pending"),
       reports: this.listReports(),
+      run_warnings: this.runWarnings(),
       pre_approvals: this.options.preApprovals ?? [],
     };
   }
@@ -612,6 +640,20 @@ export class KonfabService {
           bridge_outdated:
             agent.bridge_protocol !== null && agent.bridge_protocol !== 1,
           closes_at: session?.run_ends_at ?? null,
+          run_clock: session
+            ? {
+                remaining_ms: this.remainingRunMs(session),
+                paused: session.run_remaining_ms !== null,
+                server_now: this.now(),
+              }
+            : null,
+          saved_run_ms: (
+            this.db
+              .prepare(
+                "SELECT saved_run_ms FROM room_members WHERE room_id = ? AND agent_id = ?",
+              )
+              .get(room.id, agent.id) as { saved_run_ms: number | null }
+          ).saved_run_ms,
           working:
             session?.working_detail && session.working_updated_at !== null
               ? {
@@ -680,22 +722,37 @@ export class KonfabService {
           .get(room.id, agentId) as TurnRow | undefined;
         if (activeTurn) this.abandonAndRequeue(activeTurn);
       }
+      const saved = this.db
+        .prepare(
+          "SELECT saved_run_ms FROM room_members WHERE room_id = ? AND agent_id = ?",
+        )
+        .get(room.id, agentId) as { saved_run_ms: number | null };
+      const budget =
+        saved.saved_run_ms ??
+        (this.options.runHoursFor?.(agentId) ?? 5) * 3_600_000;
+      this.db
+        .prepare(
+          "UPDATE room_members SET saved_run_ms = NULL WHERE room_id = ? AND agent_id = ?",
+        )
+        .run(room.id, agentId);
       this.db
         .prepare(
           `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at)
            VALUES (?, ?, ?, 'active', ?, ?, ?)`,
         )
-        .run(
-          sessionId,
-          room.id,
-          agentId,
-          now,
-          now,
-          now + (this.options.runHoursFor?.(agentId) ?? 5) * 3_600_000,
-        );
+        .run(sessionId, room.id, agentId, now, now, now + budget);
       this.logEvent("run_window_started", room.id, agentId, {
-        ends_at: now + (this.options.runHoursFor?.(agentId) ?? 5) * 3_600_000,
+        ends_at: now + budget,
       });
+      for (const threshold of new Set(
+        this.options.runWarningsMinutes ?? [30, 10, 5],
+      )) {
+        this.db
+          .prepare(
+            "INSERT INTO run_warning_state (session_id, threshold, fired) VALUES (?, ?, ?)",
+          )
+          .run(sessionId, threshold, budget > threshold * 60_000 ? 0 : 1);
+      }
       const earlierSession = this.db
         .prepare(
           "SELECT 1 FROM sessions WHERE room_id = ? AND agent_id = ? AND id <> ? LIMIT 1",
@@ -710,6 +767,7 @@ export class KonfabService {
           .run(room.id);
         this.logEvent("break_ended", room.id, agentId, {});
       }
+      this.syncRunPauses();
     })();
     this.notify();
     return {
@@ -763,7 +821,7 @@ export class KonfabService {
         .get(room.id) as TurnRow | undefined;
       if (active?.agent_id === agentId) return this.buildTurn(room, active);
 
-      if (room.on_break === 1) {
+      if (room.on_break === 1 || session.run_break_pending === 1) {
         this.endSession(session.id, "on_break");
         notifyAfter.value = true;
         return closed("on_break");
@@ -781,7 +839,16 @@ export class KonfabService {
         : { status: "idle", wait_seconds: waitSeconds };
     })();
     if (notifyAfter.value) this.notify();
-    return result;
+    const remaining = this.remainingRunMs(session);
+    return remaining > 0 &&
+      remaining <= 10 * 60_000 &&
+      session.run_remaining_ms === null &&
+      (result.status === "turn" || result.status === "idle")
+      ? {
+          ...result,
+          run_window_notice: `${Math.ceil(remaining / 60_000)} min left in your run window: commit or hand off your work.`,
+        }
+      : result;
   }
 
   beginObservedWait(agentId: string, sessionId: string, callId: string): void {
@@ -1659,7 +1726,7 @@ export class KonfabService {
       .prepare(
         `SELECT id, type, agent_id, created_at, payload FROM events
       WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
-      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended')
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning')
       AND id < ? ORDER BY id DESC LIMIT ?`,
       )
       .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
@@ -1767,40 +1834,78 @@ export class KonfabService {
   // Run windows
 
   extendRunWindow(ref: RoomRef, agentId: string, minutes: number): void {
-    const room = this.room(ref);
-    this.requireMember(room.id, agentId);
-    const session = this.activeSession(room.id, agentId);
-    if (!session || session.run_ends_at === null)
-      throw new KonfabError(
-        "session_not_active",
-        409,
-        "Agent must rejoin before its run window can be extended",
-      );
-    const activeTurn = this.db
-      .prepare("SELECT 1 FROM turns WHERE session_id = ? AND state = 'active'")
-      .get(session.id);
-    if (!this.isWindowActive(session) && !activeTurn)
-      throw new KonfabError(
-        "session_not_active",
-        409,
-        "Run window ended; rejoin before extending",
-      );
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
       throw new KonfabError(
         "invalid_extension",
         400,
         "Extension must be from 1 to 1440 minutes",
       );
-    const endsAt = Math.max(this.now(), session.run_ends_at) + minutes * 60_000;
-    this.db
-      .prepare(
-        "UPDATE sessions SET run_ends_at = ? WHERE id = ? AND state = 'active'",
-      )
-      .run(endsAt, session.id);
-    this.logEvent("run_window_extended", room.id, agentId, {
-      ends_at: endsAt,
-      minutes,
-    });
+    this.db.transaction(() => {
+      const room = this.room(ref);
+      this.requireMember(room.id, agentId);
+      const session = this.activeSession(room.id, agentId);
+      if (!session) {
+        const member = this.db
+          .prepare(
+            "SELECT saved_run_ms FROM room_members WHERE room_id = ? AND agent_id = ?",
+          )
+          .get(room.id, agentId) as { saved_run_ms: number | null };
+        if (member.saved_run_ms !== null) {
+          this.db
+            .prepare(
+              "UPDATE room_members SET saved_run_ms = saved_run_ms + ? WHERE room_id = ? AND agent_id = ?",
+            )
+            .run(minutes * 60000, room.id, agentId);
+          this.logEvent("run_window_extended", room.id, agentId, {
+            minutes,
+            remaining_ms: member.saved_run_ms + minutes * 60000,
+          });
+          return;
+        }
+      }
+      if (!session || session.run_ends_at === null)
+        throw new KonfabError(
+          "session_not_active",
+          409,
+          "Agent must rejoin before its run window can be extended",
+        );
+      const activeTurn = this.db
+        .prepare(
+          "SELECT 1 FROM turns WHERE session_id = ? AND state = 'active'",
+        )
+        .get(session.id);
+      if (!this.isWindowActive(session) && !activeTurn)
+        throw new KonfabError(
+          "session_not_active",
+          409,
+          "Run window ended; rejoin before extending",
+        );
+      const remaining = this.remainingRunMs(session) + minutes * 60_000;
+      const endsAt = this.now() + remaining;
+      this.db
+        .prepare(
+          "UPDATE sessions SET run_ends_at = ?, run_remaining_ms = ? WHERE id = ? AND state = 'active'",
+        )
+        .run(
+          endsAt,
+          session.run_remaining_ms === null ? null : remaining,
+          session.id,
+        );
+      this.db
+        .prepare(
+          "UPDATE run_warning_state SET fired = 0, cycle = cycle + 1 WHERE session_id = ? AND threshold * 60000 < ? AND fired = 1",
+        )
+        .run(session.id, remaining);
+      this.db
+        .prepare(
+          "UPDATE room_members SET saved_run_ms = ? WHERE room_id = ? AND agent_id = ? AND saved_run_ms IS NOT NULL",
+        )
+        .run(remaining, room.id, agentId);
+      this.logEvent("run_window_extended", room.id, agentId, {
+        ends_at: endsAt,
+        minutes,
+      });
+    })();
     this.notify();
   }
 
@@ -1809,6 +1914,7 @@ export class KonfabService {
   /** Preserve work owned by surviving sessions; requeue orphaned turns. */
   recoverAfterRestart(): void {
     this.db.transaction(() => {
+      this.syncRunPauses();
       const active = this.db
         .prepare("SELECT * FROM turns WHERE state = 'active'")
         .all() as TurnRow[];
@@ -1825,6 +1931,7 @@ export class KonfabService {
 
   /** Applies time-based rules. Called periodically by the server. */
   tick(): void {
+    this.processRunWarnings();
     if (this.options.attachmentDir) {
       const stale = this.db
         .prepare(
@@ -1889,6 +1996,10 @@ export class KonfabService {
             "SELECT 1 FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'active'",
           )
           .get(session.room_id, session.agent_id);
+        if (!working && session.run_break_pending === 1) {
+          this.endSession(session.id, "on_break");
+          continue;
+        }
         if (
           !working &&
           session.contact_lost_at === null &&
@@ -1959,6 +2070,16 @@ export class KonfabService {
       .prepare("SELECT * FROM sessions WHERE room_id = ? AND state = 'active'")
       .all(roomId) as SessionRow[];
     for (const session of sessions) {
+      const remaining = this.remainingRunMs(session);
+      this.db
+        .prepare(
+          "UPDATE room_members SET saved_run_ms = ? WHERE room_id = ? AND agent_id = ? AND saved_run_ms IS NULL",
+        )
+        .run(remaining, roomId, session.agent_id);
+      this.freezeRun(session);
+      this.db
+        .prepare("UPDATE sessions SET run_break_pending = 1 WHERE id = ?")
+        .run(session.id);
       const working = this.db
         .prepare(
           "SELECT 1 FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'active'",
@@ -2028,8 +2149,107 @@ export class KonfabService {
     this.logEvent("members_changed", roomId, null, { members: unique });
   }
 
+  private remainingRunMs(session: SessionRow): number {
+    return Math.max(
+      0,
+      session.run_remaining_ms ??
+        (session.run_ends_at ?? this.now()) - this.now(),
+    );
+  }
+
+  private freezeRun(session: SessionRow): void {
+    if (session.run_remaining_ms !== null) return;
+    const remaining = this.remainingRunMs(session);
+    this.db
+      .prepare("UPDATE sessions SET run_remaining_ms = ? WHERE id = ?")
+      .run(remaining, session.id);
+    this.logEvent("run_window_paused", session.room_id, session.agent_id, {
+      remaining_ms: remaining,
+    });
+  }
+
+  private syncRunPauses(): void {
+    const sessions = this.db
+      .prepare("SELECT * FROM sessions WHERE state = 'active'")
+      .all() as SessionRow[];
+    for (const session of sessions) {
+      const room = this.roomById(session.room_id);
+      const paused =
+        this.isAllPaused() ||
+        room.paused === 1 ||
+        room.on_break === 1 ||
+        session.run_break_pending === 1;
+      if (paused) this.freezeRun(session);
+      else if (session.run_remaining_ms !== null) {
+        this.db
+          .prepare(
+            "UPDATE sessions SET run_ends_at = ?, run_remaining_ms = NULL WHERE id = ?",
+          )
+          .run(this.now() + session.run_remaining_ms, session.id);
+        this.logEvent("run_window_resumed", session.room_id, session.agent_id, {
+          remaining_ms: session.run_remaining_ms,
+        });
+      }
+    }
+  }
+
+  private processRunWarnings(): void {
+    const sessions = this.db
+      .prepare(
+        "SELECT * FROM sessions WHERE state = 'active' AND run_remaining_ms IS NULL",
+      )
+      .all() as SessionRow[];
+    let changed = false;
+    this.db.transaction(() => {
+      for (const session of sessions) {
+        const remaining = this.remainingRunMs(session);
+        if (remaining <= 0) continue;
+        const thresholds = this.db
+          .prepare(
+            "SELECT threshold, cycle FROM run_warning_state WHERE session_id = ? AND fired = 0 AND threshold * 60000 >= ?",
+          )
+          .all(session.id, remaining) as { threshold: number; cycle: number }[];
+        for (const { threshold, cycle } of thresholds) {
+          this.db
+            .prepare(
+              "INSERT OR IGNORE INTO run_warnings (session_id, threshold, cycle, created_at) VALUES (?, ?, ?, ?)",
+            )
+            .run(session.id, threshold, cycle, this.now());
+          this.db
+            .prepare(
+              "UPDATE run_warning_state SET fired = 1 WHERE session_id = ? AND threshold = ?",
+            )
+            .run(session.id, threshold);
+          this.logEvent("run_warning", session.room_id, session.agent_id, {
+            threshold,
+          });
+          changed = true;
+        }
+      }
+    })();
+    if (changed) this.notify();
+  }
+
+  private runWarnings() {
+    return this.db
+      .prepare(
+        `SELECT w.id, w.threshold, w.created_at, s.id AS session_id, s.room_id, s.agent_id, r.name AS room
+      FROM run_warnings w JOIN sessions s ON s.id = w.session_id JOIN rooms r ON r.id = s.room_id JOIN run_warning_state ws ON ws.session_id = w.session_id AND ws.threshold = w.threshold AND ws.cycle = w.cycle
+      WHERE s.state = 'active' AND w.created_at > ? ORDER BY w.id`,
+      )
+      .all(this.now() - 24 * 60 * 60_000) as {
+      id: number;
+      threshold: number;
+      created_at: number;
+      session_id: string;
+      room_id: number;
+      agent_id: string;
+      room: string;
+    }[];
+  }
+
   private isWindowActive(session: SessionRow): boolean {
-    return session.run_ends_at !== null && this.now() < session.run_ends_at;
+    return this.remainingRunMs(session) > 0;
   }
 
   private endSession(sessionId: string, reason: string): void {
@@ -2093,6 +2313,7 @@ export class KonfabService {
         ? "window_ended"
         : "not_joined";
     }
+    if (session.run_break_pending === 1) return "on_break";
     if (!this.isWindowActive(session)) return "window_ended";
     if (!this.isLive(session)) return "not_responding";
     const queued = this.db
@@ -2395,7 +2616,9 @@ export class KonfabService {
           reason: resultMessageId === null ? "pass" : "post",
         });
       }
-      if (session.state === "active" && !this.isWindowActive(session))
+      if (session.state === "active" && session.run_break_pending === 1)
+        this.endSession(session.id, "on_break");
+      else if (session.state === "active" && !this.isWindowActive(session))
         this.endSession(session.id, "run_window_ended");
     }
   }

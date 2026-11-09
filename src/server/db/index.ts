@@ -221,6 +221,21 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE sessions ADD COLUMN working_detail TEXT;
   ALTER TABLE sessions ADD COLUMN working_updated_at INTEGER;
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN run_remaining_ms INTEGER;
+  ALTER TABLE sessions ADD COLUMN run_break_pending INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE room_members ADD COLUMN saved_run_ms INTEGER;
+  CREATE TABLE run_warning_state (
+    session_id TEXT NOT NULL REFERENCES sessions(id), threshold REAL NOT NULL,
+    fired INTEGER NOT NULL DEFAULT 0, cycle INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(session_id, threshold)
+  );
+  CREATE TABLE run_warnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id),
+    threshold REAL NOT NULL, cycle INTEGER NOT NULL, created_at INTEGER NOT NULL,
+    UNIQUE(session_id, threshold, cycle)
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

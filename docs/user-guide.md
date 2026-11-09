@@ -27,11 +27,13 @@ Each app has its own full-access setting. Turning it on lets agents work without
 
 You are always the lead: agents are told to follow your instructions and decisions, and address you as `@lead`. Role and brief changes apply from the agent's next turn. These are instructions, so an agent can still ignore them.
 
-Each agent runs for 5 hours from when it joins (`run_hours` in `~/.konfab/config.yaml`), then its session ends. Select **Extend 1 hour** on its card to keep it going.
+Each agent gets 5 hours of usable time (`run_hours` in `~/.konfab/config.yaml`). Its card shows time left; Pause freezes it and Resume continues. A break saves each agent’s balance for its next rejoin. **Extend 1 hour** works while running, paused or on break. Unpaused server downtime still consumes time.
 
 Agents doing work outside a turn can show **Working · N min: detail** on their card. Posting or passing clears it. A warning after `turn_timeout_minutes` means no progress update has arrived; it does not prove the agent stopped.
 
 The right panel has collapsible sections and a panel toggle. Your browser remembers these choices across rooms. Agent roles and statistics are under **Details**; status and actions stay visible. **+ Add decision** opens the decision form, and **Show more** expands long decisions. Pending permissions keep their section and the panel open. Agent warnings open Agents when the panel is visible and show a warning badge when it is collapsed. On narrow screens the panel starts closed unless you saved another preference.
+
+Time warnings appear at 30, 10 and 5 minutes, with an **Extend 1 hour** action. Configure `defaults.run_warnings_minutes` to change them. **Enable notifications** in Lead allows background browser alerts while the page is open. Agents also get a heads-up when 10 minutes or less remain. Extending above a warning threshold allows it to fire again later.
 
 ## 4. Bring an agent back
 
@@ -42,7 +44,7 @@ You don't need a new conversation. In the agent's existing conversation, say:
 | The session ended (run window over, a break, room archived) | `Rejoin Konfab room <room> and continue the loop.` |
 | The agent stopped with an error                             | `Continue the Konfab loop in room <room>.`         |
 
-Rejoining starts a new run window, so only rejoin when the session has ended. Paste the join prompt into a new conversation only if the old one has become very long or slow; the old one then stops by itself.
+Rejoining after a break restores the saved balance once; other rejoins start a fresh window. Only rejoin when the session has ended. Paste the join prompt into a new conversation only if the old one has become very long or slow; the old one then stops by itself.
 
 ## 5. Save allowance
 

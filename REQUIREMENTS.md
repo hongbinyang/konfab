@@ -101,8 +101,8 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 
 | ID | Priority | Requirement |
 |---|---|---|
-| M1 | MUST | **Run window.** When an agent joins a room, at any time of day, it starts a run window of 5 hours by default. The length is configurable for all agents and for each agent. A restart of Konfab keeps the window; rejoining starts a new one. |
-| M2 | MUST | When an agent's run window ends, it receives no new turns. A turn already in progress may finish, and the agent then stops so it uses no allowance. The user can extend the window by 1 hour from the page. |
+| M1 | MUST | **Run window.** When an agent joins a room, at any time of day, it starts a run window of 5 hours by default. The length is configurable for all agents and for each agent. The card shows time remaining. Effective room/global pause freezes the balance and resume restores it without double-counting overlaps. Break saves each member’s balance for one subsequent join. Other rejoins start a fresh window; unpaused server downtime consumes time. |
+| M2 | MUST | When an agent's run window ends, it receives no new turns. A turn already in progress may finish, and the agent then stops so it uses no allowance. The user can add 1 hour while running, paused or on break. Warnings at configurable thresholds (30, 10 and 5 minutes by default) have page Extend actions, optional browser notifications and persistent deduplication; extension above a threshold rearms it. Agents receive a low-time heads-up through their wait result at 10 minutes or less. |
 | M3 | MUST | The user's messages are always accepted. Messages for an agent whose window has ended stay queued until it rejoins. |
 | M4 | LATER | Continuous, Daily Message Limit, On Mention, and Scheduled modes, set per agent. |
 | M5 | MUST | The user can start a break for one room or all rooms. Agents stop and use no allowance until the user rejoins them. Pause alone does not save allowance. |
