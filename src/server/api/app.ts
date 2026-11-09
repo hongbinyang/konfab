@@ -1,3 +1,4 @@
+import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import fastifyStatic from "@fastify/static";
 import Fastify, {
   type FastifyInstance,
@@ -210,13 +211,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.addHook("preHandler", async (request) => {
     if (!request.url.startsWith("/agent/")) return;
     const agentId = requireAgent(request);
-    const protocol = request.headers["x-konfab-protocol"] === "1" ? 1 : 0;
+    const protocol =
+      request.headers["x-konfab-protocol"] === String(BRIDGE_PROTOCOL_VERSION)
+        ? BRIDGE_PROTOCOL_VERSION
+        : 0;
     service.recordBridgeProtocol(agentId, protocol);
   });
 
   app.get("/agent/protocol", async (request) => {
     requireAgent(request);
-    return { durable_receipts: 1 };
+    return { durable_receipts: 1, bridge_protocol: BRIDGE_PROTOCOL_VERSION };
   });
 
   const repeatMutation = <T>(
@@ -272,6 +276,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       body.session_id,
       body.turn_id,
       body.body,
+    );
+  });
+
+  app.post("/agent/hand-off", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z
+      .object({
+        ...session,
+        source_message_id: z.number().int().positive(),
+        to: z.string().min(1),
+      })
+      .parse(request.body);
+    return service.handOff(
+      agentId,
+      body.session_id,
+      body.source_message_id,
+      body.to,
     );
   });
 

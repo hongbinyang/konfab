@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import type { Db } from "../db/index.js";
 
 export class KonfabError extends Error {
@@ -80,7 +81,10 @@ export type WaitResult = (
       wait_seconds: number;
     }
   | { status: "replaced"; wait_seconds: number }
-) & { run_window_notice?: string };
+) & {
+  run_window_notice?: string;
+  handoff_repair?: { source_message_id: number };
+};
 
 export type AgentState =
   | "not_joined"
@@ -199,6 +203,8 @@ interface TurnRow {
   last_message_id: number | null;
   decision_snapshot_event_id: number;
   result_message_id: number | null;
+  post_result_json: string | null;
+  repair_source_message_id: number | null;
   started_at: number | null;
 }
 
@@ -235,6 +241,7 @@ const RULES = [
   "When you change code, commit it to your own git branch.",
   "If you start work outside your turn (coding, testing, reviewing), call report_status with kind working and a short detail first. Posting or passing clears it.",
   "If you know you are low on or out of allowance, call report_status.",
+  "If post_message warns that no continuation is queued and someone should act next, call hand_off with that message ID and the intended agent, if the tool is available. Otherwise ask the lead to use the page continuation controls.",
   "When your work is done, call post_message or pass_turn, then call wait_for_turn again.",
 ].join(" ");
 
@@ -597,6 +604,66 @@ export class KonfabService {
     };
   }
 
+  private routingState(room: RoomRow) {
+    const active = this.db
+      .prepare(
+        "SELECT agent_id, id AS turn_id FROM turns WHERE room_id = ? AND state = 'active'",
+      )
+      .get(room.id) as { agent_id: string; turn_id: number } | undefined;
+    const queued = this.db
+      .prepare(
+        "SELECT agent_id, id AS turn_id, repair_source_message_id FROM turns WHERE room_id = ? AND state = 'queued' ORDER BY id",
+      )
+      .all(room.id) as {
+      agent_id: string;
+      turn_id: number;
+      repair_source_message_id: number | null;
+    }[];
+    const sessions = this.db
+      .prepare("SELECT * FROM sessions WHERE room_id = ? AND state = 'active'")
+      .all(room.id) as SessionRow[];
+    const working = sessions
+      .filter(
+        (session) =>
+          session.working_detail !== null &&
+          session.working_updated_at !== null &&
+          this.now() - session.working_updated_at < this.options.turnTimeoutMs,
+      )
+      .map((session) => session.agent_id);
+    const latest = this.db
+      .prepare(
+        "SELECT sender_type FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT 1",
+      )
+      .get(room.id) as { sender_type: string } | undefined;
+    const suspended =
+      room.paused === 1 ||
+      this.isAllPaused() ||
+      room.on_break === 1 ||
+      room.archived_at !== null;
+    return {
+      active: active ?? null,
+      queued,
+      working,
+      suspended,
+      no_continuation:
+        !suspended &&
+        !active &&
+        queued.length === 0 &&
+        working.length === 0 &&
+        latest?.sender_type === "agent",
+      eligible_agents: suspended
+        ? []
+        : sessions
+            .filter(
+              (session) =>
+                this.isWindowActive(session) &&
+                this.isLive(session) &&
+                session.run_break_pending === 0,
+            )
+            .map((session) => session.agent_id),
+    };
+  }
+
   roomState(ref: RoomRef) {
     const room = this.room(ref);
     const agents = this.db
@@ -640,7 +707,8 @@ export class KonfabService {
           can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
           bridge_outdated:
-            agent.bridge_protocol !== null && agent.bridge_protocol !== 1,
+            agent.bridge_protocol !== null &&
+            agent.bridge_protocol !== BRIDGE_PROTOCOL_VERSION,
           closes_at: session?.run_ends_at ?? null,
           run_clock: session
             ? {
@@ -672,6 +740,7 @@ export class KonfabService {
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
+      routing: this.routingState(room),
       messages: this.decorateLeadUnread(
         room.id,
         this.withAttachments(room.id, messages),
@@ -906,7 +975,13 @@ export class KonfabService {
     const result = this.db.transaction(() => {
       const turn = this.requireTurn(turnId, agentId);
       if (turn.result_message_id !== null) {
-        return { message_id: turn.result_message_id };
+        return turn.post_result_json
+          ? (JSON.parse(turn.post_result_json) as {
+              message_id: number;
+              routing_warning?: string;
+              hand_off?: { source_message_id: number; to: string };
+            })
+          : { message_id: turn.result_message_id };
       }
       const session = this.requireLiveSession(agentId, sessionId);
       this.requireActive(turn, session.id);
@@ -930,7 +1005,151 @@ export class KonfabService {
           this.enqueue(turn.room_id, target, "agent_mention");
         }
       }
-      return { message_id: messageId };
+      const targets = this.memberIds(turn.room_id).filter(
+        (id) => id !== agentId && id !== "lead",
+      );
+      const queued = this.db
+        .prepare("SELECT 1 FROM turns WHERE room_id = ? AND state = 'queued'")
+        .get(turn.room_id);
+      const needsRouting =
+        !mentions.some((id) => targets.includes(id)) && !queued;
+      const response = {
+        message_id: messageId,
+        ...(needsRouting
+          ? {
+              routing_warning: `No other agent was @mentioned, so no continuation is queued. Your turn is complete. ${targets[0] ? `If someone should act next, call hand_off with source_message_id: ${messageId} and to: "${targets[0]}" (or another member).` : "No other agent is a member; ask the lead to add or rejoin an agent."} If work is complete, keep waiting. Older connectors can use the page's Ask to continue controls.`,
+              ...(targets[0]
+                ? { hand_off: { source_message_id: messageId, to: targets[0] } }
+                : {}),
+            }
+          : {}),
+      };
+      this.db
+        .prepare("UPDATE turns SET post_result_json = ? WHERE id = ?")
+        .run(JSON.stringify(response), turn.id);
+      return response;
+    })();
+    this.notify();
+    return result;
+  }
+
+  handOff(
+    agentId: string,
+    sessionId: string,
+    sourceMessageId: number,
+    to: string,
+  ) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    const source = this.db
+      .prepare(
+        "SELECT id, sender_type, sender_id, created_at FROM messages WHERE room_id = ? AND id = ?",
+      )
+      .get(session.room_id, sourceMessageId) as
+      | {
+          id: number;
+          sender_type: string;
+          sender_id: string;
+          created_at: number;
+        }
+      | undefined;
+    if (
+      !source ||
+      source.sender_type !== "agent" ||
+      source.sender_id !== agentId
+    )
+      throw new KonfabError(
+        "invalid_handoff",
+        403,
+        "Only the author can hand off its source message in this room",
+      );
+    const result = this.db.transaction(() => {
+      const prior = this.db
+        .prepare(
+          "SELECT turn_id FROM handoffs WHERE source_message_id = ? AND target_agent_id = ?",
+        )
+        .get(sourceMessageId, to) as { turn_id: number } | undefined;
+      if (prior)
+        return {
+          turn_id: prior.turn_id,
+          to,
+          source_message_id: sourceMessageId,
+        };
+      const room = this.roomById(session.room_id);
+      if (
+        room.archived_at !== null ||
+        room.paused === 1 ||
+        this.isAllPaused() ||
+        room.on_break === 1
+      )
+        throw new KonfabError(
+          "handoff_unavailable",
+          409,
+          "Room is paused, on break or archived; ask the lead to resume or rejoin the target agent",
+        );
+      const latest = this.db
+        .prepare(
+          "SELECT id FROM messages WHERE room_id = ? AND sender_type = 'agent' ORDER BY id DESC LIMIT 1",
+        )
+        .get(room.id) as { id: number } | undefined;
+      if (
+        latest?.id !== sourceMessageId ||
+        this.now() - source.created_at > 10 * 60_000
+      )
+        throw new KonfabError(
+          "stale_handoff",
+          409,
+          "Source must be the room's latest agent message from the last 10 minutes; ask the lead to request a new continuation",
+        );
+      if (
+        to === agentId ||
+        to === "lead" ||
+        !this.memberIds(room.id).includes(to)
+      )
+        throw new KonfabError(
+          "invalid_handoff_target",
+          400,
+          "Choose another member agent",
+        );
+      const target = this.activeSession(room.id, to);
+      if (
+        !target ||
+        !this.isWindowActive(target) ||
+        !this.isLive(target) ||
+        target.run_break_pending === 1
+      )
+        throw new KonfabError(
+          "handoff_target_unavailable",
+          409,
+          `Ask the lead to rejoin ${to} before handing off`,
+        );
+      if (room.agent_streak >= (this.options.maxConsecutiveAgentMessages ?? 50))
+        throw new KonfabError(
+          "streak_limit",
+          409,
+          "Agent message limit reached; ask the lead to post a continuation request",
+        );
+      this.enqueue(room.id, to, "agent_mention");
+      const turn = this.db
+        .prepare(
+          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued'",
+        )
+        .get(room.id, to) as { id: number };
+      this.db
+        .prepare(
+          "UPDATE turns SET repair_source_message_id = COALESCE(repair_source_message_id, ?) WHERE id = ?",
+        )
+        .run(sourceMessageId, turn.id);
+      this.db
+        .prepare(
+          "INSERT INTO handoffs (source_message_id, target_agent_id, turn_id) VALUES (?, ?, ?)",
+        )
+        .run(sourceMessageId, to, turn.id);
+      this.logEvent("handoff_repaired", room.id, agentId, {
+        to,
+        source_message_id: sourceMessageId,
+        turn_id: turn.id,
+      });
+      return { turn_id: turn.id, to, source_message_id: sourceMessageId };
     })();
     this.notify();
     return result;
@@ -1860,7 +2079,7 @@ export class KonfabService {
       .prepare(
         `SELECT id, type, agent_id, created_at, payload FROM events
       WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
-      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning')
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','handoff_repaired','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning')
       AND id < ? ORDER BY id DESC LIMIT ?`,
       )
       .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
@@ -1872,6 +2091,14 @@ export class KonfabService {
     }[];
     return events.map(({ payload, ...event }) => ({
       ...event,
+      ...(event.type === "handoff_repaired"
+        ? {
+            handoff: JSON.parse(payload) as {
+              to: string;
+              source_message_id: number;
+            },
+          }
+        : {}),
       last_contact_at:
         event.type === "contact_lost"
           ? (JSON.parse(payload) as { last_contact_at: number }).last_contact_at
@@ -2700,6 +2927,13 @@ export class KonfabService {
     const decisionsTruncated = decisions.length < currentDecisions.length;
     return {
       status: "turn",
+      ...(turn.repair_source_message_id !== null
+        ? {
+            handoff_repair: {
+              source_message_id: turn.repair_source_message_id,
+            },
+          }
+        : {}),
       decisions,
       decisions_total: currentDecisions.length,
       decisions_truncated: decisionsTruncated,

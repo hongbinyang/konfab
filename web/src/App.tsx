@@ -1017,7 +1017,9 @@ function Room({
                 {event.agent_id ? displayName(event.agent_id) : "Room"}:{" "}
                 {event.type === "contact_lost"
                   ? `Contact lost (inferred) — last seen ${event.last_contact_at === null ? "unknown" : new Date(event.last_contact_at).toLocaleString()}`
-                  : event.type.replaceAll("_", " ")}
+                  : event.type === "handoff_repaired" && event.handoff
+                    ? `handed off to ${displayName(event.handoff.to)} (repair for #${event.handoff.source_message_id})`
+                    : event.type.replaceAll("_", " ")}
               </li>
             ))}
         </ol>
@@ -1148,6 +1150,7 @@ function Room({
           </button>
         </div>
       )}
+      <RoomRouting state={state} act={act} />
     </>
   );
 }
@@ -1316,6 +1319,88 @@ function PermissionLog({
         </button>
       )}
     </details>
+  );
+}
+
+function RoomRouting({ state, act }: { state: RoomState; act: Act }) {
+  const routing = state.routing;
+  if (!routing) return null;
+  const name = (id: string) =>
+    state.agents.find((agent) => agent.id === id)?.display_name ?? id;
+  return (
+    <section
+      className={`routing-status${routing.no_continuation ? " needs-routing" : ""}`}
+      aria-label="Conversation next step"
+      aria-live="polite"
+    >
+      {routing.suspended ? (
+        <p>
+          {state.room.archived
+            ? "Room is archived."
+            : state.room.on_break
+              ? "Room is on break. Rejoin an agent to continue."
+              : state.room.paused
+                ? "Room is paused. Resume it to continue."
+                : "All rooms are paused. Resume all rooms to continue."}
+        </p>
+      ) : (
+        <>
+          {routing.active && (
+            <p>
+              Taking a turn: <strong>{name(routing.active.agent_id)}</strong>
+            </p>
+          )}
+          {routing.working.length > 0 && (
+            <p>
+              Reported background work: {routing.working.map(name).join(", ")}
+            </p>
+          )}
+          {routing.queued.length > 0 && (
+            <p>
+              Next:{" "}
+              {routing.queued
+                .map(
+                  (item) =>
+                    `${name(item.agent_id)} (queued${item.repair_source_message_id !== null ? ` · repair for #${item.repair_source_message_id}` : ""}${!routing.eligible_agents.includes(item.agent_id) ? " · needs rejoin" : ""})`,
+                )
+                .join(" → ")}
+            </p>
+          )}
+          {routing.no_continuation && (
+            <>
+              <p>
+                ⚠ No continuation queued. If work should continue, ask an agent
+                below.
+              </p>
+              <div className="row">
+                {routing.eligible_agents.map((id) => (
+                  <button
+                    className="secondary"
+                    type="button"
+                    key={id}
+                    onClick={() =>
+                      void act(() =>
+                        request(`/api/rooms/${state.room.id}/messages`, {
+                          method: "POST",
+                          body: {
+                            body: `@${id} Please continue from the latest room discussion.`,
+                          },
+                        }),
+                      )
+                    }
+                  >
+                    Ask {name(id)} to continue
+                  </button>
+                ))}
+              </div>
+              {routing.eligible_agents.length === 0 && (
+                <p className="muted">Rejoin an agent in its app to continue.</p>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

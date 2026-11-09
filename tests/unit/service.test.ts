@@ -460,6 +460,89 @@ describe("KonfabService", () => {
     ).toEqual({ state: "abandoned" });
   });
 
+  it("warns on a missing recipient and repairs it once", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    const posted = service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "@lead and @claude: ready for review",
+    );
+    expect(posted.routing_warning).toContain("hand_off");
+    expect(service.roomState(ROOM).routing.no_continuation).toBe(true);
+    expect(() =>
+      service.handOff("codex", codex, posted.message_id, "claude"),
+    ).toThrow("Only the author");
+    const repair = service.handOff(
+      "claude",
+      claude,
+      posted.message_id,
+      "codex",
+    );
+    expect(
+      service.handOff("claude", claude, posted.message_id, "codex"),
+    ).toEqual(repair);
+    expect(
+      service.postAgentMessage("claude", claude, turn.turn_id, "A retry"),
+    ).toEqual(posted);
+    const next = expectTurn(service.poll("codex", codex, true));
+    expect(next.turn_id).toBe(repair.turn_id);
+    expect(next.handoff_repair?.source_message_id).toBe(posted.message_id);
+    expect(
+      service
+        .activity(ROOM)
+        .filter((event) => event.type === "handoff_repaired"),
+    ).toHaveLength(1);
+  });
+
+  it("does not warn when a continuation is already queued or explicitly mentioned", () => {
+    service.postUserMessage(ROOM, "Start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    expect(
+      service.postAgentMessage("claude", claude, turn.turn_id, "Done")
+        .routing_warning,
+    ).toBeUndefined();
+    const next = expectTurn(service.poll("codex", codex, true));
+    expect(
+      service.postAgentMessage("codex", codex, next.turn_id, "@claude continue")
+        .routing_warning,
+    ).toBeUndefined();
+  });
+
+  it("refuses unavailable, stale and over-limit handoffs", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    const posted = service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "Done",
+    );
+    expect(() =>
+      service.handOff("claude", claude, posted.message_id, "claude"),
+    ).toThrow("another member");
+    service.setRoomPaused(ROOM, true);
+    expect(service.roomState(ROOM).routing.no_continuation).toBe(false);
+    expect(() =>
+      service.handOff("claude", claude, posted.message_id, "codex"),
+    ).toThrow("paused");
+    service.setRoomPaused(ROOM, false);
+    db.prepare("UPDATE rooms SET agent_streak = 50 WHERE name = ?").run(ROOM);
+    expect(() =>
+      service.handOff("claude", claude, posted.message_id, "codex"),
+    ).toThrow("limit reached");
+    db.prepare("UPDATE rooms SET agent_streak = 1 WHERE name = ?").run(ROOM);
+    db.prepare("UPDATE sessions SET state = 'ended' WHERE id = ?").run(codex);
+    expect(() =>
+      service.handOff("claude", claude, posted.message_id, "codex"),
+    ).toThrow("rejoin codex");
+    now += 10 * 60_000 + 1;
+    expect(() =>
+      service.handOff("claude", claude, posted.message_id, "codex"),
+    ).toThrow("last 10 minutes");
+  });
+
   it("keeps skipped messages unread when reading out of order", () => {
     const roomId = service.roomState(ROOM).room.id;
     const insert = db.prepare(

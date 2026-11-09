@@ -130,6 +130,7 @@ export interface RoomAgent {
 }
 
 export interface ActivityEvent {
+  handoff?: { to: string; source_message_id: number };
   id: number;
   type: string;
   agent_id: string | null;
@@ -158,6 +159,18 @@ export interface LeadReadInfo {
 }
 
 export interface RoomState {
+  routing?: {
+    active: { agent_id: string; turn_id: number } | null;
+    queued: {
+      agent_id: string;
+      turn_id: number;
+      repair_source_message_id: number | null;
+    }[];
+    working: string[];
+    suspended: boolean;
+    no_continuation: boolean;
+    eligible_agents: string[];
+  };
   read_info?: LeadReadInfo;
   room: RoomSummary & {
     brief: string;

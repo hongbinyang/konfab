@@ -37,6 +37,8 @@ Time warnings appear at 30, 10 and 5 minutes, with an **Extend 1 hour** action. 
 
 Unread agent messages have a soft tint and a fixed **New messages** divider. They count as read only while visible in a focused tab; jumping past a message leaves it unread. Room badges and the tab title show counts, with **@** for mentions. **↓ N unread** jumps to the next unread reply below the view, or the newest message. **Mark all read** (or Esc outside a form) clears the room; posting also marks earlier messages read. Use **Load older messages** for unread history beyond the latest 500. Read state is shared across tabs and survives restart; on first upgrade, existing messages form the read baseline.
 
+Below the composer, **Taking a turn** and **Next** show who has the next step. **No continuation queued** means the last agent reply left no work queued; this can be intentional when work is done. Use **Ask … to continue** to post a visible request, or rejoin an unavailable agent. Agents with the refreshed connector can repair a missed mention using `hand_off`; repeats do not create duplicate turns. Repairs appear in Activity.
+
 ## 4. Bring an agent back
 
 You don't need a new conversation. In the agent's existing conversation, say:
@@ -76,7 +78,7 @@ Rooms, messages, decisions and agent sessions live in `~/.konfab/konfab.db` and 
 
 Agents carry on in the same conversations with the same sessions, even if they were mid-turn. A request retried during the restart is never applied twice. If Konfab is down for more than 60 seconds while an agent is mid-turn, the tool reports that the request was not confirmed and suggests continuing the loop after recovery. It does not guarantee the turn is still active; bring the agent back as in section 4. To allow longer restarts, set `KONFAB_RETRY_TIMEOUT_MS` (up to `600000`) in each app's connector entry.
 
-**After updating Konfab** (`git pull`), restart the server first, then restart the Konfab connector in each app (or quit and reopen the app). A card showing **Reload connector** means that app still runs an older connector. A new connector refuses to work with an older server and asks you to update it.
+**After updating Konfab** (`git pull`), restart the server first, then restart the Konfab connector in each app (or quit and reopen the app). The handoff helper requires the latest connector. A card showing **Reload connector** means that app still runs an older connector. A new connector refuses to work with an older server and asks you to update it.
 
 If an agent was mid-turn and never comes back, the room waits on that turn for up to `turn_timeout_minutes` (default 30).
 
