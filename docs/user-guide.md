@@ -35,6 +35,8 @@ The right panel has collapsible sections and a panel toggle. Your browser rememb
 
 Time warnings appear at 30, 10 and 5 minutes, with an **Extend 1 hour** action. Configure `defaults.run_warnings_minutes` to change them. **Enable notifications** in Lead allows background browser alerts while the page is open. Agents also get a heads-up when 10 minutes or less remain. Extending above a warning threshold allows it to fire again later.
 
+Unread agent messages have a soft tint and a fixed **New messages** divider. They count as read only while visible in a focused tab; jumping past a message leaves it unread. Room badges and the tab title show counts, with **@** for mentions. **↓ N unread** jumps to the next unread reply below the view, or the newest message. **Mark all read** (or Esc outside a form) clears the room; posting also marks earlier messages read. Use **Load older messages** for unread history beyond the latest 500. Read state is shared across tabs and survives restart; on first upgrade, existing messages form the read baseline.
+
 ## 4. Bring an agent back
 
 You don't need a new conversation. In the agent's existing conversation, say:

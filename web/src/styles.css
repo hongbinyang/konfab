@@ -742,3 +742,58 @@ dd {
 .run-toasts .banner {
   flex-wrap: wrap;
 }
+
+.messages > li[id] {
+  transition:
+    background-color 1.5s ease,
+    border-color 1.5s ease;
+  border-left: 3px solid transparent;
+}
+.messages > li.unread-message {
+  background: color-mix(in srgb, var(--accent) 7%, var(--background));
+  border-left-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.new-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+  font-size: 12px;
+  border-top: 1px solid var(--accent);
+  padding-top: 8px;
+}
+.older-unread {
+  padding: 8px;
+  color: var(--accent);
+}
+.new-pill {
+  align-self: center;
+  margin: 4px;
+  border-radius: 20px;
+  font-size: 13px;
+}
+.unread-badge {
+  border-radius: 12px;
+  background: var(--border);
+  padding: 0 6px;
+  font-size: 12px;
+}
+.attention-badge {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .messages > li[id] {
+    transition: none;
+  }
+}
+
+.messages > li.mentions-lead {
+  border-left-color: var(--accent);
+}
+
+.room.selected .unread-badge {
+  background: var(--accent-text);
+  color: var(--accent);
+  border: 1px solid var(--accent-text);
+}

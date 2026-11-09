@@ -7,6 +7,7 @@ import {
   type ReactNode,
   useId,
   useMemo,
+  Fragment,
   type KeyboardEvent,
 } from "react";
 import Markdown from "react-markdown";
@@ -22,6 +23,7 @@ import {
   type AgentState,
   type Overview,
   type RunWarning,
+  type LeadReadInfo,
   type RoomAgent,
   type RoomState,
 } from "./api";
@@ -136,6 +138,18 @@ export function App() {
     },
     [refresh],
   );
+
+  useEffect(() => {
+    const unread =
+      overview?.rooms.reduce(
+        (sum, room) => sum + (room.unread_count ?? 0),
+        0,
+      ) ?? 0;
+    document.title = unread ? `(${unread}) Konfab` : "Konfab";
+    return () => {
+      document.title = "Konfab";
+    };
+  }, [overview]);
 
   if (signedOut) {
     return (
@@ -261,6 +275,19 @@ function Sidebar({
         onClick={() => onSelect(room.id)}
       >
         # {room.name}
+        {(room.unread_count ?? 0) > 0 && (
+          <span
+            className={
+              (room.attention_count ?? 0) > 0
+                ? "unread-badge attention-badge"
+                : "unread-badge"
+            }
+            aria-label={`${room.unread_count} unread${room.attention_count ? `, ${room.attention_count} mention you` : ""}`}
+          >
+            {room.attention_count ? "@ " : ""}
+            {room.unread_count}
+          </span>
+        )}
         {room.on_break ? (
           <span className="tag">On break</span>
         ) : (
@@ -340,7 +367,43 @@ function Room({
   act: Act;
   pageConnected: boolean;
 }) {
-  const { room, messages, agents } = state;
+  const { room, agents } = state;
+  const [olderMessages, setOlderMessages] = useState<RoomState["messages"]>([]);
+  const [olderReadInfo, setOlderReadInfo] = useState<LeadReadInfo | null>(null);
+  const messages = useMemo(
+    () =>
+      [
+        ...new Map(
+          [...olderMessages, ...state.messages].map((message) => [
+            message.id,
+            message,
+          ]),
+        ).values(),
+      ].sort((a, b) => a.id - b.id),
+    [olderMessages, state.messages],
+  );
+  const [anchor] = useState(state.read_info?.first_unread_id ?? null);
+  const [entryLast] = useState(state.messages.at(-1)?.id ?? 0);
+  const anchorId =
+    anchor ??
+    messages.find(
+      (message) => message.sender_type === "agent" && message.id > entryLast,
+    )?.id;
+  const [locallyRead, setLocallyRead] = useState(new Set<number>());
+  const [readingAbove, setReadingAbove] = useState(false);
+  const pendingRead = useRef(new Set<number>());
+  const seenHighlights = useRef(new Set<number>());
+  const inFlightRead = useRef(new Set<number>());
+  const visibleMessages = useRef(new Set<number>());
+  const queueVisibleRef = useRef<() => void>(() => undefined);
+  const initialScroll = useRef(false);
+  const unreadCount = state.read_info?.unread_count ?? 0;
+  const olderUnreadCount =
+    unreadCount === 0
+      ? 0
+      : (olderReadInfo?.older_unread_count ??
+        state.read_info?.older_unread_count ??
+        0);
   const passes = state.passes ?? [];
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
@@ -369,10 +432,178 @@ function Room({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RoomState["messages"] | null>(null);
 
+  const flushReads = useCallback(async () => {
+    const ids = [...pendingRead.current]
+      .filter((id) => !inFlightRead.current.has(id))
+      .slice(0, 200);
+    if (!ids.length) return;
+    ids.forEach((id) => {
+      pendingRead.current.delete(id);
+      inFlightRead.current.add(id);
+    });
+    await act(async () => {
+      try {
+        await request(`/api/rooms/${room.id}/read`, {
+          method: "POST",
+          body: { ids },
+        });
+        setTimeout(() => {
+          ids.forEach((id) => seenHighlights.current.delete(id));
+          setLocallyRead((previous) => new Set([...previous, ...ids]));
+        }, 2000);
+      } catch (error) {
+        ids.forEach((id) => pendingRead.current.add(id));
+        throw error;
+      } finally {
+        ids.forEach((id) => inFlightRead.current.delete(id));
+      }
+    });
+  }, [act, room.id]);
+  const markAllRead = useCallback(() => {
+    void act(async () => {
+      await request(`/api/rooms/${room.id}/read`, {
+        method: "POST",
+        body: { all: true },
+      });
+      setLocallyRead(
+        (previous) => new Set([...previous, ...seenHighlights.current]),
+      );
+      seenHighlights.current.clear();
+      pendingRead.current.clear();
+      setOlderMessages((previous) =>
+        previous.map((message) => ({ ...message, unread: false })),
+      );
+      setOlderReadInfo((previous) =>
+        previous ? { ...previous, older_unread_count: 0 } : null,
+      );
+    });
+  }, [act, room.id]);
+
   useEffect(() => {
     const list = listRef.current;
-    if (list && atBottom.current) list.scrollTop = list.scrollHeight;
-  }, [timelineKey]);
+    if (!list) return;
+    if (!initialScroll.current) {
+      initialScroll.current = true;
+      const divider = list.querySelector<HTMLElement>(".new-divider");
+      if (olderUnreadCount > 0) list.scrollTop = 0;
+      else if (divider) list.scrollTop = divider.offsetTop - list.offsetTop;
+      else list.scrollTop = list.scrollHeight;
+      atBottom.current =
+        list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    } else if (atBottom.current) list.scrollTop = list.scrollHeight;
+  }, [timelineKey, olderUnreadCount]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const queueVisible = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus())
+        return;
+      for (const id of visibleMessages.current)
+        if (!locallyRead.has(id)) {
+          const bounds = document
+            .getElementById(`message-${id}`)
+            ?.getBoundingClientRect();
+          if (
+            !bounds ||
+            bounds.bottom <= 0 ||
+            bounds.top >= window.innerHeight ||
+            bounds.right <= 0 ||
+            bounds.left >= window.innerWidth
+          )
+            continue;
+          pendingRead.current.add(id);
+          seenHighlights.current.add(id);
+        }
+    };
+    queueVisibleRef.current = queueVisible;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = Number((entry.target as HTMLElement).dataset.messageId);
+          if (entry.isIntersecting) visibleMessages.current.add(id);
+          else visibleMessages.current.delete(id);
+        }
+        queueVisible();
+      },
+      { root: list, threshold: 0 },
+    );
+    list
+      .querySelectorAll<HTMLElement>("[data-unread='true']")
+      .forEach((element) => observer.observe(element));
+    return () => {
+      observer.disconnect();
+      visibleMessages.current.clear();
+    };
+  }, [messages, locallyRead, flushReads]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      queueVisibleRef.current();
+      void flushReads();
+    }, 1000);
+    const onVisibility = () => {
+      if (document.hidden) void flushReads();
+      else queueVisibleRef.current();
+    };
+    const onFocus = () => queueVisibleRef.current();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("scroll", onFocus, true);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("scroll", onFocus, true);
+      void flushReads();
+    };
+  }, [flushReads]);
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !(
+          event.target instanceof Element &&
+          event.target.closest(
+            "input, textarea, select, form, [contenteditable='true']",
+          )
+        )
+      )
+        markAllRead();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [markAllRead]);
+
+  const loadOlder = () =>
+    void act(async () => {
+      const list = listRef.current;
+      const beforeHeight = list?.scrollHeight ?? 0;
+      const oldTop = list?.scrollTop ?? 0;
+      const result = await request<{
+        messages: RoomState["messages"];
+        read_info: LeadReadInfo;
+      }>(
+        `/api/rooms/${room.id}/messages?before=${messages[0]?.id ?? Number.MAX_SAFE_INTEGER}`,
+      );
+      setOlderMessages((previous) => [...result.messages, ...previous]);
+      setOlderReadInfo(result.read_info);
+      requestAnimationFrame(() => {
+        if (list) list.scrollTop = oldTop + list.scrollHeight - beforeHeight;
+      });
+    });
+  const jumpToNew = () => {
+    const list = listRef.current;
+    if (!list) return;
+    const edge = list.getBoundingClientRect().bottom;
+    const nextUnread = [
+      ...list.querySelectorAll<HTMLElement>("[data-unread='true']"),
+    ].find((element) => element.getBoundingClientRect().top >= edge - 1);
+    list.scrollTop = nextUnread
+      ? nextUnread.offsetTop - list.offsetTop
+      : list.scrollHeight;
+  };
 
   const addFiles = async (files: File[]) => {
     if (!files.length || uploading) return;
@@ -644,8 +875,24 @@ function Room({
           const list = event.currentTarget;
           atBottom.current =
             list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+          setReadingAbove(!atBottom.current);
         }}
       >
+        {olderUnreadCount > 0 && (
+          <li className="older-unread">
+            {olderUnreadCount} older unread{" "}
+            <button className="secondary" type="button" onClick={loadOlder}>
+              Load older messages
+            </button>
+            <button
+              className="quiet secondary"
+              type="button"
+              onClick={markAllRead}
+            >
+              Mark all read
+            </button>
+          </li>
+        )}
         {messages.length === 0 && state.permissions.length === 0 && (
           <li className="hint">
             No messages yet. Post one to give each agent a turn, or use
@@ -668,54 +915,80 @@ function Room({
               />
             </li>
           ) : (
-            <li
-              id={`message-${item.id}`}
-              key={`message-${item.id}`}
-              className={
-                item.mentions?.some(
-                  (mention) => mention === "lead" || mention === "all",
-                )
-                  ? "mentions-lead"
-                  : undefined
-              }
-            >
-              <span className="sender">
-                {item.sender_type === "user"
-                  ? "You (Lead)"
-                  : displayName(item.sender_id)}
-              </span>
-              <span className="time">{formatTime(item.created_at)}</span>
-              <div className="body">
-                <Markdown>{item.body}</Markdown>
-              </div>
-              <MessageAttachments
-                roomId={room.id}
-                attachments={item.attachments ?? []}
-              />
-              {!room.archived && (
-                <button
-                  type="button"
-                  className="quiet"
-                  disabled={
-                    item.body.trim().length === 0 ||
-                    item.body.trim().length > 2000
-                  }
-                  onClick={() =>
-                    void act(() =>
-                      request(`/api/rooms/${room.id}/decisions`, {
-                        method: "POST",
-                        body: { body: item.body, source_message_id: item.id },
-                      }),
-                    )
-                  }
-                >
-                  Mark as decision
-                </button>
+            <Fragment key={`message-${item.id}`}>
+              {item.id === anchorId && (
+                <li className="new-divider">
+                  <span>New messages</span>
+                  <button
+                    type="button"
+                    className="quiet secondary"
+                    onClick={markAllRead}
+                  >
+                    Mark all read
+                  </button>
+                </li>
               )}
-            </li>
+              <li
+                id={`message-${item.id}`}
+                data-message-id={item.id}
+                data-unread={
+                  item.unread &&
+                  item.id > (state.read_info?.cursor ?? 0) &&
+                  !locallyRead.has(item.id)
+                    ? "true"
+                    : "false"
+                }
+                className={`${(item.unread || seenHighlights.current.has(item.id)) && !locallyRead.has(item.id) ? "unread-message" : ""} ${
+                  item.mentions?.some(
+                    (mention) => mention === "lead" || mention === "all",
+                  )
+                    ? "mentions-lead"
+                    : ""
+                }`}
+              >
+                <span className="sender">
+                  {item.sender_type === "user"
+                    ? "You (Lead)"
+                    : displayName(item.sender_id)}
+                </span>
+                <span className="time">{formatTime(item.created_at)}</span>
+                <div className="body">
+                  <Markdown>{item.body}</Markdown>
+                </div>
+                <MessageAttachments
+                  roomId={room.id}
+                  attachments={item.attachments ?? []}
+                />
+                {!room.archived && (
+                  <button
+                    type="button"
+                    className="quiet"
+                    disabled={
+                      item.body.trim().length === 0 ||
+                      item.body.trim().length > 2000
+                    }
+                    onClick={() =>
+                      void act(() =>
+                        request(`/api/rooms/${room.id}/decisions`, {
+                          method: "POST",
+                          body: { body: item.body, source_message_id: item.id },
+                        }),
+                      )
+                    }
+                  >
+                    Mark as decision
+                  </button>
+                )}
+              </li>
+            </Fragment>
           ),
         )}
       </ol>
+      {readingAbove && unreadCount > 0 && (
+        <button className="new-pill" type="button" onClick={jumpToNew}>
+          ↓ {unreadCount} unread
+        </button>
+      )}
 
       <PermissionLog
         roomId={room.id}

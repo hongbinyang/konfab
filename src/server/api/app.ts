@@ -373,6 +373,30 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return reply.code(201).send(room);
   });
 
+  app.post("/api/rooms/:id/read", async (request) => {
+    const body = z
+      .object({
+        ids: z.array(z.number().int().positive()).max(200).default([]),
+        all: z.boolean().default(false),
+      })
+      .parse(request.body);
+    return service.markLeadRead(
+      idParams.parse(request.params).id,
+      body.ids,
+      body.all,
+    );
+  });
+
+  app.get("/api/rooms/:id/messages", async (request) => {
+    const query = z
+      .object({ before: z.coerce.number().int().positive() })
+      .parse(request.query);
+    return service.leadMessagePage(
+      idParams.parse(request.params).id,
+      query.before,
+    );
+  });
+
   app.get("/api/rooms/:id", async (request) => {
     return service.roomState(idParams.parse(request.params).id);
   });

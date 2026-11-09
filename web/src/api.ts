@@ -15,6 +15,8 @@ export interface RoomSummary {
   paused: boolean;
   on_break: boolean;
   archived: boolean;
+  unread_count?: number;
+  attention_count?: number;
 }
 
 export interface Permission {
@@ -80,6 +82,7 @@ export interface Message {
   created_at: number;
   attachments?: Attachment[];
   mentions?: string[];
+  unread?: boolean;
 }
 
 export interface Pass {
@@ -146,7 +149,16 @@ export interface Decision {
   updated_at: number;
 }
 
+export interface LeadReadInfo {
+  cursor: number;
+  unread_count: number;
+  attention_count: number;
+  first_unread_id: number | null;
+  older_unread_count: number;
+}
+
 export interface RoomState {
+  read_info?: LeadReadInfo;
   room: RoomSummary & {
     brief: string;
     agent_streak: number;
