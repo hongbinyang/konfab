@@ -104,6 +104,11 @@ export interface ReportView {
 }
 
 export interface AgentStats {
+  last_contact_at: number | null;
+  longest_wait_ms: number | null;
+  median_answer_ms: number | null;
+  paused_turns: number;
+  answer_samples: number;
   session_started_at: number | null;
   model_wait_calls: number;
   first_wait_call_at: number | null;
@@ -123,6 +128,7 @@ interface SessionRow {
   end_reason: string | null;
   started_at: number;
   last_call_at: number;
+  contact_lost_at: number | null;
 }
 
 interface RoomRow {
@@ -530,6 +536,7 @@ export class KonfabService {
       }),
       queued: queued.map((turn) => turn.agent_id),
       messages,
+      activity: this.activity(room.id),
       passes: this.listPasses(room.id, messages[0]?.created_at ?? 0),
     };
   }
@@ -583,7 +590,12 @@ export class KonfabService {
            VALUES (?, ?, ?, 'active', ?, ?)`,
         )
         .run(sessionId, room.id, agentId, now, now);
-      this.logEvent(previous ? "rejoin" : "join", room.id, agentId, {
+      const earlierSession = this.db
+        .prepare(
+          "SELECT 1 FROM sessions WHERE room_id = ? AND agent_id = ? AND id <> ? LIMIT 1",
+        )
+        .get(room.id, agentId, sessionId);
+      this.logEvent(earlierSession ? "rejoin" : "join", room.id, agentId, {
         session_id: sessionId,
       });
       if (room.on_break === 1) {
@@ -633,6 +645,12 @@ export class KonfabService {
       this.db
         .prepare("UPDATE sessions SET last_call_at = ? WHERE id = ?")
         .run(now, session.id);
+      if (session.contact_lost_at !== null) {
+        this.db
+          .prepare("UPDATE sessions SET contact_lost_at = NULL WHERE id = ?")
+          .run(session.id);
+        this.logEvent("contact_restored", room.id, agentId, {});
+      }
       if (isModelCall) this.logEvent("wait_call", room.id, agentId, {});
 
       const active = this.db
@@ -659,6 +677,26 @@ export class KonfabService {
     })();
     if (notifyAfter.value) this.notify();
     return result;
+  }
+
+  beginObservedWait(agentId: string, sessionId: string, callId: string): void {
+    const session = this.requireSession(agentId, sessionId);
+    if (session.state !== "active") return;
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO observed_waits (session_id, call_id, started_at) VALUES (?, ?, ?)",
+      )
+      .run(sessionId, callId, this.now());
+  }
+
+  finishObservedWait(agentId: string, sessionId: string, callId: string): void {
+    this.requireSession(agentId, sessionId);
+    this.db
+      .prepare(
+        "UPDATE observed_waits SET ended_at = ? WHERE session_id = ? AND call_id = ? AND ended_at IS NULL",
+      )
+      .run(this.now(), sessionId, callId);
+    this.notify();
   }
 
   /** Waits for up to timeoutMs for a turn, a replacement, or a closed room. */
@@ -937,6 +975,7 @@ export class KonfabService {
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(session.room_id, agentId, kind, detail.slice(0, 500), this.now());
+    this.logEvent("status_report", session.room_id, agentId, { kind });
     this.notify();
     return { report_id: Number(created.lastInsertRowid) };
   }
@@ -978,6 +1017,31 @@ export class KonfabService {
     return rows.reverse();
   }
 
+  activity(ref: RoomRef, beforeId?: number, limit = 200) {
+    const room = this.room(ref);
+    const events = this.db
+      .prepare(
+        `SELECT id, type, agent_id, created_at, payload FROM events
+      WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','contact_lost','contact_restored')
+      AND id < ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
+      id: number;
+      type: string;
+      agent_id: string | null;
+      created_at: number;
+      payload: string;
+    }[];
+    return events.map(({ payload, ...event }) => ({
+      ...event,
+      last_contact_at:
+        event.type === "contact_lost"
+          ? (JSON.parse(payload) as { last_contact_at: number }).last_contact_at
+          : null,
+    }));
+  }
+
   exportRoom(ref: RoomRef): { filename: string; markdown: string } {
     const room = this.room(ref);
     const rows = this.db
@@ -1017,6 +1081,20 @@ export class KonfabService {
       })),
     ].sort((a, b) => a.at - b.at);
     sections.push(...entries.map((entry) => entry.text));
+    const activity = this.activity(
+      room.id,
+      undefined,
+      Number.MAX_SAFE_INTEGER,
+    ).reverse();
+    if (activity.length) {
+      sections.push(
+        "## Activity",
+        ...activity.map(
+          (event) =>
+            `- ${new Date(event.created_at).toISOString()} ${event.agent_id ?? "Room"}: ${event.type.replaceAll("_", " ")}${event.last_contact_at === null ? "" : ` (inferred; last contact ${new Date(event.last_contact_at).toISOString()})`}`,
+        ),
+      );
+    }
     return {
       filename: `${room.name}.md`,
       markdown: `${sections.join("\n\n")}\n`,
@@ -1087,6 +1165,21 @@ export class KonfabService {
             "SELECT 1 FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'active'",
           )
           .get(session.room_id, session.agent_id);
+        if (
+          !working &&
+          session.contact_lost_at === null &&
+          this.now() - session.last_call_at >
+            this.options.waitTimeoutSeconds * 1000 + 60_000 &&
+          this.isInsideHours(session.agent_id) &&
+          this.roomById(session.room_id).on_break !== 1
+        ) {
+          this.db
+            .prepare("UPDATE sessions SET contact_lost_at = ? WHERE id = ?")
+            .run(this.now(), session.id);
+          this.logEvent("contact_lost", session.room_id, session.agent_id, {
+            last_contact_at: session.last_call_at,
+          });
+        }
         if (!working && !this.isInsideHours(session.agent_id)) {
           this.endSession(session.id, "outside_hours");
         }
@@ -1320,7 +1413,77 @@ export class KonfabService {
     const last = calls.at(-1)?.created_at ?? null;
     const elapsed = first !== null && last !== null ? last - first : 0;
 
+    const latestSession = this.db
+      .prepare(
+        "SELECT last_call_at FROM sessions WHERE room_id = ? AND agent_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+      )
+      .get(roomId, agentId) as { last_call_at: number } | undefined;
+    const wait = this.db
+      .prepare(
+        `SELECT MAX(w.ended_at - w.started_at) AS duration FROM observed_waits w JOIN sessions s ON s.id = w.session_id WHERE s.room_id = ? AND s.agent_id = ? AND w.ended_at IS NOT NULL`,
+      )
+      .get(roomId, agentId) as { duration: number | null };
+    const completed = this.db
+      .prepare(
+        `SELECT id, ended_at, first_started_at AS started_at FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'completed' AND ended_at IS NOT NULL AND first_started_at IS NOT NULL ORDER BY id DESC LIMIT 100`,
+      )
+      .all(roomId, agentId) as {
+      id: number;
+      started_at: number;
+      ended_at: number;
+    }[];
+    const earliest = completed.reduce(
+      (min, turn) => Math.min(min, turn.started_at),
+      Number.MAX_SAFE_INTEGER,
+    );
+    const latest = completed.reduce(
+      (max, turn) => Math.max(max, turn.ended_at),
+      0,
+    );
+    const pauses =
+      completed.length === 0
+        ? []
+        : (this.db
+            .prepare(
+              `SELECT created_at, decided_at FROM permission_requests WHERE room_id = ? AND agent_id = ? AND created_at < ? AND decided_at > ? ORDER BY created_at`,
+            )
+            .all(roomId, agentId, latest, earliest) as {
+            created_at: number;
+            decided_at: number;
+          }[]);
+    let pausedTurns = 0;
+    const durations = completed
+      .map((turn) => {
+        let total = 0;
+        let until = turn.started_at;
+        let paused = false;
+        for (const pause of pauses) {
+          const start = Math.max(turn.started_at, pause.created_at, until);
+          const end = Math.min(turn.ended_at, pause.decided_at);
+          if (end > start) {
+            total += end - start;
+            until = end;
+            paused = true;
+          }
+        }
+        if (paused) pausedTurns += 1;
+        return Math.max(0, turn.ended_at - turn.started_at - total);
+      })
+      .sort((a, b) => a - b);
+    const middle = Math.floor(durations.length / 2);
+    const median =
+      durations.length === 0
+        ? null
+        : durations.length % 2
+          ? durations[middle]!
+          : (durations[middle - 1]! + durations[middle]!) / 2;
+
     return {
+      last_contact_at: latestSession?.last_call_at ?? null,
+      longest_wait_ms: wait.duration,
+      median_answer_ms: median,
+      paused_turns: pausedTurns,
+      answer_samples: completed.length,
       session_started_at: session?.started_at ?? null,
       model_wait_calls: calls.length,
       first_wait_call_at: first,
@@ -1372,10 +1535,10 @@ export class KonfabService {
       .get(roomId) as { id: number };
     this.db
       .prepare(
-        `UPDATE turns SET state = 'active', session_id = ?, last_message_id = ?, started_at = ?
+        `UPDATE turns SET state = 'active', session_id = ?, last_message_id = ?, started_at = ?, first_started_at = COALESCE(first_started_at, ?)
          WHERE id = ?`,
       )
-      .run(sessionId, latest.id, this.now(), turnId);
+      .run(sessionId, latest.id, this.now(), this.now(), turnId);
     const turn = this.db
       .prepare("SELECT * FROM turns WHERE id = ?")
       .get(turnId) as TurnRow;
@@ -1603,8 +1766,12 @@ export class KonfabService {
       }
     }
     this.db
-      .prepare("UPDATE sessions SET last_call_at = ? WHERE id = ?")
+      .prepare(
+        "UPDATE sessions SET last_call_at = ?, contact_lost_at = NULL WHERE id = ?",
+      )
       .run(this.now(), session.id);
+    if (session.contact_lost_at !== null)
+      this.logEvent("contact_restored", session.room_id, agentId, {});
     return session;
   }
 

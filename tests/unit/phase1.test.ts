@@ -728,6 +728,31 @@ describe("Phase 1 behavior", () => {
 });
 
 describe("database migration", () => {
+  it("upgrades a version 4 database without changing existing data", () => {
+    const folder = mkdtempSync(join(tmpdir(), "konfab-v4-"));
+    const file = join(folder, "test.db");
+    try {
+      const old = new Database(file);
+      migrate(old, 4);
+      old
+        .prepare(
+          "INSERT INTO rooms (name, created_at, brief) VALUES ('existing', 1, 'kept')",
+        )
+        .run();
+      old.close();
+      const upgraded = openDatabase(file);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(5);
+      expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
+        name: "existing",
+        brief: "kept",
+      });
+      expect(upgraded.pragma("foreign_key_check")).toEqual([]);
+      upgraded.close();
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Phase 0 data when upgrading a version 1 database", () => {
     const folder = mkdtempSync(join(tmpdir(), "konfab-migrate-"));
     const file = join(folder, "test.db");
@@ -759,7 +784,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(4);
+      expect(db.pragma("user_version", { simple: true })).toBe(5);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });

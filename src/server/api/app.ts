@@ -20,6 +20,7 @@ const joinBody = z.object({ room: z.string().min(1) });
 const waitBody = z.object({
   ...session,
   first: z.boolean().default(false),
+  call_id: z.string().uuid().optional(),
   timeout_seconds: timeout,
 });
 const postBody = z.object({ ...turn, body: z.string() });
@@ -188,12 +189,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.post("/agent/wait", async (request) => {
     const agentId = requireAgent(request);
     const body = waitBody.parse(request.body);
+    if (body.call_id)
+      service.beginObservedWait(agentId, body.session_id, body.call_id);
     return service.waitForTurn(
       agentId,
       body.session_id,
       body.first,
       body.timeout_seconds * 1000,
     );
+  });
+
+  app.post("/agent/wait-finished", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z
+      .object({ ...session, call_id: z.string().uuid() })
+      .parse(request.body);
+    service.finishObservedWait(agentId, body.session_id, body.call_id);
+    return { ok: true };
   });
 
   app.post("/agent/post", async (request) => {
@@ -272,6 +284,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get("/api/rooms/:id", async (request) => {
     return service.roomState(idParams.parse(request.params).id);
+  });
+
+  app.get("/api/rooms/:id/activity", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { before_id } = z
+      .object({ before_id: z.coerce.number().int().positive().optional() })
+      .parse(request.query);
+    return { events: service.activity(id, before_id) };
   });
 
   app.patch("/api/rooms/:id", async (request) => {

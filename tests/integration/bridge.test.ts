@@ -88,6 +88,16 @@ describe("server and bridge", () => {
     });
     expect(value.status).toBe("idle");
     expect(service.roomState(ROOM).agents[0]?.stats.model_wait_calls).toBe(1);
+    expect(
+      service.roomState(ROOM).agents[0]?.stats.longest_wait_ms,
+    ).toBeGreaterThan(0);
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM observed_waits WHERE ended_at IS NOT NULL",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
   });
 
   it("wakes a waiting agent when the user posts, then records its reply", async () => {

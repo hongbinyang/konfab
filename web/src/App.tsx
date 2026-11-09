@@ -11,6 +11,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import {
   request,
   UnauthorizedError,
+  type ActivityEvent,
   type AgentState,
   type Overview,
   type RoomAgent,
@@ -325,6 +326,8 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
     ...messages.map((message) => ({ kind: "message" as const, ...message })),
     ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
   ].sort((a, b) => a.created_at - b.created_at);
+  const [olderActivity, setOlderActivity] = useState<ActivityEvent[]>([]);
+  const [hasOlderActivity, setHasOlderActivity] = useState(true);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RoomState["messages"] | null>(null);
 
@@ -585,6 +588,53 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
         )}
       </ol>
 
+      <details className="activity">
+        <summary>Activity timeline</summary>
+        <ol>
+          {[
+            ...new Map(
+              [...state.activity, ...olderActivity].map((event) => [
+                event.id,
+                event,
+              ]),
+            ).values(),
+          ]
+            .sort((a, b) => b.id - a.id)
+            .map((event) => (
+              <li key={event.id}>
+                <time dateTime={new Date(event.created_at).toISOString()}>
+                  {new Date(event.created_at).toLocaleString()}
+                </time>{" "}
+                {event.agent_id ? displayName(event.agent_id) : "Room"}:{" "}
+                {event.type === "contact_lost"
+                  ? `Contact lost (inferred) — last seen ${event.last_contact_at === null ? "unknown" : new Date(event.last_contact_at).toLocaleString()}`
+                  : event.type.replaceAll("_", " ")}
+              </li>
+            ))}
+        </ol>
+        {hasOlderActivity &&
+          (state.activity.length === 200 || olderActivity.length > 0) && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                const ids = [...state.activity, ...olderActivity].map(
+                  (event) => event.id,
+                );
+                void act(async () => {
+                  const page = await request<{ events: ActivityEvent[] }>(
+                    `/api/rooms/${room.id}/activity?before_id=${Math.min(...ids)}`,
+                  );
+                  setOlderActivity((current) => [...current, ...page.events]);
+                  setHasOlderActivity(page.events.length === 200);
+                });
+              }}
+            >
+              Load older activity
+            </button>
+          )}
+      </details>
+
       {room.on_break && (
         <p className="banner">
           Agents in this room are on break and aren&apos;t using allowance.
@@ -767,6 +817,29 @@ function AgentDetails({
   return (
     <>
       <p className={`state ${agent.state}`}>{STATE_LABELS[agent.state]}</p>
+      <p className="muted">
+        Connected since:{" "}
+        {stats.session_started_at === null
+          ? "—"
+          : new Date(stats.session_started_at).toLocaleString()}
+        <br />
+        Last contact:{" "}
+        {stats.last_contact_at === null
+          ? "—"
+          : new Date(stats.last_contact_at).toLocaleString()}
+        <br />
+        Longest completed observed wait:{" "}
+        {stats.longest_wait_ms === null
+          ? "—"
+          : formatDuration(stats.longest_wait_ms)}
+        <br />
+        Median answer time:{" "}
+        {stats.median_answer_ms === null
+          ? "—"
+          : formatDuration(stats.median_answer_ms)}{" "}
+        ({stats.paused_turns} of {stats.answer_samples} turns had permission
+        pauses; pause time excluded)
+      </p>
       {editingRole ? (
         <form className="stack role-form" onSubmit={saveRole}>
           <label>

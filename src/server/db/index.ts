@@ -148,6 +148,20 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE room_members ADD COLUMN role TEXT NOT NULL DEFAULT '';
   ALTER TABLE room_members ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN contact_lost_at INTEGER;
+  ALTER TABLE turns ADD COLUMN first_started_at INTEGER;
+  CREATE INDEX turns_by_room_agent_state ON turns(room_id, agent_id, state, id);
+  CREATE INDEX permissions_by_room_agent_time ON permission_requests(room_id, agent_id, created_at);
+  CREATE TABLE observed_waits (
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    call_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    PRIMARY KEY (session_id, call_id)
+  );
+  CREATE INDEX events_by_room ON events(room_id, id);
+  `,
 ];
 
 export function openDatabase(path: string): Db {
