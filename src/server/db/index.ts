@@ -191,6 +191,18 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY(decision_id, version)
   );
   `,
+  `
+  CREATE TABLE attachments (
+    id TEXT PRIMARY KEY,
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    message_id INTEGER REFERENCES messages(id),
+    filename TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX attachments_by_message ON attachments(message_id);
+  `,
 ];
 
 export function openDatabase(path: string): Db {

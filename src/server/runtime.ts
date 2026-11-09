@@ -1,4 +1,5 @@
 import { chmodSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db/index.js";
 import { KonfabService } from "./domain/service.js";
@@ -23,6 +24,8 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
     turnTimeoutMs: config.defaults.turn_timeout_minutes * 60_000,
     maxMessageChars: config.defaults.max_message_chars,
     maxDecisionChars: config.defaults.max_decision_chars,
+    maxAttachmentBytes: config.defaults.max_attachment_mb * 1024 * 1024,
+    attachmentDir: join(dirname(databaseFile), "files"),
     hoursFor: (agentId) =>
       config.agents[agentId]?.hours ?? config.defaults.hours,
     preApprovals: config.pre_approvals,

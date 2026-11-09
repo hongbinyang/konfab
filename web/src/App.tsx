@@ -10,8 +10,10 @@ import Markdown from "react-markdown";
 import { EmojiPicker } from "./EmojiPicker";
 import {
   request,
+  uploadAttachment,
   UnauthorizedError,
   type ActivityEvent,
+  type Attachment,
   type Decision,
   type AgentState,
   type Overview,
@@ -320,6 +322,10 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
   const [brief, setBrief] = useState(room.brief);
   const listRef = useRef<HTMLOListElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
   const atBottom = useRef(true);
   const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
   // On a time tie, a message comes first, because a pass follows what it answers.
@@ -341,14 +347,45 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
     if (list && atBottom.current) list.scrollTop = list.scrollHeight;
   }, [timelineKey]);
 
+  const addFiles = async (files: File[]) => {
+    if (!files.length || uploading) return;
+    if (attachments.length + files.length > 20) {
+      setAttachmentError("Choose up to 20 files per message.");
+      return;
+    }
+    setUploading(true);
+    setAttachmentError("");
+    try {
+      for (const file of files) {
+        const uploaded = await uploadAttachment(room.id, file);
+        setAttachments((current) => [...current, uploaded]);
+      }
+    } catch (error) {
+      setAttachmentError(errorMessage(error));
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removeAttachment = (attachment: Attachment) => {
+    void act(async () => {
+      await request(`/api/rooms/${room.id}/attachments/${attachment.id}`, {
+        method: "DELETE",
+      });
+      setAttachments((current) =>
+        current.filter((item) => item.id !== attachment.id),
+      );
+    });
+  };
+
   const send = () => {
-    if (!body.trim()) return;
+    if (uploading || (!body.trim() && !attachments.length)) return;
     void act(async () => {
       await request(`/api/rooms/${room.id}/messages`, {
         method: "POST",
-        body: { body },
+        body: { body, attachment_ids: attachments.map((item) => item.id) },
       });
       setBody("");
+      setAttachments([]);
       atBottom.current = true;
     });
   };
@@ -548,6 +585,10 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
                 <div className="body">
                   <Markdown>{message.body}</Markdown>
                 </div>
+                <MessageAttachments
+                  roomId={room.id}
+                  attachments={message.attachments ?? []}
+                />
               </li>
             ))}
           </ul>
@@ -650,6 +691,10 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               <div className="body">
                 <Markdown>{item.body}</Markdown>
               </div>
+              <MessageAttachments
+                roomId={room.id}
+                attachments={item.attachments ?? []}
+              />
               {!room.archived && (
                 <button
                   type="button"
@@ -738,8 +783,45 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
       {room.archived ? (
         <p className="banner">This room is archived and is read-only.</p>
       ) : (
-        <div className="composer">
+        <div
+          className="composer"
+          onDragOver={(event) => {
+            event.preventDefault();
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            void addFiles(Array.from(event.dataTransfer.files));
+          }}
+        >
           <label htmlFor="message">Message</label>
+          {attachmentError && (
+            <p className="attachment-error" role="alert">
+              {attachmentError}
+            </p>
+          )}
+          {(attachments.length > 0 || uploading) && (
+            <div className="attachment-drafts">
+              {attachments.map((item) => (
+                <span className="attachment-chip" key={item.id}>
+                  {item.media_type.startsWith("image/") && (
+                    <img
+                      src={`/api/rooms/${room.id}/attachments/${item.id}?inline=1`}
+                      alt=""
+                    />
+                  )}{" "}
+                  {item.filename}{" "}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.filename}`}
+                    onClick={() => removeAttachment(item)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {uploading && <span>Uploading…</span>}
+            </div>
+          )}
           <textarea
             id="message"
             ref={messageRef}
@@ -747,18 +829,78 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             value={body}
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.items)
+                .filter(
+                  (item) =>
+                    item.kind === "file" && item.type.startsWith("image/"),
+                )
+                .map((item) => item.getAsFile())
+                .filter((file): file is File => file !== null);
+              if (files.length) {
+                event.preventDefault();
+                void addFiles(files);
+              }
+            }}
             placeholder={`Message the room, or use ${[
               ...agents.map((agent) => `@${agent.id}`),
               "@all",
             ].join(", ")}`}
           />
           <EmojiPicker textarea={messageRef} onInsert={setBody} />
-          <button type="button" onClick={send}>
+          <input
+            type="file"
+            ref={fileRef}
+            className="visually-hidden"
+            multiple
+            onChange={(event) => {
+              void addFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Attach files"
+            onClick={() => fileRef.current?.click()}
+          >
+            📎
+          </button>
+          <button type="button" onClick={send} disabled={uploading}>
             Send
           </button>
         </div>
       )}
     </>
+  );
+}
+
+function MessageAttachments({
+  roomId,
+  attachments,
+}: {
+  roomId: number;
+  attachments: Attachment[];
+}) {
+  if (!attachments.length) return null;
+  return (
+    <div className="message-attachments">
+      {attachments.map((item) => {
+        const url = `/api/rooms/${roomId}/attachments/${item.id}`;
+        return (
+          <div key={item.id}>
+            {item.media_type.startsWith("image/") && (
+              <a href={url} download={item.filename}>
+                <img src={`${url}?inline=1`} alt={item.filename} />
+              </a>
+            )}
+            <a href={url} download={item.filename}>
+              {item.filename}
+            </a>{" "}
+            <span className="muted">({Math.ceil(item.size / 1024)} KB)</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

@@ -51,12 +51,21 @@ export interface Overview {
   pre_approvals: { recipient: string; data: string }[];
 }
 
+export interface Attachment {
+  id: string;
+  filename: string;
+  media_type: string;
+  size: number;
+  path: string;
+}
+
 export interface Message {
   id: number;
   sender_type: "user" | "agent";
   sender_id: string;
   body: string;
   created_at: number;
+  attachments?: Attachment[];
 }
 
 export interface Pass {
@@ -145,5 +154,23 @@ export async function request<T>(
   if (response.status === 401) throw new UnauthorizedError("Sign in required");
   const payload = (await response.json()) as T & { message?: string };
   if (!response.ok) throw new Error(payload.message ?? "Request failed");
+  return payload;
+}
+
+export async function uploadAttachment(
+  roomId: number,
+  file: File,
+): Promise<Attachment> {
+  const response = await fetch(
+    `/api/rooms/${roomId}/attachments?name=${encodeURIComponent(file.name || "clipboard-image")}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    },
+  );
+  if (response.status === 401) throw new UnauthorizedError("Sign in required");
+  const payload = (await response.json()) as Attachment & { message?: string };
+  if (!response.ok) throw new Error(payload.message ?? "Upload failed");
   return payload;
 }

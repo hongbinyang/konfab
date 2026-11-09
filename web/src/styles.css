@@ -369,7 +369,7 @@ select {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
@@ -527,4 +527,47 @@ dd {
 }
 .permission-card p {
   margin: 6px 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.attachment-drafts,
+.attachment-error {
+  grid-column: 1 / -1;
+}
+.attachment-drafts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.attachment-chip img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+}
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.message-attachments img {
+  display: block;
+  max-width: 240px;
+  max-height: 180px;
+  object-fit: contain;
 }

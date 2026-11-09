@@ -350,6 +350,12 @@ Room decisions have a stable ID, an optional source message, a status, and immut
 
 Turns include current confirmed decisions up to `defaults.max_decision_chars` (default 4000 characters), plus the total and an overflow flag; `read_decisions` pages through the complete current set. An agent's recent resolved proposals are included as status updates. Confirmed decisions reflect prior lead choices and do not override later instructions from the lead.
 
+### Local attachments
+
+The authenticated page uploads each file as a size-limited binary request to local storage under the configured data directory. A random identifier, rather than the user-supplied filename, determines its path. Uploads begin staged and are bound transactionally to a message when it is sent; removed files and abandoned staged uploads are cleaned up. Message metadata exposes local paths, type, and size to room agents without embedding file bytes in the bridge. Filename search and Markdown export refer to the stored files.
+
+The page can download attachments only after authentication. The server uses file signatures to allow inline previews of PNG, JPEG, GIF and WebP only; other files are served as downloads with `nosniff`. No attachments are uploaded to an outside service by Konfab.
+
 ## 11. Web API and page
 
 ### REST routes
