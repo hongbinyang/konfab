@@ -39,7 +39,6 @@ describe("KonfabService", () => {
   const createService = (): KonfabService =>
     new KonfabService(db, {
       now: () => now,
-      maxConsecutiveAgentMessages: 5,
       waitTimeoutSeconds: 50,
       turnTimeoutMs: TURN_TIMEOUT_MS,
       maxMessageChars: 100,
@@ -257,29 +256,102 @@ describe("KonfabService", () => {
     expect(service.poll("claude", claude, true).status).toBe("idle");
   });
 
-  it("stops after the streak limit until the user posts", () => {
-    service.postUserMessage(ROOM, "@claude start");
-    let agent: "claude" | "codex" = "claude";
-    for (let count = 0; count < 5; count += 1) {
-      const session = agent === "claude" ? claude : codex;
-      const other: "claude" | "codex" = agent === "claude" ? "codex" : "claude";
-      const turn = expectTurn(service.poll(agent, session, true));
-      service.postAgentMessage(agent, session, turn.turn_id, `@${other} reply`);
+  function setupParticipants() {
+    service.ensureAgent("first", "First");
+    service.ensureAgent("second", "Second");
+    service.createRoom("participants", "", ["first", "second"]);
+    return {
+      first: service.join("first", "participants").session_id,
+      second: service.join("second", "participants").session_id,
+    };
+  }
+
+  it("allows twenty consecutive messages, then waits for the lead", () => {
+    const sessions = setupParticipants();
+    service.postUserMessage("participants", "@first start");
+    let agent: "first" | "second" = "first";
+    for (let count = 0; count < 20; count += 1) {
+      const other: "first" | "second" = agent === "first" ? "second" : "first";
+      const turn = expectTurn(service.poll(agent, sessions[agent], true));
+      service.postAgentMessage(
+        agent,
+        sessions[agent],
+        turn.turn_id,
+        `@${other} reply`,
+      );
       agent = other;
     }
-    expect(
-      service.poll(agent, agent === "claude" ? claude : codex, true).status,
-    ).toBe("idle");
-
-    service.postUserMessage(ROOM, "@claude continue");
-    expect(service.poll("claude", claude, true).status).toBe("turn");
+    expect(service.poll(agent, sessions[agent], true).status).toBe("idle");
+    service.postUserMessage("participants", `@${agent} continue`);
+    expect(service.poll(agent, sessions[agent], true).status).toBe("turn");
   });
 
-  it("does not count a pass toward the streak or lose later messages", () => {
-    service.postUserMessage(ROOM, "@claude start");
-    const turn = expectTurn(service.poll("claude", claude, true));
-    service.passTurn("claude", claude, turn.turn_id, "Nothing to add");
-    expect(service.roomState(ROOM).room.agent_streak).toBe(0);
+  it("keeps a passed turn complete", () => {
+    const sessions = setupParticipants();
+    service.postUserMessage("participants", "@first start");
+    const turn = expectTurn(service.poll("first", sessions.first, true));
+    service.passTurn("first", sessions.first, turn.turn_id, "Nothing to add");
+    expect(service.poll("first", sessions.first, true).status).toBe("idle");
+  });
+
+  it("delivers a lead mention without queuing an agent", () => {
+    const sessions = setupParticipants();
+    service.postUserMessage("participants", "@first start");
+    const turn = expectTurn(service.poll("first", sessions.first, true));
+    service.postAgentMessage(
+      "first",
+      sessions.first,
+      turn.turn_id,
+      "@lead please decide",
+    );
+    expect(service.poll("second", sessions.second, true).status).toBe("idle");
+    expect(
+      service.roomState("participants").messages.at(-1)?.mentions,
+    ).toContain("lead");
+    expect(service.joinPrompt("participants")).toContain("@lead");
+    service.postUserMessage("participants", "@lead and @second hello");
+    expect(service.poll("second", sessions.second, true).status).toBe("turn");
+  });
+
+  it("delivers an agent's all mention to the other members and lead", () => {
+    const sessions = setupParticipants();
+    service.postUserMessage("participants", "@first start");
+    const turn = expectTurn(service.poll("first", sessions.first, true));
+    service.postAgentMessage(
+      "first",
+      sessions.first,
+      turn.turn_id,
+      "@all update",
+    );
+    expect(service.poll("second", sessions.second, true).status).toBe("turn");
+    expect(
+      service.roomState("participants").messages.at(-1)?.mentions,
+    ).toContain("all");
+  });
+
+  it("shows waiting for approval and queued participants", () => {
+    const sessions = setupParticipants();
+    service.postUserMessage("participants", "start");
+    const turn = expectTurn(service.poll("first", sessions.first, true));
+    expect(
+      service.roomState("participants").agents.find((a) => a.id === "second")
+        ?.state,
+    ).toBe("queued");
+    const approval = service.requestPermission("first", sessions.first, {
+      recipient: "example.test",
+      data_description: "file",
+      reason: "test",
+    });
+    expect(
+      service.roomState("participants").agents.find((a) => a.id === "first")
+        ?.state,
+    ).toBe("waiting_approval");
+    service.decidePermission(approval.id, "approved");
+    expect(
+      service.roomState("participants").agents.find((a) => a.id === "first")
+        ?.state,
+    ).toBe("working");
+    service.passTurn("first", sessions.first, turn.turn_id);
   });
 
   it("delivers a message posted during an active turn on the next turn", () => {

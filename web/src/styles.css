@@ -589,3 +589,22 @@ dd {
   margin: 8px 0;
   overflow-wrap: anywhere;
 }
+
+.participant-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.messages li.mentions-lead {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+}
+.state.queued,
+.state.waiting_approval {
+  color: var(--warning);
+}

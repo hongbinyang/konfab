@@ -8,9 +8,24 @@ describe("parseConfig", () => {
     expect(config.defaults.hours.start).toBe("09:00");
     expect(config.defaults.hours.end).toBe("18:00");
     expect(config.defaults.hours.days).toHaveLength(7);
-    expect(config.defaults.max_consecutive_agent_messages).toBe(5);
+    expect(config.defaults.max_consecutive_agent_messages).toBe(20);
     expect(Object.keys(config.agents)).toEqual(["claude", "codex"]);
     expect(config.pre_approvals).toEqual([]);
+  });
+
+  it("honors an existing custom message limit", () => {
+    expect(
+      parseConfig("defaults:\n  max_consecutive_agent_messages: 5\n").defaults
+        .max_consecutive_agent_messages,
+    ).toBe(5);
+  });
+
+  it("rejects names reserved for the lead and mentions", () => {
+    for (const name of ["lead", "all", "user"]) {
+      expect(() =>
+        parseConfig(`agents:\n  ${name}:\n    display_name: Test\n`),
+      ).toThrow(/reserved/i);
+    }
   });
 
   it("keeps other defaults when only some values are set", () => {

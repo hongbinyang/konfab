@@ -24,8 +24,10 @@ import {
 
 const STATE_LABELS: Record<AgentState, string> = {
   not_joined: "Not joined",
-  waiting: "Waiting",
+  waiting: "Idle",
   working: "Working",
+  queued: "Queued",
+  waiting_approval: "Waiting for approval",
   outside_hours: "Outside hours",
   on_break: "On break",
   not_responding: "Not responding",
@@ -76,6 +78,7 @@ export function App() {
   const [room, setRoom] = useState<RoomState | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [signedOut, setSignedOut] = useState(false);
+  const [pageConnected, setPageConnected] = useState(false);
   const [error, setError] = useState("");
 
   const selectedRef = useRef(selectedId);
@@ -109,6 +112,8 @@ export function App() {
   useEffect(() => {
     if (signedOut) return;
     const events = new EventSource("/api/events");
+    events.onopen = () => setPageConnected(true);
+    events.onerror = () => setPageConnected(false);
     events.onmessage = () => void refresh();
     const timer = setInterval(() => void refresh(), 15_000);
     return () => {
@@ -186,7 +191,12 @@ export function App() {
           </div>
         ))}
         {room ? (
-          <Room key={room.room.id} state={room} act={act} />
+          <Room
+            key={room.room.id}
+            state={room}
+            act={act}
+            pageConnected={pageConnected}
+          />
         ) : (
           <div className="empty">
             <h2>No rooms yet</h2>
@@ -194,7 +204,12 @@ export function App() {
           </div>
         )}
       </main>
-      <Panel overview={overview} room={room} act={act} />
+      <Panel
+        overview={overview}
+        room={room}
+        act={act}
+        pageConnected={pageConnected}
+      />
     </div>
   );
 }
@@ -313,7 +328,15 @@ function Sidebar({
   );
 }
 
-function Room({ state, act }: { state: RoomState; act: Act }) {
+function Room({
+  state,
+  act,
+  pageConnected,
+}: {
+  state: RoomState;
+  act: Act;
+  pageConnected: boolean;
+}) {
   const { room, messages, agents } = state;
   const passes = state.passes ?? [];
   const [body, setBody] = useState("");
@@ -422,6 +445,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
 
   const displayName = (id: string) =>
     agents.find((agent) => agent.id === id)?.display_name ?? id;
+
   const limited = room.agent_streak >= room.streak_limit;
 
   return (
@@ -470,6 +494,19 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             <div className="room-title">
               <h2># {room.name}</h2>
               <p>{room.topic || "No topic yet"}</p>
+              <ul
+                className="participant-statuses"
+                aria-label="Participant status"
+              >
+                <li title="This status reflects the page connection, not whether a person is present.">
+                  Lead: {pageConnected ? "Page connected" : "Page disconnected"}
+                </li>
+                {agents.map((agent) => (
+                  <li key={agent.id}>
+                    {agent.display_name}: {STATE_LABELS[agent.state]}
+                  </li>
+                ))}
+              </ul>
               {room.brief && (
                 <details>
                   <summary>Brief for agents</summary>
@@ -628,7 +665,17 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
               />
             </li>
           ) : (
-            <li id={`message-${item.id}`} key={`message-${item.id}`}>
+            <li
+              id={`message-${item.id}`}
+              key={`message-${item.id}`}
+              className={
+                item.mentions?.some(
+                  (mention) => mention === "lead" || mention === "all",
+                )
+                  ? "mentions-lead"
+                  : undefined
+              }
+            >
               <span className="sender">
                 {item.sender_type === "user"
                   ? "You (Lead)"
@@ -798,6 +845,7 @@ function Room({ state, act }: { state: RoomState; act: Act }) {
             }}
             placeholder={`Message the room, or use ${[
               ...agents.map((agent) => `@${agent.id}`),
+              "@lead",
               "@all",
             ].join(", ")}`}
           />
@@ -1029,13 +1077,21 @@ function Panel({
   overview,
   room,
   act,
+  pageConnected,
 }: {
   overview: Overview;
   room: RoomState | null;
   act: Act;
+  pageConnected: boolean;
 }) {
   return (
     <aside className="panel">
+      <section aria-label="Lead status">
+        <h2>Lead</h2>
+        <p title="This status reflects the page connection, not whether a person is present.">
+          {pageConnected ? "Page connected" : "Page disconnected"}
+        </p>
+      </section>
       {overview.permissions.length > 0 && (
         <section aria-label="Permission requests">
           <h2>Permission requests</h2>

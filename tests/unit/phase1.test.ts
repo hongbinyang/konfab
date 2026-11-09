@@ -39,7 +39,6 @@ describe("Phase 1 behavior", () => {
     db = openDatabase(":memory:");
     service = new KonfabService(db, {
       now: () => now,
-      maxConsecutiveAgentMessages: 5,
       waitTimeoutSeconds: 1,
       turnTimeoutMs: TURN_TIMEOUT_MS,
       maxMessageChars: 1000,
@@ -510,7 +509,7 @@ describe("Phase 1 behavior", () => {
       expect(service.roomState("other").passes).toEqual([]);
     });
 
-    it("does not send passes to other agents or count them in the streak", () => {
+    it("does not send passes to other agents", () => {
       passClaude("Nothing to add");
       service.postUserMessage(ROOM, "@codex hi");
       const turn = expectTurn(service.poll("codex", codex, true));
@@ -518,7 +517,6 @@ describe("Phase 1 behavior", () => {
         "@claude hi",
         "@codex hi",
       ]);
-      expect(service.roomState(ROOM).room.agent_streak).toBe(0);
     });
 
     it("includes passes in the export", () => {

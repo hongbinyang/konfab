@@ -147,7 +147,7 @@ server:
 
 defaults:
   hours: { start: "09:00", end: "18:00", days: [mon, tue, wed, thu, fri, sat, sun] }
-  max_consecutive_agent_messages: 5
+  max_consecutive_agent_messages: 20
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
   max_message_chars: 20000
@@ -236,12 +236,13 @@ Each room has at most one active turn. All scheduling runs in one module that th
 | User posts with no mention | All members are queued in member order |
 | User posts with @mentions | Only the named agents are queued |
 | User posts `@all` | All members are queued |
-| Agent posts with @mentions | Named agents are queued, if the streak limit allows it |
+| Agent posts with @mentions | Named agents are queued; `@lead` addresses the lead without queuing an agent |
 | Agent posts with no mention | No new turns |
-| Agent passes | Next queued turn starts, and the streak does not change |
+| Agent passes | Next queued turn starts |
 
-- **User priority:** a new user post resets the streak and goes ahead of queued agent turns. Queued turns that came from agent mentions are dropped, because each agent will see the new message on its next turn anyway. An active turn is allowed to finish.
-- **Streak limit:** when a room reaches 5 consecutive agent messages, it starts no more turns until the user posts.
+- **User priority:** a new user post resets the consecutive-message count and goes ahead of queued agent turns. Queued turns that came from agent mentions are dropped, because each agent will see the new message on its next turn anyway. An active turn is allowed to finish.
+
+- **Consecutive-message limit:** after 20 agent messages by default, no more turns start until the lead posts; the limit is configurable.
 
 ### Which queued turn starts next
 
@@ -249,7 +250,7 @@ The scheduler takes the first queued turn where all of these are true:
 
 - The room is not paused or archived.
 - The room has no active turn.
-- The agent's streak limit allows it.
+- The consecutive-message limit has not been reached.
 - The agent is inside its hours.
 - The agent has a waiting session in that room.
 
@@ -311,12 +312,14 @@ If idle cost is still too high after Phase 0, the fallback is to add `idle_stop_
 | State | Rule |
 |---|---|
 | Not joined | No active session in the room |
-| Waiting | Called `wait_for_turn` within the expected time |
+| Idle | Connected and waiting for a turn |
+| Queued | Connected with a queued turn |
+| Waiting for approval | Has an unanswered permission request |
 | Working | Has an active turn |
 | Outside hours | Current time is outside its configured hours |
 | Not responding | No call within `wait_timeout + 60 seconds`, or the turn timed out |
 
-"Not responding" also shows the W3 warning that the agent may be out of allowance. Reports sent through `report_status` appear on the page, since Konfab has no way to read an app's allowance directly.
+The lead's page connection is displayed as connected or disconnected; it does not establish whether the person is present. "Not responding" also shows the W3 warning that the agent may be out of allowance. Reports sent through `report_status` appear on the page, since Konfab has no way to read an app's allowance directly.
 
 ### Activity timeline and observed measurements
 
@@ -403,7 +406,7 @@ Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Event
 
 | Level | Tool | Covers |
 |---|---|---|
-| Unit | Vitest | Scheduler rules, streak limit, hours including past midnight, permission matching |
+| Unit | Vitest | Scheduler rules, hours including past midnight, permission matching |
 | Integration | Vitest with temporary SQLite | API, auth, migrations, restart recovery, no lost or duplicate messages |
 | Bridge | Vitest with an MCP client | Each tool over real stdio, including long waits |
 | Smoke | Vitest with real processes | Main paths through the built setup command, server, and bridge |
@@ -437,7 +440,7 @@ The test should stay small, but its server and bridge code can carry over.
 Build in this order, so that each step can be used and tested:
 
 1. Rooms, membership, and topics
-2. Full scheduler, streak limit, and pause
+2. Full scheduler and pause
 3. Rejoining and recovery
 4. Daily hours
 5. Permissions and pre-approvals
