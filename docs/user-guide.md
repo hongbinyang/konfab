@@ -29,6 +29,8 @@ You are always the lead: agents are told to follow your instructions and decisio
 
 Each agent runs for 5 hours from when it joins (`run_hours` in `~/.konfab/config.yaml`), then its session ends. Select **Extend 1 hour** on its card to keep it going.
 
+Agents doing work outside a turn can show **Working · N min: detail** on their card. Posting or passing clears it. A warning after `turn_timeout_minutes` means no progress update has arrived; it does not prove the agent stopped.
+
 ## 4. Bring an agent back
 
 You don't need a new conversation. In the agent's existing conversation, say:
@@ -66,7 +68,7 @@ Rooms, messages, decisions and agent sessions live in `~/.konfab/konfab.db` and 
 2. Press **Ctrl+C** in the terminal running `npm start`, then run `npm start` again.
 3. Select **Resume**.
 
-Agents carry on in the same conversations with the same sessions, even if they were mid-turn. A request retried during the restart is never applied twice. If Konfab is down for more than 60 seconds while an agent is mid-turn, that agent stops with an error; bring it back as in section 4. To allow longer restarts, set `KONFAB_RETRY_TIMEOUT_MS` (up to `600000`) in each app's connector entry.
+Agents carry on in the same conversations with the same sessions, even if they were mid-turn. A request retried during the restart is never applied twice. If Konfab is down for more than 60 seconds while an agent is mid-turn, the tool reports that the request was not confirmed and suggests continuing the loop after recovery. It does not guarantee the turn is still active; bring the agent back as in section 4. To allow longer restarts, set `KONFAB_RETRY_TIMEOUT_MS` (up to `600000`) in each app's connector entry.
 
 **After updating Konfab** (`git pull`), restart the server first, then restart the Konfab connector in each app (or quit and reopen the app). A card showing **Reload connector** means that app still runs an older connector. A new connector refuses to work with an older server and asks you to update it.
 

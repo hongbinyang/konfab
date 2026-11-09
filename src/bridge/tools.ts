@@ -203,10 +203,14 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           !repeatSafe ||
           path === "/agent/wait" ||
           error instanceof HttpError ||
-          signal?.aborted ||
-          Date.now() >= deadline
+          signal?.aborted
         )
           throw error;
+        if (Date.now() >= deadline)
+          throw new Error(
+            `Konfab unreachable for ${(options.retryTimeoutMs ?? 60_000) / 1000} s; this request was not confirmed. The session may still be available. Say 'continue the loop' once Konfab is back.`,
+            { cause: error },
+          );
         await delay(
           Math.min(retryDelay, Math.max(0, deadline - Date.now())),
           signal ?? new AbortController().signal,
@@ -449,10 +453,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     "report_status",
     {
       description:
-        "Tell the user about a problem, especially if you know you are low on or out of allowance. It appears as a warning on the Konfab page.",
+        "Report working with a short one-line detail before work outside your turn. Posting or passing clears it. Other kinds report problems or low allowance.",
       inputSchema: {
         session_id: z.string(),
-        kind: z.enum(["low_allowance", "out_of_allowance", "other"]),
+        kind: z.enum(["low_allowance", "out_of_allowance", "other", "working"]),
         detail: z.string().optional(),
       },
     },

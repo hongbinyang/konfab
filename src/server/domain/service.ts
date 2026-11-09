@@ -129,7 +129,8 @@ export interface PassView {
   created_at: number;
 }
 
-export type ReportKind = "low_allowance" | "out_of_allowance" | "other";
+export type ReportKind =
+  "low_allowance" | "out_of_allowance" | "other" | "working";
 
 export interface ReportView {
   id: number;
@@ -168,6 +169,8 @@ interface SessionRow {
   last_call_at: number;
   contact_lost_at: number | null;
   run_ends_at: number | null;
+  working_detail: string | null;
+  working_updated_at: number | null;
 }
 
 interface RoomRow {
@@ -225,6 +228,7 @@ const RULES = [
   "Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.",
   "Confirmed decisions reflect the lead's earlier choices; follow the lead's current instructions and propose a change rather than silently acting against a decision.",
   "When you change code, commit it to your own git branch.",
+  "If you start work outside your turn (coding, testing, reviewing), call report_status with kind working and a short detail first. Posting or passing clears it.",
   "If you know you are low on or out of allowance, call report_status.",
   "When your work is done, call post_message or pass_turn, then call wait_for_turn again.",
 ].join(" ");
@@ -608,6 +612,17 @@ export class KonfabService {
           bridge_outdated:
             agent.bridge_protocol !== null && agent.bridge_protocol !== 1,
           closes_at: session?.run_ends_at ?? null,
+          working:
+            session?.working_detail && session.working_updated_at !== null
+              ? {
+                  detail: session.working_detail,
+                  updated_at: session.working_updated_at,
+                  stale_after_ms: this.options.turnTimeoutMs,
+                  stale:
+                    this.now() - session.working_updated_at >=
+                    this.options.turnTimeoutMs,
+                }
+              : null,
           stats: this.agentStats(room.id, agent.id),
           join_prompt: this.joinPrompt(room.name),
         };
@@ -1556,10 +1571,40 @@ export class KonfabService {
   reportStatus(
     agentId: string,
     sessionId: string,
+    kind: Exclude<ReportKind, "working">,
+    detail: string,
+  ): { report_id: number };
+  reportStatus(
+    agentId: string,
+    sessionId: string,
+    kind: ReportKind,
+    detail: string,
+  ): { report_id: number } | { ok: boolean };
+  reportStatus(
+    agentId: string,
+    sessionId: string,
     kind: ReportKind,
     detail: string,
   ) {
     const session = this.requireLiveSession(agentId, sessionId);
+    if (kind === "working") {
+      if (!detail.trim() || detail.length > 120 || /[\r\n]/.test(detail))
+        throw new KonfabError(
+          "invalid_working_detail",
+          400,
+          "Working detail must be one line of 1 to 120 characters",
+        );
+      this.db.transaction(() => {
+        this.db
+          .prepare(
+            "UPDATE sessions SET working_detail = ?, working_updated_at = ? WHERE id = ?",
+          )
+          .run(detail, this.now(), sessionId);
+        this.logEvent("working_started", session.room_id, agentId, { detail });
+      })();
+      this.notify();
+      return { ok: true };
+    }
     const created = this.db
       .prepare(
         `INSERT INTO agent_reports (room_id, agent_id, kind, detail, created_at)
@@ -1614,7 +1659,7 @@ export class KonfabService {
       .prepare(
         `SELECT id, type, agent_id, created_at, payload FROM events
       WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
-      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended')
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended')
       AND id < ? ORDER BY id DESC LIMIT ?`,
       )
       .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
@@ -2338,6 +2383,18 @@ export class KonfabService {
       );
     if (turn.session_id) {
       const session = this.requireSession(turn.agent_id, turn.session_id);
+      if (session.working_detail !== null) {
+        this.db
+          .prepare(
+            "UPDATE sessions SET working_detail = NULL, working_updated_at = NULL WHERE id = ?",
+          )
+          .run(session.id);
+        this.logEvent("working_cleared", turn.room_id, turn.agent_id, {
+          detail: session.working_detail,
+          duration_ms: this.now() - (session.working_updated_at ?? this.now()),
+          reason: resultMessageId === null ? "pass" : "post",
+        });
+      }
       if (session.state === "active" && !this.isWindowActive(session))
         this.endSession(session.id, "run_window_ended");
     }

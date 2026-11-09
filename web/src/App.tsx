@@ -1411,6 +1411,19 @@ function AgentDetails({
   archived: boolean;
   act: Act;
 }) {
+  const [clock, setClock] = useState(Date.now);
+  const workingUpdatedAt = agent.working?.updated_at;
+  useEffect(() => {
+    if (workingUpdatedAt === undefined) return;
+    const timer = setInterval(() => setClock(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [workingUpdatedAt]);
+  const workingElapsed = agent.working
+    ? Math.max(0, Math.max(clock, Date.now()) - agent.working.updated_at)
+    : 0;
+  const workingStale = agent.working
+    ? workingElapsed >= agent.working.stale_after_ms
+    : false;
   const [copied, setCopied] = useState(false);
   const { stats } = agent;
   const [editingRole, setEditingRole] = useState(false);
@@ -1529,6 +1542,14 @@ function AgentDetails({
       {agent.state === "not_responding" && (
         <p className="warning-text">
           It may be out of allowance, so check its app.
+        </p>
+      )}
+      {agent.working && (
+        <p className={workingStale ? "warning-text" : "muted"}>
+          {workingStale
+            ? `Working (no update for ${Math.floor(workingElapsed / 60000)} min)`
+            : `Working · ${Math.floor(workingElapsed / 60000)} min`}
+          : {agent.working.detail}
         </p>
       )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}

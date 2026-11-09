@@ -460,6 +460,43 @@ describe("KonfabService", () => {
     ).toEqual({ state: "abandoned" });
   });
 
+  it("tracks bounded working status separately and clears it on post or pass", () => {
+    expect(() =>
+      service.reportStatus("claude", claude, "working", "x".repeat(121)),
+    ).toThrow("120");
+    expect(() =>
+      service.reportStatus("claude", claude, "working", "two\nlines"),
+    ).toThrow("one line");
+    service.reportStatus("claude", claude, "working", "Running checks");
+    expect(service.listReports()).toEqual([]);
+    expect(service.roomState(ROOM).agents[0]?.working?.detail).toBe(
+      "Running checks",
+    );
+    expect(service.roomState(ROOM).agents[1]?.working).toBeNull();
+    now += TURN_TIMEOUT_MS + 1;
+    expect(service.roomState(ROOM).agents[0]?.working?.stale).toBe(true);
+    service.postUserMessage(ROOM, "@claude reply");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    service.postAgentMessage("claude", claude, turn.turn_id, "Done");
+    expect(service.roomState(ROOM).agents[0]?.working).toBeNull();
+    service.reportStatus("claude", claude, "working", "Reviewing");
+    service.postUserMessage(ROOM, "@claude next");
+    const next = expectTurn(service.poll("claude", claude, true));
+    service.passTurn("claude", claude, next.turn_id);
+    expect(service.roomState(ROOM).agents[0]?.working).toBeNull();
+    const events = service.activity(ROOM).map((event) => event.type);
+    expect(events.filter((type) => type === "working_cleared")).toHaveLength(2);
+  });
+
+  it("does not carry working status into a replacement session or another room", () => {
+    service.reportStatus("claude", claude, "working", "Reviewing");
+    service.createRoom("other-room", "Other", ["claude"]);
+    service.join("claude", "other-room");
+    expect(service.roomState("other-room").agents[0]?.working).toBeNull();
+    service.join("claude", ROOM);
+    expect(service.roomState(ROOM).agents[0]?.working).toBeNull();
+  });
+
   it("reports agent state and idle call measurements", () => {
     expect(service.roomState(ROOM).agents[0]?.state).toBe("waiting");
     service.poll("claude", claude, true);

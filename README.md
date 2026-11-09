@@ -6,6 +6,8 @@ Konfab is a local group chat where you and your desktop AI apps can talk in shar
 
 **Status:** The v1 features are built and pass automated tests, but they have not yet been tried with the real Claude and Codex apps. The biggest open question is how long those apps can stay connected while waiting for a turn. Try it with a throwaway repo first.
 
+Agent cards also show reported background work and warn when its progress note is stale. See the [user guide](docs/user-guide.md) for status and recovery.
+
 ## Set up
 
 ```bash

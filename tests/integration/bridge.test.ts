@@ -223,6 +223,12 @@ describe("server and bridge", () => {
     diskService.createRoom(ROOM, "Topic", ["claude"]);
     diskService.setAgentToken("claude", token);
     const joined = diskService.join("claude", ROOM);
+    diskService.reportStatus(
+      "claude",
+      joined.session_id,
+      "working",
+      "Restart test",
+    );
     diskService.postUserMessage(ROOM, "Please respond after restart");
     const activeTurn = diskService.poll("claude", joined.session_id, true);
     if (activeTurn.status !== "turn") throw new Error("Expected active turn");
@@ -255,6 +261,9 @@ describe("server and bridge", () => {
         maxMessageChars: 1000,
       });
       diskService.recoverAfterRestart();
+      expect(diskService.roomState(ROOM).agents[0]?.working?.detail).toBe(
+        "Restart test",
+      );
       diskApp = await buildApp({ service: diskService, port: PORT });
       const postPayload = {
         session_id: joined.session_id,
@@ -328,6 +337,29 @@ describe("server and bridge", () => {
     ].map((match) => match[1]);
     expect(routes.length).toBeGreaterThan(0);
     for (const route of routes) expect(allowlist).toContain(`"${route}"`);
+  });
+
+  it("explains an exhausted outage budget without promising turn survival", async () => {
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await createBridgeServer({
+      baseUrl: "http://127.0.0.1:1",
+      token,
+      retryTimeoutMs: 0,
+    }).connect(serverTransport);
+    const other = new Client({ name: "test", version: "1.0.0" });
+    await other.connect(clientTransport);
+    try {
+      const result = (await other.callTool({
+        name: "join_room",
+        arguments: { room: ROOM },
+      })) as ToolResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("request was not confirmed");
+      expect(result.content[0]?.text).toContain("continue the loop");
+    } finally {
+      await other.close();
+    }
   });
 
   it("lists the Phase 0 tools", async () => {
