@@ -1,7 +1,7 @@
 # Konfab: Requirements
 
 **Status:** Final for v1
-**Updated:** 2026-11-06
+**Updated:** 2026-11-08 (v1.1 scope added in section 16)
 
 Priority levels:
 
@@ -225,3 +225,64 @@ One local server holds all state, and each app starts a small bridge process. Se
 | D2 | Which language is used? | TypeScript |
 | D3 | Does v1 keep Daily Hours now that joining is manual? | Yes, since the check is small |
 | D4 | How long are history and logs kept? | Until the user deletes them |
+| D5 | What is in v1.1? | Emoji input, activity timeline, inline approval cards, and a decisions log, built in that order. Approved by the user on 2026-11-08. Reactions stay LATER. |
+
+## 16. Version 1.1
+
+**Status:** Approved by the user on 2026-11-08
+**Build order:** V1 Emoji, V2 Activity timeline, V3 Approval cards, V4 Decisions log
+
+Each feature is built on its own branch and must pass `npm run check`. It is then reviewed, and pushed only after the user approves the push.
+
+### V1. Emoji input
+
+| ID | Priority | Requirement |
+|---|---|---|
+| E1 | MUST | The message box has an emoji button that opens a picker with categories and search. |
+| E2 | MUST | Choosing an emoji inserts it at the cursor, or replaces the selection, without disturbing other text or undo. The picker closes with Escape or by clicking outside it. |
+| E3 | MUST | Emoji in messages from the user and agents display correctly on the page, in search results, and in exports. |
+| E4 | MUST | Emoji data and images are bundled locally. The page loads nothing from a CDN or other external source (P7). |
+| E5 | MUST | The picker can be used with the keyboard alone, and its buttons have accessible names. |
+| E6 | SHOULD | Typing `:` and at least two letters suggests matching emoji by shortcode, such as `:thumbsup:` for 👍. |
+| E7 | LATER | Reactions on messages (see R11). |
+
+**Done when** the user can add several emoji to a message at different places, send it, and see it unchanged after a reload, in search, and in a Markdown export.
+
+### V2. Activity timeline and connection measurements
+
+| ID | Priority | Requirement |
+|---|---|---|
+| TL1 | MUST | Each room has a timeline of joins, rejoins, turns given, passes, timeouts and skips, inferred losses of contact, pauses, breaks, and status reports, with times. |
+| TL2 | MUST | A loss of contact is shown as inferred, because Konfab sees only missing calls, not a disconnect. |
+| TL3 | MUST | For each agent in the room, the page shows its last contact, its longest observed wait, and its median time to answer a turn. |
+| TL4 | MUST | Konfab does not show or estimate allowance use (W1). |
+| TL5 | MUST | Timeline data stays on the Mac and is included in the room export. |
+| TL6 | SHOULD | The timeline can be filtered by agent and by event type. |
+
+**Done when** a lead can tell from the page, after an agent drops and rejoins, when contact was last seen, how long the longest wait lasted, and when it rejoined.
+
+### V3. Inline approval cards
+
+| ID | Priority | Requirement |
+|---|---|---|
+| AP1 | MUST | A pending permission request appears as a card in the room's conversation, with Approve and Deny buttons, as well as in the existing list. |
+| AP2 | MUST | The card shows the recipient, the data, the reason, and the requesting agent. |
+| AP3 | MUST | A `code_push` request must state the repository, branch, and commit range. Konfab rejects one that does not. |
+| AP4 | MUST | An approval covers only the stated scope. The agent is told to check that the scope is unchanged before pushing, and to ask again if it has changed. |
+| AP5 | MUST | Answering a card uses the same record and log as the existing flow (P5), and the card then shows who answered, the answer, and the time. |
+| AP6 | MUST | A card can be answered only from the user's authenticated page (S2, S3). |
+
+**Done when** an agent's push request appears in the conversation, the user approves it there, and the agent's next turn shows the approval for exactly that commit range.
+
+### V4. Decisions log
+
+| ID | Priority | Requirement |
+|---|---|---|
+| DL1 | MUST | The user can mark any message as a decision, or write one directly. Agents can propose decisions, and a proposal applies only after the user confirms it. |
+| DL2 | MUST | Each room shows its current decisions in a pinned panel, with links to the source messages. |
+| DL3 | MUST | The user can revise or replace a decision. Earlier versions are kept and marked as replaced. |
+| DL4 | MUST | Each turn includes the room's current decisions, up to a configurable size. When they exceed it, the turn says so and agents can read the rest through a tool. |
+| DL5 | MUST | Only the user can confirm, revise, or replace decisions (R4). |
+| DL6 | SHOULD | Decisions are included in the room export. |
+
+**Done when** the user confirms an agent's proposal, revises it later, and each agent's next turn shows only the revised decision.
