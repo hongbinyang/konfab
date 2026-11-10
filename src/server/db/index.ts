@@ -255,6 +255,54 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY(source_message_id, target_agent_id)
   );
   `,
+  `
+  ALTER TABLE rooms ADD COLUMN project_path TEXT;
+  CREATE TABLE skill_libraries (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('personal','project')),
+    root_path TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL
+  );
+  CREATE TABLE skills (
+    id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES skill_libraries(id),
+    folder_name TEXT NOT NULL, current_revision_id TEXT,
+    created_at INTEGER NOT NULL, trashed_at INTEGER,
+    UNIQUE(library_id, folder_name),
+    FOREIGN KEY(id, current_revision_id) REFERENCES skill_revisions(skill_id, id)
+      DEFERRABLE INITIALLY DEFERRED
+  );
+  CREATE TABLE skill_revisions (
+    id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id),
+    number INTEGER NOT NULL, content_hash TEXT NOT NULL, name TEXT NOT NULL,
+    description TEXT NOT NULL, provenance_json TEXT NOT NULL DEFAULT '{}',
+    licence TEXT, created_at INTEGER NOT NULL,
+    restored_from_revision_id TEXT REFERENCES skill_revisions(id),
+    UNIQUE(skill_id, number), UNIQUE(skill_id, id)
+  );
+  CREATE TABLE skill_blobs (hash TEXT PRIMARY KEY, content BLOB NOT NULL);
+  CREATE TABLE skill_revision_files (
+    revision_id TEXT NOT NULL REFERENCES skill_revisions(id), path TEXT NOT NULL,
+    blob_hash TEXT NOT NULL REFERENCES skill_blobs(hash), mode INTEGER NOT NULL,
+    PRIMARY KEY(revision_id, path)
+  );
+  CREATE TABLE skill_reviews (
+    revision_id TEXT PRIMARY KEY REFERENCES skill_revisions(id), reviewed_at INTEGER NOT NULL
+  );
+  CREATE TABLE skill_usages (
+    skill_id TEXT NOT NULL, revision_id TEXT NOT NULL, owner_type TEXT NOT NULL,
+    owner_id TEXT NOT NULL, label TEXT NOT NULL,
+    PRIMARY KEY(skill_id, revision_id, owner_type, owner_id),
+    FOREIGN KEY(skill_id, revision_id) REFERENCES skill_revisions(skill_id, id)
+  );
+  CREATE TABLE skill_temp_files (
+    id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES skill_libraries(id),
+    content_hash TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
+  CREATE TABLE skill_rename_operations (
+    skill_id TEXT PRIMARY KEY REFERENCES skills(id), old_name TEXT NOT NULL,
+    new_name TEXT NOT NULL, old_hash TEXT NOT NULL, new_hash TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared','committed')),
+    owns_destination INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

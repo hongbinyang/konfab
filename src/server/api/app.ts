@@ -6,7 +6,11 @@ import Fastify, {
   type FastifyRequest,
 } from "fastify";
 import type { Writable } from "node:stream";
+import { existsSync, lstatSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { z, ZodError } from "zod";
+import { SkillError } from "../domain/skill-error.js";
+import type { SkillLibrary } from "../domain/skills.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 
 const MAX_SERVER_WAIT_SECONDS = 30;
@@ -67,6 +71,7 @@ const updateRoomBody = z.object({
   name: z.string().optional(),
   topic: z.string().optional(),
   brief: z.string().optional(),
+  project_path: z.string().nullable().optional(),
 });
 const memberParams = z.object({
   id: z.coerce.number().int().positive(),
@@ -86,6 +91,8 @@ const extendBody = z.object({ minutes: z.number().int().min(1).max(1440) });
 
 export interface AppOptions {
   service: KonfabService;
+  skills?: SkillLibrary;
+  skillsHome?: string;
   port: number;
   webDir?: string;
   logger?: boolean;
@@ -159,6 +166,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof SkillError) {
+      return reply
+        .code(error.statusCode)
+        .send({ code: error.code, message: error.message });
+    }
     if (error instanceof KonfabError) {
       return reply
         .code(error.statusCode)
@@ -386,6 +398,273 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // Page routes
 
+  const skillService = () => {
+    if (!options.skills || !options.skillsHome)
+      throw new KonfabError("unavailable", 503, "Library unavailable");
+    return options.skills;
+  };
+  const skillScope = (
+    scope: "personal" | "project",
+    roomId?: number,
+    create = false,
+  ) => {
+    const library = skillService();
+    const project =
+      scope === "project" && roomId
+        ? service.roomState(roomId).room.project_path
+        : null;
+    if (scope === "project" && !project)
+      throw new KonfabError(
+        "project_missing",
+        400,
+        "Set a project folder first",
+      );
+    const parent = scope === "personal" ? options.skillsHome! : project!;
+    if (!existsSync(parent) || !lstatSync(parent).isDirectory()) {
+      if (scope === "project" && !create)
+        return {
+          library,
+          libraryId: library.findLibrary(join(parent, ".konfab", "skills")),
+        };
+      throw new KonfabError("unavailable", 404, "Library root unavailable");
+    }
+    const parts = scope === "personal" ? ["skills"] : [".konfab", "skills"];
+    let path = parent;
+    for (const part of parts) {
+      path = join(path, part);
+      if (!existsSync(path)) {
+        if (!create)
+          return {
+            library,
+            libraryId:
+              scope === "project"
+                ? library.findLibrary(join(parent, ".konfab", "skills"))
+                : null,
+          };
+        mkdirSync(path, { mode: 0o700 });
+      }
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory())
+        throw new KonfabError(
+          "invalid_library",
+          400,
+          "Library folder is unavailable",
+        );
+    }
+    return { library, libraryId: library.registerLibrary(scope, path) };
+  };
+  const scopeQuery = z.object({
+    scope: z.enum(["personal", "project"]).default("personal"),
+    room_id: z.coerce.number().int().positive().optional(),
+    trash: z.enum(["true", "false"]).default("false"),
+  });
+  app.get("/api/library", async (request) => {
+    const query = scopeQuery.parse(request.query);
+    const { library, libraryId } = skillScope(query.scope, query.room_id);
+    return libraryId
+      ? library.list(libraryId, query.trash === "true")
+      : { skills: [], untracked: [] };
+  });
+  app.post("/api/library/skills", async (request) => {
+    const body = z
+      .object({
+        scope: z.enum(["personal", "project"]),
+        room_id: z.number().int().positive().optional(),
+        name: z.string().min(1).max(128),
+        description: z.string().min(1).max(2048),
+      })
+      .parse(request.body);
+    const { library, libraryId } = skillScope(body.scope, body.room_id, true);
+    if (!libraryId)
+      throw new KonfabError("unavailable", 404, "Library unavailable");
+    return { id: library.create(libraryId, body.name, body.description) };
+  });
+  app.post("/api/library/adopt", async (request) => {
+    const body = z
+      .object({
+        scope: z.enum(["personal", "project"]),
+        room_id: z.number().int().positive().optional(),
+        folder: z.string().max(128),
+      })
+      .parse(request.body);
+    const { library, libraryId } = skillScope(body.scope, body.room_id);
+    if (!libraryId)
+      throw new KonfabError(
+        "unavailable",
+        404,
+        "Library folder is unavailable",
+      );
+    return { id: library.adopt(libraryId, body.folder) };
+  });
+
+  const skillId = z.object({ id: z.string().uuid() });
+  const skillRevisionId = z.object({
+    id: z.string().uuid(),
+    revisionId: z.string().uuid(),
+  });
+  const skillMutation = z.object({
+    base_revision_id: z.string().uuid(),
+    base_draft_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  });
+  const skillAction = <T>(action: () => T): T => action();
+  app.get("/api/library/skills/:id", async (request) => {
+    const { id } = skillId.parse(request.params);
+    return skillAction(() => skillService().detail(id));
+  });
+  app.get("/api/library/skills/:id/files", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const { path } = z
+      .object({ path: z.string().min(1).max(512) })
+      .parse(request.query);
+    return skillAction(() => ({
+      content_base64: skillService().readFile(id, path).toString("base64"),
+    }));
+  });
+  app.put(
+    "/api/library/skills/:id/files",
+    { bodyLimit: 800_000 },
+    async (request) => {
+      const { id } = skillId.parse(request.params);
+      const body = skillMutation
+        .extend({
+          path: z.string().min(1).max(512),
+          content_base64: z
+            .string()
+            .max(700_000)
+            .regex(
+              /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+            ),
+        })
+        .parse(request.body);
+      return skillAction(() => {
+        const draft_hash = skillService().writeFile(
+          id,
+          body.path,
+          Buffer.from(body.content_base64, "base64"),
+          body.base_revision_id,
+          body.base_draft_hash,
+        );
+        return { draft_hash };
+      });
+    },
+  );
+  app.post("/api/library/skills/:id/files/delete", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = skillMutation
+      .extend({ path: z.string().min(1).max(512) })
+      .parse(request.body);
+    return skillAction(() => ({
+      draft_hash: skillService().deleteFile(
+        id,
+        body.path,
+        body.base_revision_id,
+        body.base_draft_hash,
+      ),
+    }));
+  });
+  app.get("/api/library/skills/:id/revisions", async (request) => {
+    const { id } = skillId.parse(request.params);
+    return skillAction(() => skillService().revisions(id));
+  });
+  app.get("/api/library/skills/:id/revisions/:revisionId", async (request) => {
+    const { id, revisionId } = skillRevisionId.parse(request.params);
+    return skillAction(() => skillService().revisionFiles(id, revisionId));
+  });
+  app.get(
+    "/api/library/skills/:id/revisions/:revisionId/files",
+    async (request) => {
+      const { id, revisionId } = skillRevisionId.parse(request.params);
+      const { path } = z
+        .object({ path: z.string().min(1).max(512) })
+        .parse(request.query);
+      return skillAction(() => ({
+        content_base64: skillService()
+          .readRevisionFile(id, revisionId, path)
+          .toString("base64"),
+      }));
+    },
+  );
+  app.post(
+    "/api/library/skills/:id/revisions/:revisionId/restore",
+    async (request) => {
+      const { id, revisionId } = skillRevisionId.parse(request.params);
+      const body = skillMutation.parse(request.body);
+      return skillAction(() => ({
+        revision_id: skillService().restoreRevision(
+          id,
+          revisionId,
+          body.base_revision_id,
+          body.base_draft_hash,
+        ),
+      }));
+    },
+  );
+  app.post("/api/library/skills/:id/rename", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = skillMutation
+      .extend({ name: z.string().min(1).max(128) })
+      .parse(request.body);
+    return skillAction(() => ({
+      revision_id: skillService().rename(
+        id,
+        body.name,
+        body.base_revision_id,
+        body.base_draft_hash,
+      ),
+    }));
+  });
+  app.post("/api/library/skills/:id/duplicate", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = z
+      .object({
+        revision_id: z.string().uuid(),
+        scope: z.enum(["personal", "project"]),
+        room_id: z.number().int().positive().optional(),
+        name: z.string().min(1).max(128),
+      })
+      .parse(request.body);
+    const { library, libraryId } = skillScope(body.scope, body.room_id, true);
+    if (!libraryId)
+      throw new KonfabError("unavailable", 404, "Library unavailable");
+    return skillAction(() => ({
+      id: library.duplicate(id, body.revision_id, libraryId, body.name),
+    }));
+  });
+  app.post("/api/library/skills/:id/save", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = skillMutation.parse(request.body);
+    return skillAction(() => ({
+      revision_id: skillService().save(
+        id,
+        body.base_revision_id,
+        body.base_draft_hash,
+      ),
+    }));
+  });
+  app.post("/api/library/skills/:id/trash", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = skillMutation.parse(request.body);
+    return skillAction(() => {
+      skillService().trash(id, body.base_revision_id, body.base_draft_hash);
+      return { ok: true };
+    });
+  });
+  app.post("/api/library/skills/:id/restore", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = skillMutation.parse(request.body);
+    return skillAction(() => {
+      skillService().restore(id, body.base_revision_id, body.base_draft_hash);
+      return { ok: true };
+    });
+  });
+  app.put("/api/library/skills/:id/reviews/:revisionId", async (request) => {
+    const { id, revisionId } = skillRevisionId.parse(request.params);
+    return skillAction(() => {
+      skillService().markReviewed(id, revisionId);
+      return { ok: true };
+    });
+  });
+
   app.get("/api/overview", async () => service.overview());
 
   app.post("/api/rooms", async (request, reply) => {
@@ -488,11 +767,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.patch("/api/rooms/:id", async (request) => {
     const { id } = idParams.parse(request.params);
-    const { name, topic, brief } = updateRoomBody.parse(request.body);
+    const { name, topic, brief, project_path } = updateRoomBody.parse(
+      request.body,
+    );
     service.updateRoom(id, {
       ...(name !== undefined ? { name } : {}),
       ...(topic !== undefined ? { topic } : {}),
       ...(brief !== undefined ? { brief } : {}),
+      ...(project_path !== undefined ? { project_path } : {}),
     });
     return service.roomState(id);
   });

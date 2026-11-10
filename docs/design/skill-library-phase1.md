@@ -103,7 +103,7 @@ usage boundary directly; phase 3 will wire actual role/room writes transactional
 
 ## Package validation and bounds
 
-Defaults: 1,000 files, 2 MiB total package bytes, 512 KiB per file, 32 path segments
+Defaults: 1,000 files and directories, 2 MiB total package bytes, 512 KiB per file, 32 path segments
 and 512 UTF-8 bytes per relative path. Count bytes while reading, not after an
 unbounded load. Reject absolute paths, empty/`.`/`..` segments, backslashes, NUL,
 reserved internal temporary names, symlinks and special files. Root confinement
@@ -115,7 +115,7 @@ the same OS user.
 
 `SKILL.md` must be UTF-8 with bounded YAML frontmatter. Use existing `yaml` with
 duplicate-key/alias safeguards and no custom tags; require a mapping. Validate
-Agent Skills name (1–64 lowercase letters/digits/hyphens, no leading/trailing or
+Agent Skills name (1–64 Unicode lowercase alphanumeric characters/hyphens, no leading/trailing or
 consecutive hyphens) and description (1–1,024 characters). Preserve extra standard
 fields and instructions instead of regenerating away metadata. Metadata parsing
 errors are explicit. Keep original licence files; duplicate adds provenance rather

@@ -12,6 +12,7 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import { EmojiPicker } from "./EmojiPicker";
+import { Library } from "./Library";
 import {
   request,
   uploadAttachment,
@@ -81,6 +82,8 @@ export function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [room, setRoom] = useState<RoomState | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryDirty, setLibraryDirty] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [pageConnected, setPageConnected] = useState(false);
   const [error, setError] = useState("");
@@ -168,7 +171,17 @@ export function App() {
       <Sidebar
         overview={overview}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={(id) => {
+          if (
+            showLibrary &&
+            libraryDirty &&
+            !window.confirm("Discard unsaved editor changes?")
+          )
+            return;
+          setSelectedId(id);
+          setShowLibrary(false);
+        }}
+        onLibrary={() => setShowLibrary(true)}
         act={act}
       />
       <main className="chat">
@@ -207,7 +220,9 @@ export function App() {
             </button>
           </div>
         ))}
-        {room ? (
+        {showLibrary ? (
+          <Library roomId={selectedId} onDirtyChange={setLibraryDirty} />
+        ) : room ? (
           <Room
             key={room.room.id}
             state={room}
@@ -237,11 +252,13 @@ function Sidebar({
   overview,
   selectedId,
   onSelect,
+  onLibrary,
   act,
 }: {
   overview: Overview;
   selectedId: number | null;
   onSelect: (id: number) => void;
+  onLibrary: () => void;
   act: Act;
 }) {
   const [name, setName] = useState("");
@@ -301,6 +318,9 @@ function Sidebar({
     <nav className="sidebar" aria-label="Rooms">
       <h1>Konfab</h1>
       <ul>{openRooms.map(roomButton)}</ul>
+      <button type="button" onClick={onLibrary}>
+        Library
+      </button>
       <form className="stack" onSubmit={create}>
         <h2>New room</h2>
         <label>
@@ -410,6 +430,7 @@ function Room({
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic);
   const [brief, setBrief] = useState(room.brief);
+  const [projectPath, setProjectPath] = useState(room.project_path ?? "");
   const listRef = useRef<HTMLOListElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -657,7 +678,14 @@ function Room({
     void act(async () => {
       await request(`/api/rooms/${room.id}`, {
         method: "PATCH",
-        body: { name: name.trim(), topic, brief },
+        body: {
+          name: name.trim(),
+          topic,
+          brief,
+          ...(projectPath.trim() !== (room.project_path ?? "")
+            ? { project_path: projectPath.trim() || null }
+            : {}),
+        },
       });
       setEditing(false);
     });
@@ -712,6 +740,14 @@ function Room({
                 onChange={(event) => setBrief(event.target.value)}
               />
             </label>
+            <label>
+              Project folder
+              <input
+                value={projectPath}
+                onChange={(event) => setProjectPath(event.target.value)}
+                placeholder="Absolute path (optional)"
+              />
+            </label>
             <div className="row">
               <button type="submit">Save</button>
               <button
@@ -757,6 +793,7 @@ function Room({
                     setName(room.name);
                     setTopic(room.topic);
                     setBrief(room.brief);
+                    setProjectPath(room.project_path ?? "");
                     setEditing(true);
                   }}
                 >

@@ -1,6 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
@@ -187,6 +194,7 @@ interface RoomRow {
   name: string;
   topic: string;
   brief: string;
+  project_path: string | null;
   archived_at: number | null;
   paused: number;
   on_break: number;
@@ -437,7 +445,12 @@ export class KonfabService {
 
   updateRoom(
     ref: RoomRef,
-    changes: { name?: string; topic?: string; brief?: string },
+    changes: {
+      name?: string;
+      topic?: string;
+      brief?: string;
+      project_path?: string | null;
+    },
   ) {
     const room = this.room(ref);
     if (changes.name !== undefined && changes.name !== room.name) {
@@ -456,12 +469,37 @@ export class KonfabService {
     if (changes.brief !== undefined) {
       this.validateLength(changes.brief, MAX_BRIEF_CHARS, "Briefs");
     }
+    let projectPath = room.project_path;
+    if (changes.project_path !== undefined) {
+      if (changes.project_path === null) projectPath = null;
+      else {
+        if (!changes.project_path.startsWith("/"))
+          throw new KonfabError(
+            "invalid_project",
+            400,
+            "Project folder must be absolute",
+          );
+        try {
+          projectPath = realpathSync(changes.project_path);
+          if (!statSync(projectPath).isDirectory()) throw new Error();
+        } catch {
+          throw new KonfabError(
+            "invalid_project",
+            400,
+            "Project folder must be an existing directory",
+          );
+        }
+      }
+    }
     this.db
-      .prepare("UPDATE rooms SET name = ?, topic = ?, brief = ? WHERE id = ?")
+      .prepare(
+        "UPDATE rooms SET name = ?, topic = ?, brief = ?, project_path = ? WHERE id = ?",
+      )
       .run(
         changes.name ?? room.name,
         changes.topic ?? room.topic,
         changes.brief ?? room.brief,
+        projectPath,
         room.id,
       );
     this.logEvent("room_updated", room.id, null, changes);
@@ -692,6 +730,7 @@ export class KonfabService {
         name: room.name,
         topic: room.topic,
         brief: room.brief,
+        project_path: room.project_path,
         paused: room.paused === 1,
         on_break: room.on_break === 1,
         archived: room.archived_at !== null,

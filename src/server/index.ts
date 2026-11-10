@@ -8,11 +8,13 @@ const TICK_INTERVAL_MS = 30_000;
 const home = konfabHome();
 ensureHome(home);
 const config = loadConfig(home);
-const { db, service } = createRuntime(databasePath(home), config);
+const { db, service, skills } = createRuntime(databasePath(home), config);
 service.recoverAfterRestart();
 
 const app = await buildApp({
   service,
+  skills,
+  skillsHome: home,
   port: config.server.port,
   webDir: resolve(import.meta.dirname, "../web"),
   logger: true,

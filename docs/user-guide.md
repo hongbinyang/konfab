@@ -111,3 +111,11 @@ Record results as you go.
 | **Break**          | Take a break, post a message, then tell an agent to rejoin. It rejoins in the same conversation and sees it. |        |
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |
+
+## Local skill library
+
+Choose **Library** in the sidebar to manage personal skills. To use a project library, first set an existing absolute **Project folder** in a room's Edit form, select that room, and choose **Project** in the library. Personal skills live under the Konfab home in `skills/`; project skills live under `.konfab/skills/` in the selected project. Existing standard skill folders appear as **Untracked** and can be adopted.
+
+Create a skill with a name and description. Edit `SKILL.md`, add or remove package files, and choose **Save revision** to validate and snapshot the whole package. External folder edits appear as drafts when reopened. The working folder path can be copied for use in another editor. A stale editor receives a conflict instead of overwriting newer changes. History lets you view or restore a revision as a new one. Rename keeps the skill's identity; Duplicate makes a separate skill from the selected saved revision.
+
+Review applies to an exact saved revision. New revisions start unreviewed. **Move to Trash** is blocked when a skill is in use; Trash can restore it. Saved revision content remains in the database. The library never runs scripts. Remote sources and role assignments are not available in this phase.
