@@ -139,7 +139,12 @@ export function skillMetadata(files: SkillFile[]): {
 } {
   const file = files.find((item) => item.path === "SKILL.md");
   if (!file) throw new SkillError("invalid_skill", 400, "SKILL.md is required");
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(file.content);
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(file.content);
+  } catch {
+    throw new SkillError("invalid_skill", 400, "SKILL.md must be valid UTF-8");
+  }
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
   if (!match?.[1])
     throw new SkillError("invalid_skill", 400, "SKILL.md needs frontmatter");

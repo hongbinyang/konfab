@@ -477,7 +477,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const { library, libraryId } = skillScope(body.scope, body.room_id, true);
     if (!libraryId)
       throw new KonfabError("unavailable", 404, "Library unavailable");
-    return { id: library.create(libraryId, body.name, body.description) };
+    return skillAction(() => ({
+      id: library.create(libraryId, body.name, body.description),
+    }));
   });
   app.post("/api/library/adopt", async (request) => {
     const body = z
@@ -494,7 +496,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         404,
         "Library folder is unavailable",
       );
-    return { id: library.adopt(libraryId, body.folder) };
+    return skillAction(() => ({ id: library.adopt(libraryId, body.folder) }));
   });
 
   const skillId = z.object({ id: z.string().uuid() });
@@ -506,7 +508,28 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     base_revision_id: z.string().uuid(),
     base_draft_hash: z.string().regex(/^[a-f0-9]{64}$/),
   });
-  const skillAction = <T>(action: () => T): T => action();
+  const skillAction = <T>(action: () => T): T => {
+    try {
+      return action();
+    } catch (error) {
+      if (error instanceof SkillError || error instanceof KonfabError)
+        throw error;
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === "EEXIST")
+        throw new SkillError(
+          "name_conflict",
+          409,
+          "A file or folder already exists",
+        );
+      if (code === "ENOENT" || code === "EACCES" || code === "EPERM")
+        throw new SkillError(
+          "unavailable",
+          404,
+          "The library or file is unavailable",
+        );
+      throw error;
+    }
+  };
   app.get("/api/library/skills/:id", async (request) => {
     const { id } = skillId.parse(request.params);
     return skillAction(() => skillService().detail(id));
