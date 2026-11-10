@@ -167,6 +167,16 @@ export interface RoomState {
       repair_source_message_id: number | null;
     }[];
     working: string[];
+    auto_continue_enabled: boolean;
+    automatic: {
+      id: number;
+      target_agent_id: string;
+      reason: string;
+      due_at: number;
+      server_now: number;
+      capped: boolean;
+      blocked: string | null;
+    } | null;
     suspended: boolean;
     no_continuation: boolean;
     eligible_agents: string[];

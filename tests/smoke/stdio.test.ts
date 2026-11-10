@@ -1,3 +1,4 @@
+import Database from "better-sqlite3";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   mkdtempSync,
@@ -149,9 +150,10 @@ describe("built app over real processes", () => {
     writeFileSync(
       join(home, "config.yaml"),
       [
-        `server:\n  port: ${port}`,
+        `server:\n  port: ${port}\n  tick_seconds: 1`,
         "defaults:",
         `  wait_timeout_seconds: ${WAIT_SECONDS}`,
+        "  auto_continue_delay_seconds: 10",
         '  hours: { start: "00:00", end: "00:00", days: [sun, mon, tue, wed, thu, fri, sat] }',
       ].join("\n"),
       { mode: 0o600 },
@@ -182,6 +184,72 @@ describe("built app over real processes", () => {
     await Promise.allSettled(clients.map((client) => client.close()));
     if (server) await stopServer(server);
     rmSync(home, { recursive: true, force: true });
+  });
+
+  it("recovers self, watchdog and timeout continuations across real processes", async () => {
+    const agent = await connect(tokens[0] ?? "");
+    const session = (await tool(agent, "join_room", { room: ROOM })).session_id;
+    await userPost("@claude start");
+    let turn = await tool(agent, "wait_for_turn", { session_id: session });
+    const posted = await tool(agent, "post_message", {
+      session_id: session,
+      turn_id: turn.turn_id,
+      body: "Continuing",
+      next: { kind: "self" },
+    });
+    turn = await tool(agent, "wait_for_turn", { session_id: session });
+    expect(turn.continuation).toMatchObject({
+      reason: "self",
+      source_message_id: posted.message_id,
+    });
+    const legacy = await tool(agent, "post_message", {
+      session_id: session,
+      turn_id: turn.turn_id,
+      body: "Still working",
+    });
+    await stopServer(server!);
+    server = undefined;
+    let db = new Database(join(home, "konfab.db"));
+    db.prepare(
+      "UPDATE automatic_continuations SET due_at = ? WHERE state = 'pending'",
+    ).run(Date.now() - 1);
+    db.close();
+    server = await startServer();
+    const deadline = Date.now() + 8000;
+    do {
+      turn = await tool(agent, "wait_for_turn", { session_id: session });
+    } while (turn.status === "idle" && Date.now() < deadline);
+    expect(turn.continuation).toMatchObject({
+      reason: "watchdog",
+      source_message_id: legacy.message_id,
+    });
+    db = new Database(join(home, "konfab.db"));
+    db.prepare(
+      "UPDATE turns SET started_at = ?, last_progress_at = NULL WHERE id = ?",
+    ).run(Date.now() - 31 * 60_000, turn.turn_id);
+    db.close();
+    const timeoutDeadline = Date.now() + 5000;
+    do {
+      await new Promise((done) => setTimeout(done, 200));
+      db = new Database(join(home, "konfab.db"));
+      const row = db
+        .prepare("SELECT state FROM turns WHERE id = ?")
+        .get(turn.turn_id) as { state: string };
+      db.close();
+      if (row.state === "skipped") break;
+    } while (Date.now() < timeoutDeadline);
+    const recovered = await tool(agent, "wait_for_turn", {
+      session_id: session,
+    });
+    expect(recovered.continuation?.reason).toBe("timeout_recovery");
+    await tool(agent, "post_message", {
+      session_id: session,
+      turn_id: recovered.turn_id,
+      body: "Finished",
+      next: { kind: "done" },
+    });
+    const done = await roomState();
+    expect(done.messages.at(-1)?.body).toBe("Finished");
   });
 
   it("runs a conversation, survives a restart, and keeps clean history", async () => {

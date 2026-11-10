@@ -467,6 +467,41 @@ describe("KonfabService", () => {
     ).toEqual({ state: "skipped" });
   });
 
+  it("extends active turns on working heartbeat and retries one timeout", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const first = expectTurn(service.poll("claude", claude, true));
+    now += TURN_TIMEOUT_MS - 1000;
+    service.reportStatus("claude", claude, "working", "Implementing");
+    now += 2000;
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("turn");
+    now += TURN_TIMEOUT_MS;
+    service.poll("claude", claude, true);
+    service.tick();
+    const retry = expectTurn(service.poll("claude", claude, true));
+    expect(retry.turn_id).not.toBe(first.turn_id);
+    expect(retry.continuation?.reason).toBe("timeout_recovery");
+    now += TURN_TIMEOUT_MS + 1;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+  });
+
+  it("recovers a legacy timeout with a missing message cursor", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    now += 1;
+    const first = expectTurn(service.poll("claude", claude, true));
+    db.prepare("UPDATE turns SET last_message_id = NULL WHERE id = ?").run(
+      first.turn_id,
+    );
+    now += TURN_TIMEOUT_MS + 1;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(
+      expectTurn(service.poll("claude", claude, true)).continuation?.reason,
+    ).toBe("timeout_recovery");
+  });
+
   it("requeues an active turn whose owning session ended", () => {
     service.postUserMessage(ROOM, "@claude hi");
     const original = expectTurn(service.poll("claude", claude, true));
@@ -475,6 +510,205 @@ describe("KonfabService", () => {
     expect(
       db.prepare("SELECT state FROM turns WHERE id = ?").get(original.turn_id),
     ).toEqual({ state: "abandoned" });
+  });
+
+  it("fires a bounded legacy watchdog and reports why the turn was queued", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    const post = service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "Continuing work",
+    );
+    const pending = service.roomState(ROOM).routing.automatic;
+    expect(pending?.target_agent_id).toBe("claude");
+    now += 180_001;
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    service.tick();
+    const continued = expectTurn(service.poll("claude", claude, true));
+    expect(continued.continuation).toMatchObject({
+      reason: "watchdog",
+      source_message_id: post.message_id,
+    });
+    service.passTurn("claude", claude, continued.turn_id, "Nothing to do");
+    now += 180_001;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+  });
+
+  it("cancels stale plans and does not fire while paused", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    let turn = expectTurn(service.poll("claude", claude, true));
+    service.postAgentMessage("claude", claude, turn.turn_id, "Working further");
+    const old = service.roomState(ROOM).routing.automatic!;
+    service.cancelAutoContinue(ROOM, old.id);
+    expect(() => service.cancelAutoContinue(ROOM, old.id)).toThrow(
+      "no longer pending",
+    );
+    now += 180_001;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    service.postUserMessage(ROOM, "@claude again");
+    turn = expectTurn(service.poll("claude", claude, true));
+    service.postAgentMessage("claude", claude, turn.turn_id, "Working further");
+    service.setRoomPaused(ROOM, true);
+    now += 180_001;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    service.setRoomPaused(ROOM, false);
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(
+      expectTurn(service.poll("claude", claude, true)).continuation?.reason,
+    ).toBe("watchdog");
+  });
+
+  it("does not schedule a watchdog when disabled", () => {
+    service.setAutoContinue(ROOM, false);
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    service.postAgentMessage("claude", claude, turn.turn_id, "Continuing");
+    expect(service.roomState(ROOM).routing.automatic).toBeNull();
+    now += 180_001;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+  });
+
+  it("does not auto-continue while an approval is pending", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    const approval = service.requestPermission("claude", claude, {
+      recipient: "example.org",
+      data_description: "test",
+      reason: "test",
+    });
+    service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "Waiting for approval",
+    );
+    now += 180_001;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    expect(service.roomState(ROOM).routing.automatic?.blocked).toBe(
+      "permission",
+    );
+    service.decidePermission(approval.id, "approved");
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(
+      expectTurn(service.poll("claude", claude, true)).continuation?.reason,
+    ).toBe("watchdog");
+  });
+
+  it("caps automatic recoveries per room and stays quiet for done", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    let turn = expectTurn(service.poll("claude", claude, true));
+    for (let n = 0; n < 3; n++) {
+      service.postAgentMessage("claude", claude, turn.turn_id, "Continuing");
+      now += 180_001;
+      service.poll("claude", claude, true);
+      service.tick();
+      turn = expectTurn(service.poll("claude", claude, true));
+    }
+    service.postAgentMessage("claude", claude, turn.turn_id, "More work");
+    now += 180_001;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    expect(service.roomState(ROOM).routing.automatic?.capped).toBe(true);
+    now += 60 * 60_000 + 1;
+    service.poll("claude", claude, true);
+    service.tick();
+    expect(service.roomState(ROOM).routing.automatic?.capped).toBe(true);
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    service.postUserMessage(ROOM, "@claude final");
+    turn = expectTurn(service.poll("claude", claude, true));
+    service.postAgentMessage("claude", claude, turn.turn_id, "Finished", {
+      kind: "done",
+    });
+    expect(service.roomState(ROOM).routing.automatic).toBeNull();
+  });
+
+  it("queues explicit self continuation exactly once and returns its source", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    const posted = service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "Continuing",
+      { kind: "self" },
+    );
+    expect(
+      service.postAgentMessage("claude", claude, turn.turn_id, "Continuing", {
+        kind: "self",
+      }),
+    ).toEqual(posted);
+    const next = expectTurn(service.poll("claude", claude, true));
+    expect(next.continuation).toMatchObject({
+      reason: "self",
+      source_message_id: posted.message_id,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM turns WHERE room_id = ? AND state = 'queued'",
+        )
+        .get(1),
+    ).toEqual({ n: 0 });
+  });
+
+  it("deduplicates explicit handoffs and rejects conflicting lead decisions", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    expect(() =>
+      service.postAgentMessage(
+        "claude",
+        claude,
+        turn.turn_id,
+        "@codex please",
+        { kind: "done" },
+      ),
+    ).toThrow("cannot be combined");
+    expect(() =>
+      service.postAgentMessage("claude", claude, turn.turn_id, "Next", {
+        kind: "agent",
+        agent_id: "missing",
+      }),
+    ).toThrow("room member");
+    const post = service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "@codex review",
+      { kind: "agent", agent_id: "codex" },
+    );
+    const repair = service.handOff("claude", claude, post.message_id, "codex");
+    expect(expectTurn(service.poll("codex", codex, true)).turn_id).toBe(
+      repair.turn_id,
+    );
+  });
+
+  it("does not warn or enqueue when explicitly waiting on the lead", () => {
+    service.postUserMessage(ROOM, "@claude start");
+    const turn = expectTurn(service.poll("claude", claude, true));
+    const post = service.postAgentMessage(
+      "claude",
+      claude,
+      turn.turn_id,
+      "@lead your call",
+      { kind: "lead" },
+    );
+    expect(post.routing_warning).toBeUndefined();
+    expect(service.poll("codex", codex, true).status).toBe("idle");
   });
 
   it("warns on a missing recipient and repairs it once", () => {
@@ -487,7 +721,7 @@ describe("KonfabService", () => {
       "@lead and @claude: ready for review",
     );
     expect(posted.routing_warning).toContain("hand_off");
-    expect(service.roomState(ROOM).routing.no_continuation).toBe(true);
+    expect(service.roomState(ROOM).routing.no_continuation).toBe(false);
     expect(() =>
       service.handOff("codex", codex, posted.message_id, "claude"),
     ).toThrow("Only the author");

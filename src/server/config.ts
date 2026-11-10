@@ -36,6 +36,7 @@ const defaultsSchema = z.object({
   max_consecutive_agent_messages: z.number().int().min(1).default(50),
   wait_timeout_seconds: z.number().int().min(1).default(50),
   turn_timeout_minutes: z.number().int().min(1).default(30),
+  auto_continue_delay_seconds: z.number().int().min(10).max(3600).default(180),
   max_message_chars: z.number().int().min(1).default(20000),
   max_decision_chars: z.number().int().min(1).default(4000),
   max_attachment_mb: z.number().int().min(1).max(100).default(10),
@@ -43,8 +44,11 @@ const defaultsSchema = z.object({
 
 const configSchema = z.object({
   server: z
-    .object({ port: z.number().int().min(1024).max(65535).default(8787) })
-    .default({ port: 8787 }),
+    .object({
+      port: z.number().int().min(1024).max(65535).default(8787),
+      tick_seconds: z.number().int().min(1).max(60).default(30),
+    })
+    .default({ port: 8787, tick_seconds: 30 }),
   defaults: defaultsSchema.default(() => defaultsSchema.parse({})),
   agents: z
     .record(
@@ -80,6 +84,7 @@ defaults:
   max_consecutive_agent_messages: 50
   wait_timeout_seconds: 50
   turn_timeout_minutes: 30
+  auto_continue_delay_seconds: 180
   max_message_chars: 20000
   max_decision_chars: 4000
   max_attachment_mb: 10
