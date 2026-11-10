@@ -402,6 +402,27 @@ describe("server and bridge", () => {
     }
   });
 
+  it("routes an explicit self continuation through the bridge", async () => {
+    const { value: joined } = await callTool("join_room", { room: ROOM });
+    service.postUserMessage(ROOM, "@claude start");
+    const { value: turn } = await callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    const { value: posted } = await callTool("post_message", {
+      session_id: joined.session_id,
+      turn_id: turn.turn_id,
+      body: "Continuing",
+      next: { kind: "self" },
+    });
+    const { value: continued } = await callTool("wait_for_turn", {
+      session_id: joined.session_id,
+    });
+    expect(continued.continuation).toMatchObject({
+      reason: "self",
+      source_message_id: posted.message_id,
+    });
+  });
+
   it("repairs an unmentioned handoff through the bridge", async () => {
     service.ensureAgent("codex", "Codex");
     service.setMembers(ROOM, ["claude", "codex"]);

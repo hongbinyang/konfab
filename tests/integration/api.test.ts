@@ -110,6 +110,23 @@ describe("page API", () => {
     ).toBe("Updated");
   });
 
+  it("lets the lead disable automatic continuation", async () => {
+    const created = await call("POST", "/api/rooms", {
+      name: "auto-control",
+      members: ["claude"],
+    });
+    const id = created.json().id;
+    const updated = await call("PUT", `/api/rooms/${id}/auto-continue`, {
+      enabled: false,
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().routing.auto_continue_enabled).toBe(false);
+    expect(
+      (await call("GET", `/api/rooms/${id}`)).json().routing
+        .auto_continue_enabled,
+    ).toBe(false);
+  });
+
   describe("sign-in", () => {
     it("sets a protected cookie and redirects", async () => {
       const login = await app.inject({

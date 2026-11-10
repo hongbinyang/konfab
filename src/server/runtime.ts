@@ -24,6 +24,7 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
     maxConsecutiveAgentMessages: config.defaults.max_consecutive_agent_messages,
     waitTimeoutSeconds: config.defaults.wait_timeout_seconds,
     turnTimeoutMs: config.defaults.turn_timeout_minutes * 60_000,
+    autoContinueDelayMs: config.defaults.auto_continue_delay_seconds * 1000,
     maxMessageChars: config.defaults.max_message_chars,
     maxDecisionChars: config.defaults.max_decision_chars,
     maxAttachmentBytes: config.defaults.max_attachment_mb * 1024 * 1024,

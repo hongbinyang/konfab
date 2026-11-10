@@ -1359,6 +1359,84 @@ function PermissionLog({
   );
 }
 
+function AutoContinuation({ state, act }: { state: RoomState; act: Act }) {
+  const routing = state.routing!;
+  const item = routing.automatic;
+  const [now, setNow] = useState(Date.now());
+  const anchor = useRef({ local: Date.now(), server: item?.server_now ?? 0 });
+  useEffect(() => {
+    anchor.current = { local: Date.now(), server: item?.server_now ?? 0 };
+    setNow(Date.now());
+  }, [item?.id, item?.server_now]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const target = item
+    ? (state.agents.find((agent) => agent.id === item.target_agent_id)
+        ?.display_name ?? item.target_agent_id)
+    : "";
+  const left = item
+    ? Math.max(
+        0,
+        Math.ceil(
+          (item.due_at - (anchor.current.server + now - anchor.current.local)) /
+            1000,
+        ),
+      )
+    : 0;
+  const reasons: Record<string, string> = {
+    cap: "Stuck · needs you",
+    paused: "Paused",
+    limit: "Message limit reached",
+    permission: "Waiting for approval",
+    working: "Work in progress",
+    queued: "Turn already queued",
+    rejoin: "Needs rejoin",
+  };
+  return (
+    <div>
+      <button
+        type="button"
+        className="quiet"
+        onClick={() =>
+          void act(() =>
+            request(`/api/rooms/${state.room.id}/auto-continue`, {
+              method: "PUT",
+              body: { enabled: !routing.auto_continue_enabled },
+            }),
+          )
+        }
+      >
+        Automatic continuation: {routing.auto_continue_enabled ? "On" : "Off"}
+      </button>
+      {item && (
+        <p aria-live="off">
+          {item.blocked
+            ? (reasons[item.blocked] ?? "Waiting")
+            : left > 0
+              ? `Auto-continue ${target} in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`
+              : `Checking continuation for ${target}…`}{" "}
+          <button
+            type="button"
+            className="quiet"
+            onClick={() =>
+              void act(() =>
+                request(
+                  `/api/rooms/${state.room.id}/auto-continue/${item.id}/cancel`,
+                  { method: "POST" },
+                ),
+              )
+            }
+          >
+            Cancel
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
 function RoomRouting({ state, act }: { state: RoomState; act: Act }) {
   const routing = state.routing;
   if (!routing) return null;
@@ -1370,6 +1448,7 @@ function RoomRouting({ state, act }: { state: RoomState; act: Act }) {
       aria-label="Conversation next step"
       aria-live="polite"
     >
+      <AutoContinuation state={state} act={act} />
       {routing.suspended ? (
         <p>
           {state.room.archived
@@ -1406,8 +1485,9 @@ function RoomRouting({ state, act }: { state: RoomState; act: Act }) {
           {routing.no_continuation && (
             <>
               <p>
-                ⚠ No continuation queued. If work should continue, ask an agent
-                below.
+                {routing.automatic && !routing.automatic.blocked
+                  ? "Automatic continuation is scheduled. You can also ask an agent to continue now."
+                  : "⚠ No continuation queued. If work should continue, ask an agent below."}
               </p>
               <div className="row">
                 {routing.eligible_agents.map((id) => (

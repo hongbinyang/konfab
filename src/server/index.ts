@@ -3,8 +3,6 @@ import { buildApp } from "./api/app.js";
 import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
 import { createRuntime } from "./runtime.js";
 
-const TICK_INTERVAL_MS = 30_000;
-
 const home = konfabHome();
 ensureHome(home);
 const config = loadConfig(home);
@@ -20,7 +18,10 @@ const app = await buildApp({
   logger: true,
 });
 
-const tick = setInterval(() => service.tick(), TICK_INTERVAL_MS);
+const tick = setInterval(
+  () => service.tick(),
+  config.server.tick_seconds * 1000,
+);
 
 const shutdown = async (): Promise<void> => {
   clearInterval(tick);

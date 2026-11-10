@@ -28,7 +28,17 @@ const waitBody = z.object({
   call_id: z.string().uuid().optional(),
   timeout_seconds: timeout,
 });
-const postBody = z.object({ ...turn, body: z.string() });
+const nextAction = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("self") }),
+  z.object({ kind: z.literal("agent"), agent_id: z.string().min(1) }),
+  z.object({ kind: z.literal("lead") }),
+  z.object({ kind: z.literal("done") }),
+]);
+const postBody = z.object({
+  ...turn,
+  body: z.string(),
+  next: nextAction.optional(),
+});
 const passBody = z.object({ ...turn, reason: z.string().optional() });
 const historyBody = z.object({
   ...session,
@@ -288,6 +298,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       body.session_id,
       body.turn_id,
       body.body,
+      body.next,
     );
   });
 
@@ -787,6 +798,26 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .parse(request.body);
     return service.updateDecision(id, decisionId, body.action, body.body);
   });
+
+  app.put("/api/rooms/:id/auto-continue", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const body = z.object({ enabled: z.boolean() }).parse(request.body);
+    service.setAutoContinue(id, body.enabled);
+    return service.roomState(id);
+  });
+  app.post(
+    "/api/rooms/:id/auto-continue/:continuationId/cancel",
+    async (request) => {
+      const { id, continuationId } = z
+        .object({
+          id: z.coerce.number().int().positive(),
+          continuationId: z.coerce.number().int().positive(),
+        })
+        .parse(request.params);
+      service.cancelAutoContinue(id, continuationId);
+      return service.roomState(id);
+    },
+  );
 
   app.patch("/api/rooms/:id", async (request) => {
     const { id } = idParams.parse(request.params);

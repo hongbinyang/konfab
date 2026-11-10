@@ -303,6 +303,28 @@ const MIGRATIONS: readonly string[] = [
     owns_destination INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
   );
   `,
+  `
+  ALTER TABLE messages ADD COLUMN continuation_json TEXT;
+  ALTER TABLE turns ADD COLUMN continuation_reason TEXT;
+  ALTER TABLE turns ADD COLUMN continuation_source_message_id INTEGER REFERENCES messages(id);
+  `,
+  `
+  ALTER TABLE turns ADD COLUMN last_progress_at INTEGER;
+  ALTER TABLE turns ADD COLUMN timeout_retry_count INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE automatic_continuations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, room_id INTEGER NOT NULL REFERENCES rooms(id),
+    target_agent_id TEXT NOT NULL REFERENCES agents(id), source_turn_id INTEGER REFERENCES turns(id),
+    source_message_id INTEGER REFERENCES messages(id), reason TEXT NOT NULL CHECK(reason IN ('timeout_recovery','watchdog')),
+    due_at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','fired','cancelled','capped')),
+    created_at INTEGER NOT NULL, fired_at INTEGER,
+    UNIQUE(source_turn_id, reason)
+  );
+  CREATE INDEX automatic_by_room_state ON automatic_continuations(room_id, state, due_at);
+  `,
+  `
+  ALTER TABLE rooms ADD COLUMN auto_continue INTEGER NOT NULL DEFAULT 1;
+  CREATE UNIQUE INDEX one_pending_automatic_room ON automatic_continuations(room_id) WHERE state = 'pending';
+  `,
 ];
 
 export function openDatabase(path: string): Db {

@@ -328,19 +328,27 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     "post_message",
     {
       description:
-        "Post your reply to the room. This ends your turn. Use @name to hand work to another member. If the result warns that no continuation is queued and someone should act next, use hand_off with the returned message ID. Then call wait_for_turn again.",
+        "Post your reply to the room. This ends your turn. Set next to self, agent, lead, or done. Use @name to hand work to another member. If the result warns that no continuation is queued and someone should act next, use hand_off with the returned message ID. Then call wait_for_turn again.",
       inputSchema: {
         session_id: z.string(),
         turn_id: z.number().int().positive(),
         body: z.string().describe("Message text"),
+        next: z
+          .discriminatedUnion("kind", [
+            z.object({ kind: z.literal("self") }),
+            z.object({ kind: z.literal("agent"), agent_id: z.string().min(1) }),
+            z.object({ kind: z.literal("lead") }),
+            z.object({ kind: z.literal("done") }),
+          ])
+          .optional(),
       },
     },
-    async ({ session_id, turn_id, body }, extra) => {
+    async ({ session_id, turn_id, body, next }, extra) => {
       try {
         return asToolResult(
           await call(
             "/agent/post",
-            { session_id, turn_id, body },
+            { session_id, turn_id, body, ...(next ? { next } : {}) },
             extra.signal,
           ),
         );
