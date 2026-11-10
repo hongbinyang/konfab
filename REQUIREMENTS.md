@@ -328,3 +328,9 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 - Personal and explicitly configured project libraries manage standard skill folders. Untracked folders can be adopted.
 - Create, duplicate, edit, rename, save and move unused skills to Trash. A saved revision contains the complete package; history can be viewed and restored as a new revision. External edits are drafts and conflicting edits are rejected.
 - Review is recorded per revision. New revisions begin unreviewed. Scripts are stored as files and are never run by Konfab. Remote sources and role assignment are separate phases.
+
+## Automatic continuation
+
+- Agent posts can explicitly continue themselves, hand off to an agent, wait for the lead, or finish. Existing mention routing remains compatible.
+- A bounded, cancellable per-room watchdog recovers unaddressed legacy posts. It respects pause, break, approvals, streak limits and run windows, and stops after three automatic recoveries in an hour.
+- Working heartbeats refresh the owning active turn; a timeout can be recovered once. Routing receipts, pending plans and caps survive restart.

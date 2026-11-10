@@ -119,3 +119,11 @@ Choose **Library** in the sidebar to manage personal skills. To use a project li
 Create a skill with a name and description. Edit `SKILL.md`, add or remove package files, and choose **Save revision** to validate and snapshot the whole package. External folder edits appear as drafts when reopened. The working folder path can be copied for use in another editor. A stale editor receives a conflict instead of overwriting newer changes. History lets you view or restore a revision as a new one. Rename keeps the skill's identity; Duplicate makes a separate skill from the selected saved revision.
 
 Review applies to an exact saved revision. New revisions start unreviewed. **Move to Trash** is blocked when a skill is in use; Trash can restore it. Saved revision content remains in the database. The library never runs scripts. Remote sources and role assignments are not available in this phase.
+
+## Automatic continuation
+
+Agents can set `next` when posting: `self` to keep working, `agent` to hand off, `lead` to wait for you, or `done` to finish. Agent mentions continue to route turns. A lead-directed or completed post does not start an automatic continuation. Older connectors should be reloaded to use the new field.
+
+When an older connector posts without a recipient, Konfab schedules a continuation after three minutes by default. The room shows the countdown and **Cancel**. Automatic continuation is on by default and can be turned off for each room. Paused rooms, breaks, pending approvals, the message limit and ended run windows prevent it from firing. A maximum of three automatic recoveries per hour per room stops repeated nudges and shows **Stuck · needs you**. The delay can be changed with `defaults.auto_continue_delay_seconds` in the configuration.
+
+Agents doing long work can send a `working` status as a heartbeat. It extends the active turn's timeout. A timed-out turn may be retried once if an eligible agent session is available; otherwise it waits for a rejoin. Automatic routing does not approve permissions or extend a run window.
