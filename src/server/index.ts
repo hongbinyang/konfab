@@ -6,12 +6,16 @@ import { createRuntime } from "./runtime.js";
 const home = konfabHome();
 ensureHome(home);
 const config = loadConfig(home);
-const { db, service, skills } = createRuntime(databasePath(home), config);
+const { db, service, skills, sources } = createRuntime(
+  databasePath(home),
+  config,
+);
 service.recoverAfterRestart();
 
 const app = await buildApp({
   service,
   skills,
+  sources,
   skillsHome: home,
   port: config.server.port,
   webDir: resolve(import.meta.dirname, "../web"),
@@ -25,6 +29,7 @@ const tick = setInterval(
 
 const shutdown = async (): Promise<void> => {
   clearInterval(tick);
+  await sources.close();
   await app.close();
   db.close();
   process.exit(0);

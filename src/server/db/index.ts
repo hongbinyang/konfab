@@ -325,6 +325,34 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE rooms ADD COLUMN auto_continue INTEGER NOT NULL DEFAULT 1;
   CREATE UNIQUE INDEX one_pending_automatic_room ON automatic_continuations(room_id) WHERE state = 'pending';
   `,
+  `
+  CREATE TABLE skill_sources (
+    id TEXT PRIMARY KEY, owner TEXT NOT NULL COLLATE NOCASE, repository TEXT NOT NULL COLLATE NOCASE,
+    ref TEXT NOT NULL, badge TEXT NOT NULL CHECK(badge IN ('vendor','community')),
+    enabled INTEGER NOT NULL DEFAULT 1, current_generation_id TEXT,
+    etag TEXT, last_checked_at INTEGER, rate_limit_reset INTEGER,
+    UNIQUE(owner, repository, ref)
+  );
+  CREATE TABLE source_generations (
+    id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES skill_sources(id),
+    commit_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('downloading','indexing','complete','failed')),
+    discovered INTEGER NOT NULL DEFAULT 0, indexed INTEGER NOT NULL DEFAULT 0,
+    cache_bytes INTEGER NOT NULL DEFAULT 0, error TEXT, created_at INTEGER NOT NULL,
+    completed_at INTEGER, last_accessed_at INTEGER NOT NULL
+  );
+  CREATE TABLE source_entries (
+    generation_id TEXT NOT NULL REFERENCES source_generations(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL,
+    PRIMARY KEY(generation_id, path)
+  );
+  CREATE TABLE source_manifests (
+    generation_id TEXT NOT NULL REFERENCES source_generations(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, content BLOB, name TEXT, description TEXT, licence TEXT,
+    diagnostic TEXT, indexed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(generation_id, path)
+  );
+  CREATE INDEX source_generation_by_source ON source_generations(source_id, created_at);
+  `,
 ];
 
 export function openDatabase(path: string): Db {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/server/api/app.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { SkillLibrary } from "../../src/server/domain/skills.js";
+import { SkillSources } from "../../src/server/domain/skill-sources.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 
 const PORT = 18788;
@@ -16,6 +17,7 @@ describe("page API", () => {
   let db: Db;
   let service: KonfabService;
   let app: FastifyInstance;
+  let sources: SkillSources;
   let cookie: string;
   let attachmentDir: string;
 
@@ -40,9 +42,15 @@ describe("page API", () => {
     });
     service.ensureAgent("claude", "Claude");
     service.ensureAgent("codex", "Codex");
+    sources = new SkillSources(db, {
+      fetch: async () => {
+        throw new Error("unexpected network request");
+      },
+    });
     app = await buildApp({
       service,
       skills: new SkillLibrary(db),
+      sources,
       skillsHome: attachmentDir,
       port: PORT,
     });
@@ -56,9 +64,59 @@ describe("page API", () => {
   });
 
   afterEach(async () => {
+    await sources.close();
     await app.close();
     db.close();
     rmSync(attachmentDir, { recursive: true, force: true });
+  });
+
+  it("lists public sources without fetching and manages source settings", async () => {
+    const list = await call("GET", "/api/library/sources");
+    expect(list.statusCode).toBe(200);
+    expect(list.json().sources).toHaveLength(7);
+    const created = await call("POST", "/api/library/sources", {
+      owner: "example",
+      repository: "skills",
+      ref: "main",
+    });
+    expect(created.statusCode).toBe(200);
+    expect((await call("GET", "/api/library/sources")).json().sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner: "example", repository: "skills" }),
+      ]),
+    );
+    expect(
+      (
+        await call(
+          "PUT",
+          `/api/library/sources/${created.json().id as string}`,
+          { enabled: false },
+        )
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await call("PUT", "/api/library/source-token", {
+          enabled: true,
+          acknowledged: true,
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+
+  it("maps an empty JSON request body to a client error", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/sources",
+      headers: {
+        host: HOST,
+        cookie,
+        "content-type": "application/json",
+      },
+      payload: "",
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe("invalid_request");
   });
 
   it("creates and lists a local skill through authenticated page routes", async () => {

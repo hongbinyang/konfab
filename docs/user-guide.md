@@ -116,6 +116,10 @@ Record results as you go.
 
 Choose **Library** in the sidebar to manage personal skills. To use a project library, first set an existing absolute **Project folder** in a room's Edit form, select that room, and choose **Project** in the library. Personal skills live under the Konfab home in `skills/`; project skills live under `.konfab/skills/` in the selected project. Existing standard skill folders appear as **Untracked** and can be adopted.
 
+Choose **Public** to manage remote source indexes. Opening the tab never contacts GitHub. Select **Fetch** for an enabled source after reviewing the download notice; later updates use **Refresh**. Konfab stores a complete index at the resolved commit, so search and preview continue to work when GitHub is unavailable. A failed or rate-limited refresh leaves the previous cached commit in place. Suggested sources are disabled until you enable them, and custom sources accept a public GitHub owner and repository. Public previews are read-only in this phase.
+
+If `KONFAB_GITHUB_TOKEN` is present in the server environment, Public shows an opt-in control. Enabling it requires confirmation; the token is sent only to `api.github.com` during an explicit refresh and is never stored in the database or forwarded to the archive host. Anonymous requests remain the default.
+
 Create a skill with a name and description. Edit `SKILL.md`, add or remove package files, and choose **Save revision** to validate and snapshot the whole package. External folder edits appear as drafts when reopened. The working folder path can be copied for use in another editor. A stale editor receives a conflict instead of overwriting newer changes. History lets you view or restore a revision as a new one. Rename keeps the skill's identity; Duplicate makes a separate skill from the selected saved revision.
 
 Review applies to an exact saved revision. New revisions start unreviewed. **Move to Trash** is blocked when a skill is in use; Trash can restore it. Saved revision content remains in the database. The library never runs scripts. Remote sources and role assignments are not available in this phase.
