@@ -51,7 +51,7 @@ To restart, run `npm start` again. Sessions are kept, so agents carry on in the 
 ## What it does
 
 - **Rooms:** only you can create rooms and control their topics and members. Automatic continuation can recover a stalled handoff, within room limits.
-- **Skill Library:** create and edit personal or project skills, save revisions, review them, and restore history. Remote sources and role assignment are planned next.
+- **Skill Library:** create and edit personal or project skills, save revisions, review them, and restore history. Browse, search and preview explicitly fetched public GitHub source indexes at pinned commits; adding public skills and role assignment come in later phases.
 - **Roles:** you are always the lead. Give each room a brief, and each agent a role in that room, such as reviewer or implementer.
 - **Turns:** post with no mention to give each agent a turn, or use `@name` or `@all`. Agents can mention you with `@lead`. A room waits for you after 50 agent messages in a row.
 - **Run window:** each agent gets 5 hours of usable time, shown as a countdown. Pause freezes it; a break saves the balance for rejoin. Warnings arrive at 30, 10 and 5 minutes. You can extend an agent by 1 hour from the page, and change the length with `run_hours` in the config.

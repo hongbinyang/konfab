@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { z, ZodError } from "zod";
 import { SkillError } from "../domain/skill-error.js";
 import type { SkillLibrary } from "../domain/skills.js";
+import type { SkillSources } from "../domain/skill-sources.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 
 const MAX_SERVER_WAIT_SECONDS = 30;
@@ -102,6 +103,7 @@ const extendBody = z.object({ minutes: z.number().int().min(1).max(1440) });
 export interface AppOptions {
   service: KonfabService;
   skills?: SkillLibrary;
+  sources?: SkillSources;
   skillsHome?: string;
   port: number;
   webDir?: string;
@@ -201,6 +203,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         .code(400)
         .send({ code: "invalid_request", message: "Invalid request" });
     }
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      typeof error.statusCode === "number" &&
+      error.statusCode >= 400 &&
+      error.statusCode < 500
+    )
+      return reply
+        .code(400)
+        .send({ code: "invalid_request", message: "Invalid request" });
     app.log.error(error);
     return reply
       .code(500)
@@ -414,6 +427,75 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       throw new KonfabError("unavailable", 503, "Library unavailable");
     return options.skills;
   };
+  const sourceService = () => {
+    if (!options.sources)
+      throw new KonfabError("unavailable", 503, "Public sources unavailable");
+    return options.sources;
+  };
+  const sourceId = z.object({ sourceId: z.string().uuid() });
+  app.get("/api/library/sources", async () => ({
+    sources: sourceService().list(),
+    token: sourceService().tokenState(),
+  }));
+  app.post("/api/library/sources", async (request) => {
+    const body = z
+      .object({
+        owner: z.string().min(1).max(100),
+        repository: z.string().min(1).max(100),
+        ref: z.string().min(1).max(200).default("HEAD"),
+      })
+      .parse(request.body);
+    return { id: sourceService().add(body.owner, body.repository, body.ref) };
+  });
+  app.put("/api/library/sources/:sourceId", async (request) => {
+    const { sourceId: id } = sourceId.parse(request.params);
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(request.body);
+    sourceService().setEnabled(id, enabled);
+    return { ok: true };
+  });
+  app.post("/api/library/sources/:sourceId/refresh", async (request) => {
+    const { sourceId: id } = sourceId.parse(request.params);
+    sourceService().startRefresh(id);
+    return { ok: true };
+  });
+  app.post("/api/library/sources/:sourceId/cancel", async (request) => {
+    const { sourceId: id } = sourceId.parse(request.params);
+    sourceService().cancel(id);
+    return { ok: true };
+  });
+  app.get("/api/library/sources/:sourceId/skills", async (request) => {
+    const { sourceId: id } = sourceId.parse(request.params);
+    const { q } = z
+      .object({ q: z.string().max(200).default("") })
+      .parse(request.query);
+    return sourceService().browse(id, q);
+  });
+  app.get("/api/library/sources/:sourceId/preview", async (request) => {
+    const { sourceId: id } = sourceId.parse(request.params);
+    const query = z
+      .object({
+        generation: z.string().uuid(),
+        path: z.string().min(1).max(1024),
+      })
+      .parse(request.query);
+    return sourceService().preview(id, query.generation, query.path);
+  });
+  app.put("/api/library/source-token", async (request) => {
+    const { enabled, acknowledged } = z
+      .object({
+        enabled: z.boolean(),
+        acknowledged: z.boolean().default(false),
+      })
+      .parse(request.body);
+    if (enabled && !acknowledged)
+      throw new SkillError(
+        "token_consent_required",
+        400,
+        "Confirm before sending the token to GitHub",
+      );
+    sourceService().setTokenEnabled(enabled);
+    return sourceService().tokenState();
+  });
   const skillScope = (
     scope: "personal" | "project",
     roomId?: number,

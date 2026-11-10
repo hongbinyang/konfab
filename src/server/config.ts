@@ -40,6 +40,7 @@ const defaultsSchema = z.object({
   max_message_chars: z.number().int().min(1).default(20000),
   max_decision_chars: z.number().int().min(1).default(4000),
   max_attachment_mb: z.number().int().min(1).max(100).default(10),
+  source_cache_mb: z.number().int().min(50).max(2048).default(500),
 });
 
 const configSchema = z.object({

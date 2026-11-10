@@ -3,15 +3,21 @@ import { dirname, join } from "node:path";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db/index.js";
 import { SkillLibrary } from "./domain/skills.js";
+import { SkillSources, type SourceOptions } from "./domain/skill-sources.js";
 import { KonfabService } from "./domain/service.js";
 
 export interface Runtime {
   db: Db;
   service: KonfabService;
   skills: SkillLibrary;
+  sources: SkillSources;
 }
 
-export function createRuntime(databaseFile: string, config: Config): Runtime {
+export function createRuntime(
+  databaseFile: string,
+  config: Config,
+  sourceOptions: SourceOptions = {},
+): Runtime {
   const db = openDatabase(databaseFile);
   for (const file of [
     databaseFile,
@@ -37,5 +43,14 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
   for (const [id, agent] of Object.entries(config.agents)) {
     service.ensureAgent(id, agent.display_name);
   }
-  return { db, service, skills: new SkillLibrary(db) };
+  return {
+    db,
+    service,
+    skills: new SkillLibrary(db),
+    sources: new SkillSources(db, {
+      cacheBytes: config.defaults.source_cache_mb * 1024 * 1024,
+      token: process.env.KONFAB_GITHUB_TOKEN,
+      ...sourceOptions,
+    }),
+  };
 }

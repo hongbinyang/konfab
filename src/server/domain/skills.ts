@@ -119,16 +119,32 @@ export class SkillLibrary {
       .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
       .get(libraryId) as { root_path: string } | undefined;
     if (!library) throw new SkillError("unavailable", 404, "Library not found");
-    const skills = this.db
-      .prepare(
-        `SELECT s.id, s.folder_name, s.current_revision_id, s.trashed_at,
+    const skills = (
+      this.db
+        .prepare(
+          `SELECT s.id, s.folder_name, s.current_revision_id, s.trashed_at,
       r.name, r.description, r.content_hash, r.licence, r.provenance_json, sr.reviewed_at,
       (SELECT COUNT(*) FROM skill_usages u WHERE u.skill_id = s.id) AS usage_count
       FROM skills s LEFT JOIN skill_revisions r ON r.id = s.current_revision_id
       LEFT JOIN skill_reviews sr ON sr.revision_id = r.id
       WHERE s.library_id = ? AND (s.trashed_at IS NOT NULL) = ? ORDER BY s.folder_name`,
-      )
-      .all(libraryId, trash ? 1 : 0);
+        )
+        .all(libraryId, trash ? 1 : 0) as Record<string, unknown>[]
+    ).map((skill) => {
+      try {
+        return {
+          ...skill,
+          is_draft:
+            packageHash(
+              readSkillFiles(
+                join(library.root_path, String(skill.folder_name)),
+              ),
+            ) !== skill.content_hash,
+        };
+      } catch {
+        return { ...skill, is_draft: null };
+      }
+    });
     if (trash) return { skills, untracked: [] as string[] };
     const known = new Set(
       (
@@ -147,7 +163,27 @@ export class SkillLibrary {
           !known.has(entry.name),
       )
       .map((entry) => entry.name);
-    return { skills, untracked };
+    const untracked_details = untracked.map((folder) => {
+      try {
+        const metadata = skillMetadata(
+          readSkillFiles(join(library.root_path, folder)),
+        );
+        return {
+          folder,
+          diagnostic:
+            metadata.name === folder
+              ? null
+              : "Skill name does not match its folder",
+        };
+      } catch (error) {
+        return {
+          folder,
+          diagnostic:
+            error instanceof Error ? error.message : "Invalid skill package",
+        };
+      }
+    });
+    return { skills, untracked, untracked_details };
   }
 
   readFile(id: string, path: string): Buffer {
