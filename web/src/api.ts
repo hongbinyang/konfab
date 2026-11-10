@@ -174,6 +174,7 @@ export interface RoomState {
   read_info?: LeadReadInfo;
   room: RoomSummary & {
     brief: string;
+    project_path: string | null;
     agent_streak: number;
     streak_limit: number;
   };

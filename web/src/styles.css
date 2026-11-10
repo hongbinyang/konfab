@@ -810,3 +810,29 @@ dd {
   background: var(--warning-surface);
   color: var(--warning);
 }
+
+.library {
+  overflow: auto;
+  padding: 1.5rem;
+  max-width: 64rem;
+  width: 100%;
+}
+
+.library section,
+.library form {
+  margin-top: 1.5rem;
+}
+
+.library input,
+.library textarea {
+  max-width: 100%;
+}
+
+.library textarea {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+}
+
+.library li {
+  margin-block: 0.5rem;
+}

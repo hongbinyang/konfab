@@ -322,3 +322,9 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | -- | -- | -- |
 | RH1 | MUST | An agent post with no other agent recipient and no queued continuation returns a routing warning with a repair hint. Replays return the same post result. The hand_off tool lets the author of the room’s latest agent message, within 10 minutes, explicitly queue another live member. It refuses pause, break, archive, unavailable targets and the agent-streak limit. The original post already counts toward that limit; repair never bypasses it. Source/target repeats return the same turn, including after restart. |
 | RH2 | MUST | The page shows active and queued recipients, including repaired routing, and neutrally indicates when no continuation is queued. Explicit Ask-to-continue buttons post an auditable user request. Suspension and fresh reported background work suppress the no-continuation prompt. No language heuristics or automatic recipient guessing are used. Repairs appear in the Activity timeline. |
+
+## Local skill library (phase 1)
+
+- Personal and explicitly configured project libraries manage standard skill folders. Untracked folders can be adopted.
+- Create, duplicate, edit, rename, save and move unused skills to Trash. A saved revision contains the complete package; history can be viewed and restored as a new revision. External edits are drafts and conflicting edits are rejected.
+- Review is recorded per revision. New revisions begin unreviewed. Scripts are stored as files and are never run by Konfab. Remote sources and role assignment are separate phases.

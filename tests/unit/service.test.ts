@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import {
@@ -56,6 +58,21 @@ describe("KonfabService", () => {
   });
 
   afterEach(() => db.close());
+
+  it("stores an explicit existing project folder and rejects invalid paths", () => {
+    service.updateRoom(ROOM, { project_path: tmpdir() });
+    expect(service.roomState(ROOM).room.project_path).toBe(
+      realpathSync(tmpdir()),
+    );
+    expect(() =>
+      service.updateRoom(ROOM, { project_path: "relative" }),
+    ).toThrow();
+    expect(service.roomState(ROOM).room.project_path).toBe(
+      realpathSync(tmpdir()),
+    );
+    service.updateRoom(ROOM, { project_path: null });
+    expect(service.roomState(ROOM).room.project_path).toBeNull();
+  });
 
   it("records completed waits and one inferred contact loss per lapse", () => {
     service.beginObservedWait("claude", claude, "call-one");

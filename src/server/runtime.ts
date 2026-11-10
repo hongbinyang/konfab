@@ -2,11 +2,13 @@ import { chmodSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db/index.js";
+import { SkillLibrary } from "./domain/skills.js";
 import { KonfabService } from "./domain/service.js";
 
 export interface Runtime {
   db: Db;
   service: KonfabService;
+  skills: SkillLibrary;
 }
 
 export function createRuntime(databaseFile: string, config: Config): Runtime {
@@ -34,5 +36,5 @@ export function createRuntime(databaseFile: string, config: Config): Runtime {
   for (const [id, agent] of Object.entries(config.agents)) {
     service.ensureAgent(id, agent.display_name);
   }
-  return { db, service };
+  return { db, service, skills: new SkillLibrary(db) };
 }

@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/server/api/app.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
+import { SkillLibrary } from "../../src/server/domain/skills.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 
 const PORT = 18788;
@@ -39,7 +40,12 @@ describe("page API", () => {
     });
     service.ensureAgent("claude", "Claude");
     service.ensureAgent("codex", "Codex");
-    app = await buildApp({ service, port: PORT });
+    app = await buildApp({
+      service,
+      skills: new SkillLibrary(db),
+      skillsHome: attachmentDir,
+      port: PORT,
+    });
 
     const login = await app.inject({
       method: "GET",
@@ -53,6 +59,55 @@ describe("page API", () => {
     await app.close();
     db.close();
     rmSync(attachmentDir, { recursive: true, force: true });
+  });
+
+  it("creates and lists a local skill through authenticated page routes", async () => {
+    const created = await call("POST", "/api/library/skills", {
+      scope: "personal",
+      name: "review-change",
+      description: "Review a change",
+    });
+    expect(created.statusCode).toBe(200);
+    const list = await call("GET", "/api/library?scope=personal");
+    expect(list.statusCode).toBe(200);
+    expect(list.json().skills).toHaveLength(1);
+    const id = created.json().id as string;
+    const detail = await call("GET", `/api/library/skills/${id}`);
+    expect(detail.json().name).toBe("review-change");
+    expect(detail.json().reviewed_at).toBeNull();
+    const written = await call("PUT", `/api/library/skills/${id}/files`, {
+      path: "SKILL.md",
+      content_base64: Buffer.from(
+        "---\nname: review-change\ndescription: Updated\n---\nBody",
+      ).toString("base64"),
+      base_revision_id: detail.json().current_revision_id,
+      base_draft_hash: detail.json().draft_hash,
+    });
+    expect(written.statusCode).toBe(200);
+    const conflict = await call("PUT", `/api/library/skills/${id}/files`, {
+      path: "SKILL.md",
+      content_base64: "WA==",
+      base_revision_id: detail.json().current_revision_id,
+      base_draft_hash: detail.json().draft_hash,
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().code).toBe("draft_conflict");
+    const invalid = await call("PUT", `/api/library/skills/${id}/files`, {
+      path: "../escape",
+      content_base64: "WA==",
+      base_revision_id: detail.json().current_revision_id,
+      base_draft_hash: written.json().draft_hash,
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().code).toBe("invalid_path");
+    const saved = await call("POST", `/api/library/skills/${id}/save`, {
+      base_revision_id: detail.json().current_revision_id,
+      base_draft_hash: written.json().draft_hash,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(
+      (await call("GET", `/api/library/skills/${id}`)).json().description,
+    ).toBe("Updated");
   });
 
   describe("sign-in", () => {
@@ -86,7 +141,12 @@ describe("page API", () => {
         { host: HOST },
         { host: HOST, cookie: "konfab_session=wrong" },
       ]) {
-        for (const url of ["/api/overview", "/api/events", "/api/rooms/1"]) {
+        for (const url of [
+          "/api/overview",
+          "/api/events",
+          "/api/rooms/1",
+          "/api/library?scope=personal",
+        ]) {
           const response = await app.inject({ method: "GET", url, headers });
           expect(response.statusCode).toBe(401);
         }
