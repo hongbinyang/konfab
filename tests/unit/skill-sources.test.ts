@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { pack } from "tar-stream";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/server/db/index.js";
@@ -18,6 +19,7 @@ async function fixture(): Promise<Buffer> {
     "---\nname: example\ndescription: Cached example\nlicense: MIT\n---\nHello",
   );
   tar.entry({ name: "repo/example/file.txt" }, "data");
+  tar.entry({ name: "repo/LICENSE" }, "MIT terms");
   tar.finalize();
   await new Promise<void>((resolve, reject) => {
     tar.on("end", resolve);
@@ -65,6 +67,13 @@ describe("public skill sources", () => {
         name: "example",
         licence: "MIT",
         diagnostic: null,
+      }),
+    ]);
+    expect(sources.browseAll("cached").skills).toEqual([
+      expect.objectContaining({
+        name: "example",
+        owner: "anthropics",
+        generation_id: browse.generation_id,
       }),
     ]);
     const preview = sources.preview(
@@ -142,7 +151,7 @@ describe("public skill sources", () => {
     const state = sources.list().find((item) => item.id === source.id)!;
     expect(state.current_generation_id).toBe(cached);
     expect(state.rate_limit_reset).toBe(2_000_000_000_000);
-    expect(state.latest?.error).toBe("GitHub rate limit reached");
+    expect(state.latest?.error).toContain("GitHub rate limit reached");
     await sources.close();
     db.close();
   });
@@ -181,5 +190,109 @@ describe("public skill sources", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("downloads pinned tree blobs, verifies hashes, and keeps the nearest licence", async () => {
+    const archive = await fixture();
+    const manifest = Buffer.from(
+      "---\nname: example\ndescription: Cached example\nlicense: MIT\n---\nHello",
+    );
+    const extra = Buffer.from("data");
+    const license = Buffer.from("MIT terms");
+    const blob = (content: Buffer) =>
+      createHash("sha1")
+        .update(`blob ${content.length}\0`)
+        .update(content)
+        .digest("hex");
+    const blobs = new Map([
+      [blob(manifest), manifest],
+      [blob(extra), extra],
+      [blob(license), license],
+    ]);
+    let offline = false;
+    let apiRequests = 0;
+    const db = openDatabase(":memory:");
+    const sources = new SkillSources(db, {
+      fetch: async (input) => {
+        if (offline) throw new Error("offline");
+        const url = String(input);
+        if (url.startsWith("https://api.github.com/")) apiRequests += 1;
+        if (url.includes("/commits/"))
+          return new Response(JSON.stringify({ sha: "e".repeat(40) }), {
+            status: 200,
+          });
+        if (url.startsWith("https://codeload.github.com/"))
+          return new Response(archive, { status: 200 });
+        if (url.includes("/git/trees/"))
+          return new Response(
+            JSON.stringify({
+              truncated: false,
+              tree: [
+                {
+                  path: "example/SKILL.md",
+                  mode: "100644",
+                  type: "blob",
+                  sha: blob(manifest),
+                  size: manifest.length,
+                },
+                {
+                  path: "example/file.txt",
+                  mode: "100644",
+                  type: "blob",
+                  sha: blob(extra),
+                  size: extra.length,
+                },
+                {
+                  path: "LICENSE",
+                  mode: "100644",
+                  type: "blob",
+                  sha: blob(license),
+                  size: license.length,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        const sha = url.split("/").at(-1)!;
+        const content = blobs.get(sha)!;
+        return new Response(
+          JSON.stringify({
+            encoding: "base64",
+            content: content.toString("base64"),
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    const source = sources.list().find((item) => item.owner === "anthropics")!;
+    sources.startRefresh(source.id);
+    await sources.waitForRefresh();
+    const beforeImport = apiRequests;
+    const generation = sources.browse(source.id).generation_id!;
+    const downloaded = await sources.packageFiles(
+      source.id,
+      generation,
+      "example/SKILL.md",
+    );
+    expect(downloaded.files.map((file) => file.path)).toEqual([
+      "SKILL.md",
+      "SOURCE-LICENSE",
+      "file.txt",
+    ]);
+    expect(downloaded.provenance).toEqual(
+      expect.objectContaining({
+        commit: "e".repeat(40),
+        licence_path: "LICENSE",
+      }),
+    );
+    expect(apiRequests - beforeImport).toBe(1);
+    offline = true;
+    expect(
+      (
+        await sources.packageFiles(source.id, generation, "example/SKILL.md")
+      ).files.map((file) => file.path),
+    ).toEqual(["SKILL.md", "SOURCE-LICENSE", "file.txt"]);
+    await sources.close();
+    db.close();
   });
 });

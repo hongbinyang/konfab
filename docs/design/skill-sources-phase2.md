@@ -1,6 +1,6 @@
 # Skill Library phase 2: public sources
 
-Status: reviewed. Builds on the phase 1 local library and the measured source spike.
+Status: reviewed; phase 2a shipped and phase 2b implemented for review. Builds on the phase 1 local library and the measured source spike.
 Phase 2a delivers sources, index, search, preview, offline/rate-limit state and
 local UI polish. Phase 2b delivers Add, duplication, invalid drafts and import
 recovery. Each phase is reviewed and committed separately; phase 3 connects
