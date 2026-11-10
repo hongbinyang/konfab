@@ -3,8 +3,8 @@ import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { parseDocument } from "yaml";
 import type { Db } from "../db/index.js";
-import { indexArchive } from "./source-archive.js";
-import { skillMetadata } from "./skill-files.js";
+import { extractVerifiedPackage, indexArchive } from "./source-archive.js";
+import { skillMetadata, type SkillFile } from "./skill-files.js";
 import { SkillError } from "./skill-error.js";
 
 const DEFAULTS = [
@@ -232,6 +232,26 @@ export class SkillSources {
       skills,
     };
   }
+  browseAll(query = "") {
+    const rows = this.db
+      .prepare(
+        `SELECT m.path, m.name, m.description, m.licence, m.diagnostic,
+        s.id AS source_id, s.owner, s.repository, g.id AS generation_id, g.commit_id
+        FROM skill_sources s JOIN source_generations g ON g.id = s.current_generation_id
+        JOIN source_manifests m ON m.generation_id = g.id
+        WHERE s.enabled = 1 AND g.state = 'complete' AND m.indexed = 1
+        AND instr(lower(COALESCE(m.name,'') || ' ' || COALESCE(m.description,'') || ' ' || m.path), lower(?)) > 0
+        ORDER BY COALESCE(m.name, m.path), s.owner, s.repository LIMIT 10000`,
+      )
+      .all(query);
+    const now = this.now();
+    this.db
+      .prepare(
+        "UPDATE source_generations SET last_accessed_at = ? WHERE id IN (SELECT current_generation_id FROM skill_sources WHERE enabled = 1 AND current_generation_id IS NOT NULL)",
+      )
+      .run(now);
+    return { skills: rows };
+  }
   preview(id: string, generationId: string, path: string) {
     const source = this.source(id);
     const belongs = this.db
@@ -364,7 +384,10 @@ export class SkillSources {
       );
     return response;
   }
-  private async boundedJson(response: Response): Promise<unknown> {
+  private async boundedJson(
+    response: Response,
+    maximum = 1024 * 1024,
+  ): Promise<unknown> {
     if (!response.body)
       throw new SkillError("source_error", 502, "Empty source response");
     const reader = response.body.getReader();
@@ -375,7 +398,7 @@ export class SkillSources {
         const item = await reader.read();
         if (item.done) break;
         size += item.value.byteLength;
-        if (size > 1024 * 1024)
+        if (size > maximum)
           throw new SkillError(
             "source_limit",
             413,
@@ -391,6 +414,337 @@ export class SkillSources {
     } catch {
       throw new SkillError("source_error", 502, "Invalid source response");
     }
+  }
+
+  private throwGitHubError(response: Response, sourceId: string): never {
+    if (
+      response.status === 429 ||
+      (response.status === 403 &&
+        response.headers.get("x-ratelimit-remaining") === "0")
+    ) {
+      const reset = Number(response.headers.get("x-ratelimit-reset"));
+      const resetAt = Number.isFinite(reset) && reset > 0 ? reset * 1000 : null;
+      this.db
+        .prepare("UPDATE skill_sources SET rate_limit_reset = ? WHERE id = ?")
+        .run(resetAt, sourceId);
+      const retry = resetAt
+        ? `; try again after ${new Date(resetAt).toLocaleTimeString()}, or enable a token`
+        : "; try again later, or enable a token";
+      throw new SkillError(
+        "source_rate_limited",
+        429,
+        `GitHub rate limit reached${retry}`,
+      );
+    }
+    throw new SkillError(
+      "source_error",
+      502,
+      `GitHub request failed (${response.status})`,
+    );
+  }
+
+  async packageFiles(
+    id: string,
+    generationId: string,
+    manifestPath: string,
+  ): Promise<{
+    files: SkillFile[];
+    provenance: Record<string, unknown>;
+    licence: string | null;
+    diagnostic: string | null;
+  }> {
+    const source = this.source(id);
+    const generation = this.db
+      .prepare(
+        "SELECT commit_id FROM source_generations WHERE id = ? AND source_id = ? AND state = 'complete'",
+      )
+      .get(generationId, id) as { commit_id: string } | undefined;
+    const manifest = this.db
+      .prepare(
+        "SELECT licence, diagnostic FROM source_manifests WHERE generation_id = ? AND path = ? AND indexed = 1",
+      )
+      .get(generationId, manifestPath) as
+      { licence: string | null; diagnostic: string | null } | undefined;
+    if (!generation || !manifest)
+      throw new SkillError(
+        "source_unavailable",
+        404,
+        "Cached skill unavailable",
+      );
+    const cachedPackage = this.db
+      .prepare(
+        "SELECT licence_path FROM source_cached_packages WHERE generation_id = ? AND manifest_path = ?",
+      )
+      .get(generationId, manifestPath) as
+      { licence_path: string | null } | undefined;
+    if (cachedPackage) {
+      const files = this.db
+        .prepare(
+          `SELECT f.path, f.mode, b.content FROM source_cached_files f
+          JOIN source_cached_blobs b ON b.sha = f.sha
+          WHERE f.generation_id = ? AND f.manifest_path = ? ORDER BY f.path`,
+        )
+        .all(generationId, manifestPath) as SkillFile[];
+      this.db
+        .prepare(
+          "UPDATE source_cached_packages SET last_accessed_at = ? WHERE generation_id = ? AND manifest_path = ?",
+        )
+        .run(this.now(), generationId, manifestPath);
+      return {
+        files,
+        provenance: {
+          source: `${source.owner}/${source.repository}`,
+          commit: generation.commit_id,
+          path: manifestPath,
+          licence_path: cachedPackage.licence_path,
+        },
+        licence: manifest.licence,
+        diagnostic: manifest.diagnostic,
+      };
+    }
+    const controller = new AbortController();
+    const signal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(120_000),
+    ]);
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Konfab",
+    };
+    if (this.token && this.tokenState().enabled)
+      headers.Authorization = `Bearer ${this.token}`;
+    const treeItems: Array<{
+      path: string;
+      mode: string;
+      type: string;
+      sha: string;
+      size?: number;
+    }> = [];
+    let requests = 0;
+    const getTree = async (sha: string, prefix: string, recursive: boolean) => {
+      if (++requests > 200)
+        throw new SkillError("source_limit", 413, "Source tree is too large");
+      const response = await this.response(
+        `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/git/trees/${sha}${recursive ? "?recursive=1" : ""}`,
+        headers,
+        signal,
+      );
+      if (!response.ok) this.throwGitHubError(response, source.id);
+      const payload = (await this.boundedJson(response, 10 * 1024 * 1024)) as {
+        truncated?: boolean;
+        tree?: Array<{
+          path?: unknown;
+          mode?: unknown;
+          type?: unknown;
+          sha?: unknown;
+          size?: unknown;
+        }>;
+      };
+      if (!Array.isArray(payload.tree))
+        throw new SkillError("source_error", 502, "Invalid source tree");
+      if (recursive && payload.truncated) {
+        await getTree(sha, prefix, false);
+        return;
+      }
+      if (!recursive && payload.truncated)
+        throw new SkillError("source_limit", 413, "Source tree is truncated");
+      for (const raw of payload.tree) {
+        if (
+          typeof raw.path !== "string" ||
+          typeof raw.mode !== "string" ||
+          typeof raw.type !== "string" ||
+          typeof raw.sha !== "string"
+        )
+          throw new SkillError(
+            "source_error",
+            502,
+            "Invalid source tree entry",
+          );
+        const path = prefix ? `${prefix}/${raw.path}` : raw.path;
+        if (raw.type === "tree" && !recursive) {
+          await getTree(raw.sha, path, false);
+        } else if (raw.type === "blob") {
+          treeItems.push({
+            path,
+            mode: raw.mode,
+            type: raw.type,
+            sha: raw.sha,
+            ...(typeof raw.size === "number" ? { size: raw.size } : {}),
+          });
+          if (treeItems.length > 100_000)
+            throw new SkillError(
+              "source_limit",
+              413,
+              "Source tree is too large",
+            );
+        }
+      }
+    };
+    await getTree(generation.commit_id, "", true);
+    const packagePrefix = manifestPath.slice(0, -"SKILL.md".length);
+    const nestedPrefixes = treeItems
+      .filter(
+        (item) =>
+          item.path !== manifestPath &&
+          item.path.startsWith(packagePrefix) &&
+          item.path.endsWith("/SKILL.md"),
+      )
+      .map((item) => item.path.slice(0, -"SKILL.md".length));
+    const candidates = treeItems.filter(
+      (item) =>
+        item.path.startsWith(packagePrefix) &&
+        !nestedPrefixes.some((prefix) => item.path.startsWith(prefix)),
+    );
+    const expected = new Map<
+      string,
+      { path: string; sha: string; mode: number }
+    >();
+    const addExpected = (
+      item: (typeof treeItems)[number],
+      relativeOverride?: string,
+    ) => {
+      if (item.mode === "120000")
+        throw new SkillError("invalid_path", 400, "Links are not allowed");
+      const relative =
+        relativeOverride ?? item.path.slice(packagePrefix.length);
+      if (
+        !relative ||
+        relative.startsWith("/") ||
+        /[\\\0]/.test(relative) ||
+        relative
+          .split("/")
+          .some((part) => !part || part === "." || part === "..")
+      )
+        throw new SkillError("invalid_path", 400, "Invalid package path");
+      if (expected.size >= 1000 || (item.size ?? 0) > 512 * 1024)
+        throw new SkillError("package_limits", 413, "Package exceeds limits");
+      const mode = item.mode === "100755" ? 0o700 : 0o600;
+      expected.set(item.path, { path: relative, sha: item.sha, mode });
+    };
+    for (const item of candidates) addExpected(item);
+
+    const ancestors = packagePrefix.replace(/\/$/, "").split("/");
+    let licenceItem: (typeof treeItems)[number] | undefined;
+    for (let depth = ancestors.length; depth >= 0 && !licenceItem; depth -= 1) {
+      const prefix = ancestors.slice(0, depth).join("/");
+      licenceItem = treeItems.find((item) => {
+        const parent = item.path.includes("/")
+          ? item.path.slice(0, item.path.lastIndexOf("/"))
+          : "";
+        const base = item.path.split("/").at(-1) ?? "";
+        return parent === prefix && /^licen[cs]e(?:[._-].*)?$/i.test(base);
+      });
+    }
+    let licencePath: string | null = null;
+    if (
+      licenceItem &&
+      !candidates.some((item) => item.path === licenceItem?.path)
+    ) {
+      addExpected(licenceItem, "SOURCE-LICENSE");
+      licencePath = licenceItem.path;
+    } else if (licenceItem) {
+      licencePath = licenceItem.path;
+    }
+    const archive = await this.response(
+      `https://codeload.github.com/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/tar.gz/${generation.commit_id}`,
+      { "User-Agent": "Konfab" },
+      signal,
+    );
+    if (!archive.ok || !archive.body)
+      throw new SkillError(
+        "source_error",
+        502,
+        "Unable to download pinned source archive",
+      );
+    const files = await extractVerifiedPackage(
+      Readable.fromWeb(archive.body as unknown as NodeReadableStream),
+      expected,
+      signal,
+    );
+    if (!files.some((file) => file.path === "SKILL.md"))
+      throw new SkillError("skill_missing", 404, "Source manifest missing");
+    const cacheFiles = new Map(
+      [...expected.values()].map((item) => [item.path, item]),
+    );
+    const cacheBytes = files.reduce(
+      (sum, file) =>
+        sum + file.content.length + Buffer.byteLength(file.path) + 128,
+      0,
+    );
+    this.db.transaction(() => {
+      let used =
+        (
+          this.db
+            .prepare(
+              "SELECT COALESCE(SUM(cache_bytes),0) AS n FROM source_generations WHERE state = 'complete'",
+            )
+            .get() as { n: number }
+        ).n +
+        (
+          this.db
+            .prepare(
+              "SELECT COALESCE(SUM(cache_bytes),0) AS n FROM source_cached_packages",
+            )
+            .get() as { n: number }
+        ).n;
+      const old = this.db
+        .prepare(
+          "SELECT generation_id, manifest_path, cache_bytes FROM source_cached_packages ORDER BY last_accessed_at",
+        )
+        .all() as Array<{
+        generation_id: string;
+        manifest_path: string;
+        cache_bytes: number;
+      }>;
+      for (const row of old) {
+        if (used + cacheBytes <= this.cacheBytes) break;
+        this.db
+          .prepare(
+            "DELETE FROM source_cached_packages WHERE generation_id = ? AND manifest_path = ?",
+          )
+          .run(row.generation_id, row.manifest_path);
+        used -= row.cache_bytes;
+      }
+      this.db
+        .prepare(
+          "DELETE FROM source_cached_blobs WHERE sha NOT IN (SELECT sha FROM source_cached_files)",
+        )
+        .run();
+      if (used + cacheBytes > this.cacheBytes) return;
+      this.db
+        .prepare(
+          "INSERT INTO source_cached_packages(generation_id, manifest_path, licence_path, cache_bytes, last_accessed_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(generationId, manifestPath, licencePath, cacheBytes, this.now());
+      const blobInsert = this.db.prepare(
+        "INSERT OR IGNORE INTO source_cached_blobs(sha, content) VALUES (?, ?)",
+      );
+      const fileInsert = this.db.prepare(
+        "INSERT INTO source_cached_files(generation_id, manifest_path, path, sha, mode) VALUES (?, ?, ?, ?, ?)",
+      );
+      for (const file of files) {
+        const cached = cacheFiles.get(file.path)!;
+        blobInsert.run(cached.sha, file.content);
+        fileInsert.run(
+          generationId,
+          manifestPath,
+          cached.path,
+          cached.sha,
+          cached.mode,
+        );
+      }
+    })();
+    return {
+      files,
+      provenance: {
+        source: `${source.owner}/${source.repository}`,
+        commit: generation.commit_id,
+        path: manifestPath,
+        licence_path: licencePath,
+      },
+      licence: manifest.licence,
+      diagnostic: manifest.diagnostic,
+    };
   }
   private async refresh(source: Source, signal: AbortSignal): Promise<void> {
     let generation: string | null = null;
@@ -416,29 +770,7 @@ export class SkillSources {
           .run(this.now(), source.id);
         return;
       }
-      if (
-        api.status === 429 ||
-        (api.status === 403 && api.headers.get("x-ratelimit-remaining") === "0")
-      ) {
-        const reset = Number(api.headers.get("x-ratelimit-reset"));
-        this.db
-          .prepare("UPDATE skill_sources SET rate_limit_reset = ? WHERE id = ?")
-          .run(
-            Number.isFinite(reset) && reset > 0 ? reset * 1000 : null,
-            source.id,
-          );
-        throw new SkillError(
-          "source_rate_limited",
-          429,
-          "GitHub rate limit reached",
-        );
-      }
-      if (!api.ok)
-        throw new SkillError(
-          "source_error",
-          502,
-          `GitHub request failed (${api.status})`,
-        );
+      if (!api.ok) this.throwGitHubError(api, source.id);
       const payload = (await this.boundedJson(api)) as { sha?: unknown };
       const commit =
         typeof payload.sha === "string" ? payload.sha.toLowerCase() : "";
@@ -638,10 +970,21 @@ export class SkillSources {
               "SELECT COALESCE(SUM(cache_bytes),0) AS n FROM source_generations WHERE state = 'complete'",
             )
             .get() as { n: number }
-        ).n + incoming.cache_bytes;
+        ).n +
+        (
+          this.db
+            .prepare(
+              "SELECT COALESCE(SUM(cache_bytes),0) AS n FROM source_cached_packages",
+            )
+            .get() as { n: number }
+        ).n +
+        incoming.cache_bytes;
       const evictable = this.db
         .prepare(
-          `SELECT g.id, g.cache_bytes FROM source_generations g WHERE g.state = 'complete' AND g.id NOT IN (SELECT current_generation_id FROM skill_sources WHERE current_generation_id IS NOT NULL AND id != ? AND enabled = 1) ORDER BY g.last_accessed_at`,
+          `SELECT g.id, g.cache_bytes + COALESCE((SELECT SUM(p.cache_bytes) FROM source_cached_packages p WHERE p.generation_id = g.id), 0) AS cache_bytes
+          FROM source_generations g WHERE g.state = 'complete' AND g.id NOT IN
+          (SELECT current_generation_id FROM skill_sources WHERE current_generation_id IS NOT NULL AND id != ? AND enabled = 1)
+          ORDER BY g.last_accessed_at`,
         )
         .all(sourceId) as { id: string; cache_bytes: number }[];
       for (const row of evictable) {
@@ -662,6 +1005,11 @@ export class SkillSources {
           413,
           "Source cache is full; disable or remove another source",
         );
+      this.db
+        .prepare(
+          "DELETE FROM source_cached_blobs WHERE sha NOT IN (SELECT sha FROM source_cached_files)",
+        )
+        .run();
       this.db
         .prepare(
           "UPDATE source_generations SET state = 'complete', completed_at = ?, last_accessed_at = ? WHERE id = ?",

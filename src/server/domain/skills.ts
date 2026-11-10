@@ -23,6 +23,7 @@ import {
   readSkillFiles,
   skillMetadata,
   validSkillName,
+  type SkillFile,
 } from "./skill-files.js";
 
 /** Local library persistence. Filesystem operations are kept outside SQL transactions. */
@@ -36,7 +37,63 @@ export class SkillLibrary {
     } catch {
       /* Keep inaccessible libraries pending for later recovery. */
     }
+    try {
+      this.recoverImports();
+    } catch {
+      /* Keep inaccessible libraries pending for later recovery. */
+    }
     this.cleanupTempFiles();
+  }
+
+  private recoverImports(): void {
+    const rows = this.db
+      .prepare(
+        `SELECT o.*, l.root_path FROM skill_import_operations o JOIN skill_libraries l ON l.id = o.library_id ORDER BY o.created_at`,
+      )
+      .all() as Array<{
+      id: string;
+      library_id: string;
+      folder_name: string;
+      staging_name: string;
+      provenance_json: string;
+      licence: string | null;
+      state: string;
+      root_path: string;
+    }>;
+    for (const row of rows) {
+      const staging = join(row.root_path, row.staging_name);
+      const target = join(row.root_path, row.folder_name);
+      try {
+        if (existsSync(target) && !existsSync(staging)) {
+          const tracked = this.db
+            .prepare(
+              "SELECT 1 FROM skills WHERE library_id = ? AND folder_name = ?",
+            )
+            .get(row.library_id, row.folder_name);
+          if (!tracked)
+            this.adopt(
+              row.library_id,
+              row.folder_name,
+              row.provenance_json,
+              row.licence,
+            );
+          this.db
+            .prepare("DELETE FROM skill_import_operations WHERE id = ?")
+            .run(row.id);
+        } else if (existsSync(staging)) {
+          rmSync(staging, { recursive: true });
+          this.db
+            .prepare("DELETE FROM skill_import_operations WHERE id = ?")
+            .run(row.id);
+        } else {
+          this.db
+            .prepare("DELETE FROM skill_import_operations WHERE id = ?")
+            .run(row.id);
+        }
+      } catch {
+        /* Retry this exact journal record on next startup. */
+      }
+    }
   }
 
   private cleanupTempFiles(): void {
@@ -1155,7 +1212,224 @@ export class SkillLibrary {
     return this.adopt(libraryId, name);
   }
 
-  adopt(libraryId: string, folder: string, provenance = "{}"): string {
+  importFiles(
+    libraryId: string,
+    folder: string,
+    files: SkillFile[],
+    provenance: Record<string, unknown>,
+    licence: string | null,
+  ): string {
+    if (!validSkillName(folder))
+      throw new SkillError("invalid_skill", 400, "Invalid destination name");
+    const library = this.db
+      .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
+      .get(libraryId) as { root_path: string } | undefined;
+    if (!library) throw new SkillError("unavailable", 404, "Library not found");
+    const operation = randomUUID();
+    const stagingName = `.konfab-import-${operation}`;
+    const staging = join(library.root_path, stagingName);
+    const target = join(library.root_path, folder);
+    if (existsSync(target))
+      throw new SkillError(
+        "name_conflict",
+        409,
+        "A file or folder already exists",
+      );
+    const provenanceJson = JSON.stringify(provenance);
+    this.db
+      .prepare(
+        "INSERT INTO skill_import_operations(id, library_id, folder_name, staging_name, provenance_json, licence, state, created_at) VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?)",
+      )
+      .run(
+        operation,
+        libraryId,
+        folder,
+        stagingName,
+        provenanceJson,
+        licence,
+        this.now(),
+      );
+    let renamed = false;
+    try {
+      mkdirSync(staging, { mode: 0o700 });
+      for (const file of files) {
+        if (
+          !file.path ||
+          file.path.startsWith("/") ||
+          /[\\\0]/.test(file.path) ||
+          file.path
+            .split("/")
+            .some((part) => !part || part === "." || part === "..")
+        )
+          throw new SkillError("invalid_path", 400, "Invalid package path");
+        const destination = join(staging, file.path);
+        mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+        writeFileSync(destination, file.content, {
+          flag: "wx",
+          mode: file.mode & 0o777,
+        });
+      }
+      const staged = readSkillFiles(staging);
+      const metadata = skillMetadata(staged);
+      if (metadata.name !== folder)
+        throw new SkillError(
+          "invalid_skill",
+          400,
+          "Skill name must match destination folder",
+        );
+      this.db
+        .prepare(
+          "UPDATE skill_import_operations SET state = 'written' WHERE id = ?",
+        )
+        .run(operation);
+      renameSync(staging, target);
+      renamed = true;
+      this.db
+        .prepare(
+          "UPDATE skill_import_operations SET state = 'renamed' WHERE id = ?",
+        )
+        .run(operation);
+      const id = this.adopt(libraryId, folder, provenanceJson, licence);
+      this.db
+        .prepare("DELETE FROM skill_import_operations WHERE id = ?")
+        .run(operation);
+      return id;
+    } catch (error) {
+      if (!renamed) {
+        if (existsSync(staging)) rmSync(staging, { recursive: true });
+        this.db
+          .prepare("DELETE FROM skill_import_operations WHERE id = ?")
+          .run(operation);
+      }
+      throw error;
+    }
+  }
+
+  createImportDraft(
+    libraryId: string,
+    folder: string,
+    files: SkillFile[],
+    provenance: Record<string, unknown>,
+    licence: string | null,
+    diagnostic: string,
+  ): string {
+    if (!validSkillName(folder))
+      throw new SkillError("invalid_skill", 400, "Invalid destination name");
+    if (
+      !this.db
+        .prepare("SELECT 1 FROM skill_libraries WHERE id = ?")
+        .get(libraryId)
+    )
+      throw new SkillError("unavailable", 404, "Library not found");
+    const id = randomUUID();
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, licence, diagnostic, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          id,
+          libraryId,
+          folder,
+          JSON.stringify(provenance),
+          licence,
+          diagnostic,
+          this.now(),
+          this.now(),
+        );
+      const insert = this.db.prepare(
+        "INSERT INTO skill_import_draft_files(draft_id, path, content, mode) VALUES (?, ?, ?, ?)",
+      );
+      for (const file of files)
+        insert.run(id, file.path, file.content, file.mode & 0o777);
+    })();
+    return id;
+  }
+
+  importDraft(id: string) {
+    const draft = this.db
+      .prepare("SELECT * FROM skill_import_drafts WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    if (!draft) throw new SkillError("unavailable", 404, "Draft not found");
+    const files = this.db
+      .prepare(
+        "SELECT path, length(content) AS size FROM skill_import_draft_files WHERE draft_id = ? ORDER BY path",
+      )
+      .all(id);
+    const manifest = this.db
+      .prepare(
+        "SELECT content FROM skill_import_draft_files WHERE draft_id = ? AND path = 'SKILL.md'",
+      )
+      .get(id) as { content: Buffer } | undefined;
+    return {
+      ...draft,
+      manifest: manifest?.content.toString("utf8") ?? "",
+      files,
+    };
+  }
+
+  updateImportDraft(
+    id: string,
+    folder: string,
+    manifest: string,
+    baseRevision: number,
+  ): number {
+    if (!validSkillName(folder) || Buffer.byteLength(manifest) > 512 * 1024)
+      throw new SkillError("invalid_skill", 400, "Invalid draft");
+    return this.db.transaction(() => {
+      const changed = this.db
+        .prepare(
+          "UPDATE skill_import_drafts SET folder_name = ?, updated_at = ?, revision = revision + 1, diagnostic = NULL WHERE id = ? AND revision = ?",
+        )
+        .run(folder, this.now(), id, baseRevision);
+      if (!changed.changes)
+        throw new SkillError("draft_conflict", 409, "Draft changed elsewhere");
+      this.db
+        .prepare(
+          "UPDATE skill_import_draft_files SET content = ? WHERE draft_id = ? AND path = 'SKILL.md'",
+        )
+        .run(Buffer.from(manifest), id);
+      return baseRevision + 1;
+    })();
+  }
+
+  promoteImportDraft(id: string, baseRevision: number): string {
+    const draft = this.db
+      .prepare("SELECT * FROM skill_import_drafts WHERE id = ?")
+      .get(id) as
+      | {
+          library_id: string;
+          folder_name: string;
+          provenance_json: string;
+          licence: string | null;
+          revision: number;
+        }
+      | undefined;
+    if (!draft) throw new SkillError("unavailable", 404, "Draft not found");
+    if (draft.revision !== baseRevision)
+      throw new SkillError("draft_conflict", 409, "Draft changed elsewhere");
+    const files = this.db
+      .prepare(
+        "SELECT path, content, mode FROM skill_import_draft_files WHERE draft_id = ? ORDER BY path",
+      )
+      .all(id) as SkillFile[];
+    const skillId = this.importFiles(
+      draft.library_id,
+      draft.folder_name,
+      files,
+      JSON.parse(draft.provenance_json) as Record<string, unknown>,
+      draft.licence,
+    );
+    this.db.prepare("DELETE FROM skill_import_drafts WHERE id = ?").run(id);
+    return skillId;
+  }
+
+  adopt(
+    libraryId: string,
+    folder: string,
+    provenance = "{}",
+    licence: string | null = null,
+  ): string {
     if (!validSkillName(folder))
       throw new SkillError("invalid_path", 400, "Invalid skill folder");
     const library = this.db
@@ -1176,7 +1450,7 @@ export class SkillLibrary {
         .run(id, libraryId, folder, revision, this.now());
       this.db
         .prepare(
-          "INSERT INTO skill_revisions(id, skill_id, number, content_hash, name, description, provenance_json, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?)",
+          "INSERT INTO skill_revisions(id, skill_id, number, content_hash, name, description, provenance_json, licence, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           revision,
@@ -1185,6 +1459,7 @@ export class SkillLibrary {
           metadata.name,
           metadata.description,
           provenance,
+          licence,
           this.now(),
         );
       const blob = this.db.prepare(

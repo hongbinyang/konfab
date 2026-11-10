@@ -226,7 +226,7 @@ export function Library({
           Public
         </button>
       </div>
-      {publicTab && <PublicSources />}
+      {publicTab && <PublicSources roomId={roomId} />}
       <div hidden={publicTab}>
         <p>
           {scope === "personal"
@@ -695,12 +695,15 @@ type PublicSkill = {
   description: string | null;
   licence: string | null;
   diagnostic: string | null;
+  source_id: string;
+  owner: string;
+  repository: string;
+  generation_id: string;
+  commit_id: string;
 };
 
-function PublicSources() {
+function PublicSources({ roomId }: { roomId: number | null }) {
   const [sources, setSources] = useState<PublicSource[]>([]);
-  const [selectedSource, setSelectedSource] = useState("");
-  const [generation, setGeneration] = useState<string | null>(null);
   const [skills, setSkills] = useState<PublicSkill[]>([]);
   const [query, setQuery] = useState("");
   const [preview, setPreview] = useState<null | {
@@ -712,12 +715,23 @@ function PublicSources() {
     diagnostic: string | null;
     content: string | null;
     files: { path: string; size: number; kind: string }[];
+    path: string;
+    sourceId: string;
+    generationId: string;
   }>(null);
   const [owner, setOwner] = useState("");
   const [repository, setRepository] = useState("");
   const [error, setError] = useState("");
   const [token, setToken] = useState({ available: false, enabled: false });
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [importName, setImportName] = useState("");
+  const [draft, setDraft] = useState<null | {
+    id: string;
+    name: string;
+    manifest: string;
+    diagnostic: string | null;
+    revision: number;
+  }>(null);
   const load = useCallback(async () => {
     const data = await request<{
       sources: PublicSource[];
@@ -725,9 +739,7 @@ function PublicSources() {
     }>("/api/library/sources");
     setSources(data.sources);
     setToken(data.token);
-    if (!selectedSource)
-      setSelectedSource(data.sources.find((s) => s.enabled)?.id ?? "");
-  }, [selectedSource]);
+  }, []);
   useEffect(() => {
     void load().catch((e) =>
       setError(e instanceof Error ? e.message : "Sources unavailable"),
@@ -741,15 +753,10 @@ function PublicSources() {
     const timer = window.setInterval(() => void load(), 1200);
     return () => window.clearInterval(timer);
   }, [working, load]);
-  async function browse(sourceId = selectedSource, search = query) {
-    if (!sourceId) return;
-    const result = await request<{
-      generation_id: string | null;
-      skills: PublicSkill[];
-    }>(
-      `/api/library/sources/${sourceId}/skills?q=${encodeURIComponent(search)}`,
+  async function browse(search = query) {
+    const result = await request<{ skills: PublicSkill[] }>(
+      `/api/library/public?q=${encodeURIComponent(search)}`,
     );
-    setGeneration(result.generation_id);
     setSkills(result.skills);
     setPreview(null);
   }
@@ -809,30 +816,40 @@ function PublicSources() {
       >
         <input
           aria-label="Search public skills"
-          placeholder={
-            generation
-              ? "Search cached skills"
-              : "Choose Browse on a cached source"
-          }
+          placeholder="Search all enabled cached sources"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          disabled={!generation}
+          disabled={!sources.some((source) => source.current_generation_id)}
         />
-        <button disabled={!generation}>Search</button>
+        <button
+          disabled={!sources.some((source) => source.current_generation_id)}
+        >
+          Search
+        </button>
       </form>
-      {generation && (
+      {skills.length > 0 && (
         <div className="public-results">
           {skills.map((skill) => (
-            <article key={skill.path}>
+            <article key={`${skill.source_id}:${skill.path}`}>
               <button
                 onClick={() =>
-                  void act(async () =>
-                    setPreview(
-                      await request(
-                        `/api/library/sources/${selectedSource}/preview?generation=${generation}&path=${encodeURIComponent(skill.path)}`,
-                      ),
-                    ),
-                  )
+                  void act(async () => {
+                    const detail = await request<
+                      Omit<
+                        NonNullable<typeof preview>,
+                        "sourceId" | "generationId"
+                      >
+                    >(
+                      `/api/library/sources/${skill.source_id}/preview?generation=${skill.generation_id}&path=${encodeURIComponent(skill.path)}`,
+                    );
+                    setPreview({
+                      ...detail,
+                      sourceId: skill.source_id,
+                      generationId: skill.generation_id,
+                    });
+                    setImportName(skill.name ?? "");
+                    setDraft(null);
+                  })
                 }
               >
                 {skill.name ?? skill.path}
@@ -862,16 +879,9 @@ function PublicSources() {
                 </button>
               )}
               <small>
-                {sources.find((source) => source.id === selectedSource)?.owner}/
-                {
-                  sources.find((source) => source.id === selectedSource)
-                    ?.repository
-                }{" "}
-                at{" "}
-                {sources
-                  .find((source) => source.id === selectedSource)
-                  ?.current_commit?.slice(0, 8)}{" "}
-                · {skill.licence ?? "Licence not specified"}
+                {skill.owner}/{skill.repository} at{" "}
+                {skill.commit_id.slice(0, 8)} ·{" "}
+                {skill.licence ?? "Licence not specified"}
               </small>
             </article>
           ))}
@@ -951,16 +961,6 @@ function PublicSources() {
             {source.current_commit && (
               <span> Cached at {source.current_commit.slice(0, 8)}</span>
             )}
-            {source.current_generation_id && (
-              <button
-                onClick={() => {
-                  setSelectedSource(source.id);
-                  void browse(source.id, "");
-                }}
-              >
-                Browse
-              </button>
-            )}
           </article>
         ))}
         <form
@@ -1020,6 +1020,144 @@ function PublicSources() {
               </li>
             ))}
           </ul>
+          <label>
+            Destination name
+            <input
+              value={importName}
+              onChange={(event) => setImportName(event.target.value)}
+            />
+          </label>
+          <button
+            disabled={!!preview.diagnostic || !importName}
+            onClick={() =>
+              void act(async () => {
+                await request(
+                  `/api/library/sources/${preview.sourceId}/import`,
+                  {
+                    method: "POST",
+                    body: {
+                      generation: preview.generationId,
+                      path: preview.path,
+                      scope: "personal",
+                      name: importName,
+                      mode: "add",
+                    },
+                  },
+                );
+              })
+            }
+          >
+            Add to Mine
+          </button>
+          {roomId && (
+            <button
+              disabled={!!preview.diagnostic || !importName}
+              onClick={() =>
+                void act(async () => {
+                  await request(
+                    `/api/library/sources/${preview.sourceId}/import`,
+                    {
+                      method: "POST",
+                      body: {
+                        generation: preview.generationId,
+                        path: preview.path,
+                        scope: "project",
+                        room_id: roomId,
+                        name: importName,
+                        mode: "add",
+                      },
+                    },
+                  );
+                })
+              }
+            >
+              Add to Project
+            </button>
+          )}
+          <button
+            disabled={!importName}
+            onClick={() =>
+              void act(async () => {
+                const result = await request<{ draft_id: string }>(
+                  `/api/library/sources/${preview.sourceId}/import`,
+                  {
+                    method: "POST",
+                    body: {
+                      generation: preview.generationId,
+                      path: preview.path,
+                      scope: "personal",
+                      name: importName,
+                      mode: "duplicate_fix",
+                    },
+                  },
+                );
+                const detail = await request<{
+                  folder_name: string;
+                  manifest: string;
+                  diagnostic: string | null;
+                  revision: number;
+                }>(`/api/library/import-drafts/${result.draft_id}`);
+                setDraft({
+                  id: result.draft_id,
+                  name: detail.folder_name,
+                  manifest: detail.manifest,
+                  diagnostic: detail.diagnostic,
+                  revision: detail.revision,
+                });
+              })
+            }
+          >
+            {preview.diagnostic ? "Duplicate & fix" : "Duplicate & edit"}
+          </button>
+        </section>
+      )}
+      {draft && (
+        <section>
+          <h3>Imported draft</h3>
+          {draft.diagnostic && <p>{draft.diagnostic}</p>}
+          <label>
+            Name
+            <input
+              value={draft.name}
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            SKILL.md
+            <textarea
+              rows={16}
+              value={draft.manifest}
+              onChange={(event) =>
+                setDraft({ ...draft, manifest: event.target.value })
+              }
+            />
+          </label>
+          <button
+            onClick={() =>
+              void act(async () => {
+                const changed = await request<{ revision: number }>(
+                  `/api/library/import-drafts/${draft.id}`,
+                  {
+                    method: "PUT",
+                    body: {
+                      name: draft.name,
+                      manifest: draft.manifest,
+                      base_revision: draft.revision,
+                    },
+                  },
+                );
+                await request(`/api/library/import-drafts/${draft.id}/save`, {
+                  method: "POST",
+                  body: { base_revision: changed.revision },
+                });
+                setDraft(null);
+              })
+            }
+          >
+            Validate and save to Mine
+          </button>
         </section>
       )}
     </section>

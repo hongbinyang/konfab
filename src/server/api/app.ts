@@ -9,6 +9,7 @@ import type { Writable } from "node:stream";
 import { existsSync, lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { z, ZodError } from "zod";
+import { parseDocument } from "yaml";
 import { SkillError } from "../domain/skill-error.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
@@ -470,6 +471,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .parse(request.query);
     return sourceService().browse(id, q);
   });
+  app.get("/api/library/public", async (request) => {
+    const { q } = z
+      .object({ q: z.string().max(200).default("") })
+      .parse(request.query);
+    return sourceService().browseAll(q);
+  });
   app.get("/api/library/sources/:sourceId/preview", async (request) => {
     const { sourceId: id } = sourceId.parse(request.params);
     const query = z
@@ -550,6 +557,111 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     scope: z.enum(["personal", "project"]).default("personal"),
     room_id: z.coerce.number().int().positive().optional(),
     trash: z.enum(["true", "false"]).default("false"),
+  });
+  const renameImportedManifest = (
+    files: Array<{ path: string; content: Buffer; mode: number }>,
+    name: string,
+  ) =>
+    files.map((file) => {
+      if (file.path !== "SKILL.md") return file;
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(
+        file.content,
+      );
+      const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+      if (!match?.[1]) return file;
+      const document = parseDocument(match[1], {
+        uniqueKeys: true,
+        customTags: [],
+      });
+      if (document.errors.length) return file;
+      document.set("name", name);
+      return {
+        ...file,
+        content: Buffer.from(
+          `---\n${document.toString()}---\n${text.slice(match[0].length)}`,
+        ),
+      };
+    });
+  app.post("/api/library/sources/:sourceId/import", async (request) => {
+    const { sourceId: id } = sourceId.parse(request.params);
+    const body = z
+      .object({
+        generation: z.string().uuid(),
+        path: z.string().min(1).max(1024),
+        scope: z.enum(["personal", "project"]),
+        room_id: z.number().int().positive().optional(),
+        name: z.string().min(1).max(128),
+        mode: z.enum(["add", "duplicate_fix"]).default("add"),
+      })
+      .parse(request.body);
+    const { library, libraryId } = skillScope(body.scope, body.room_id, true);
+    if (!libraryId)
+      throw new SkillError("unavailable", 404, "Library unavailable");
+    const selected = await sourceService().packageFiles(
+      id,
+      body.generation,
+      body.path,
+    );
+    const files = renameImportedManifest(selected.files, body.name);
+    if (selected.diagnostic && body.mode === "add")
+      throw new SkillError(
+        "invalid_skill",
+        400,
+        "Invalid source package; use Duplicate & fix",
+      );
+    if (selected.diagnostic || body.mode === "duplicate_fix") {
+      return {
+        draft_id: library.createImportDraft(
+          libraryId,
+          body.name,
+          files,
+          selected.provenance,
+          selected.licence,
+          selected.diagnostic ?? "Review and save this imported draft",
+        ),
+      };
+    }
+    return {
+      id: library.importFiles(
+        libraryId,
+        body.name,
+        files,
+        selected.provenance,
+        selected.licence,
+      ),
+    };
+  });
+  const draftId = z.object({ draftId: z.string().uuid() });
+  app.get("/api/library/import-drafts/:draftId", async (request) => {
+    const { draftId: id } = draftId.parse(request.params);
+    return skillService().importDraft(id);
+  });
+  app.put("/api/library/import-drafts/:draftId", async (request) => {
+    const { draftId: id } = draftId.parse(request.params);
+    const body = z
+      .object({
+        name: z.string().min(1).max(128),
+        manifest: z
+          .string()
+          .refine((value) => Buffer.byteLength(value) <= 512 * 1024),
+        base_revision: z.number().int().nonnegative(),
+      })
+      .parse(request.body);
+    return {
+      revision: skillService().updateImportDraft(
+        id,
+        body.name,
+        body.manifest,
+        body.base_revision,
+      ),
+    };
+  });
+  app.post("/api/library/import-drafts/:draftId/save", async (request) => {
+    const { draftId: id } = draftId.parse(request.params);
+    const { base_revision } = z
+      .object({ base_revision: z.number().int().nonnegative() })
+      .parse(request.body);
+    return { id: skillService().promoteImportDraft(id, base_revision) };
   });
   app.get("/api/library", async (request) => {
     const query = scopeQuery.parse(request.query);

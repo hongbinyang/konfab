@@ -353,6 +353,41 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX source_generation_by_source ON source_generations(source_id, created_at);
   `,
+  `
+  CREATE TABLE skill_import_operations (
+    id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES skill_libraries(id),
+    folder_name TEXT NOT NULL, staging_name TEXT NOT NULL,
+    provenance_json TEXT NOT NULL, licence TEXT,
+    state TEXT NOT NULL CHECK(state IN ('prepared','written','renamed')),
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE skill_import_drafts (
+    id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES skill_libraries(id),
+    folder_name TEXT NOT NULL, provenance_json TEXT NOT NULL, licence TEXT,
+    diagnostic TEXT, revision INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE skill_import_draft_files (
+    draft_id TEXT NOT NULL REFERENCES skill_import_drafts(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, content BLOB NOT NULL, mode INTEGER NOT NULL,
+    PRIMARY KEY(draft_id, path)
+  );
+  CREATE TABLE source_cached_packages (
+    generation_id TEXT NOT NULL REFERENCES source_generations(id) ON DELETE CASCADE,
+    manifest_path TEXT NOT NULL, licence_path TEXT, cache_bytes INTEGER NOT NULL,
+    last_accessed_at INTEGER NOT NULL,
+    PRIMARY KEY(generation_id, manifest_path)
+  );
+  CREATE TABLE source_cached_blobs (
+    sha TEXT PRIMARY KEY, content BLOB NOT NULL
+  );
+  CREATE TABLE source_cached_files (
+    generation_id TEXT NOT NULL, manifest_path TEXT NOT NULL, path TEXT NOT NULL,
+    sha TEXT NOT NULL REFERENCES source_cached_blobs(sha), mode INTEGER NOT NULL,
+    PRIMARY KEY(generation_id, manifest_path, path),
+    FOREIGN KEY(generation_id, manifest_path) REFERENCES source_cached_packages(generation_id, manifest_path) ON DELETE CASCADE
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

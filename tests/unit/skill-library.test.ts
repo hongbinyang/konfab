@@ -274,4 +274,112 @@ describe("skill library adoption", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+  it("imports verified files and promotes a repaired invalid draft", () => {
+    const root = mkdtempSync(join(tmpdir(), "konfab-import-"));
+    const db = openDatabase(":memory:");
+    try {
+      const service = new SkillLibrary(db);
+      const library = service.registerLibrary("personal", root);
+      const files = [
+        {
+          path: "SKILL.md",
+          content: Buffer.from(
+            "---\nname: imported\ndescription: Imported skill\n---\nBody",
+          ),
+          mode: 0o600,
+        },
+        { path: "file.txt", content: Buffer.from("data"), mode: 0o600 },
+      ];
+      const id = service.importFiles(
+        library,
+        "imported",
+        files,
+        { source: "example/skills", commit: "a".repeat(40) },
+        "MIT",
+      );
+      expect(service.detail(id)).toEqual(
+        expect.objectContaining({ name: "imported", licence: "MIT" }),
+      );
+      expect(() =>
+        service.importFiles(library, "imported", files, {}, null),
+      ).toThrow("already exists");
+
+      const invalid = files.map((file) =>
+        file.path === "SKILL.md"
+          ? { ...file, content: Buffer.from("not valid") }
+          : file,
+      );
+      const draftId = service.createImportDraft(
+        library,
+        "repaired",
+        invalid,
+        { source: "example/skills" },
+        null,
+        "Invalid manifest",
+      );
+      expect(service.importDraft(draftId)).toEqual(
+        expect.objectContaining({ diagnostic: "Invalid manifest" }),
+      );
+      const draft = service.importDraft(draftId) as unknown as {
+        revision: number;
+      };
+      const revision = service.updateImportDraft(
+        draftId,
+        "repaired",
+        "---\nname: repaired\ndescription: Repaired skill\n---\nBody",
+        draft.revision,
+      );
+      expect(() =>
+        service.updateImportDraft(draftId, "repaired", "stale", draft.revision),
+      ).toThrow("changed elsewhere");
+      const repaired = service.promoteImportDraft(draftId, revision);
+      expect(service.detail(repaired).name).toBe("repaired");
+      expect(
+        db
+          .prepare("SELECT 1 FROM skill_import_drafts WHERE id = ?")
+          .get(draftId),
+      ).toBeUndefined();
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it("finishes a renamed import journal after reopening", () => {
+    const root = mkdtempSync(join(tmpdir(), "konfab-import-recover-"));
+    const dbPath = join(root, "state.db");
+    let db = openDatabase(dbPath);
+    try {
+      const service = new SkillLibrary(db);
+      const library = service.registerLibrary("personal", root);
+      const folder = join(root, "recovered");
+      mkdirSync(folder);
+      writeFileSync(
+        join(folder, "SKILL.md"),
+        "---\nname: recovered\ndescription: Recovered import\n---\n",
+      );
+      db.prepare(
+        "INSERT INTO skill_import_operations(id, library_id, folder_name, staging_name, provenance_json, licence, state, created_at) VALUES (?, ?, 'recovered', ?, '{}', 'MIT', 'renamed', 0)",
+      ).run(randomUUID(), library, `.konfab-import-${randomUUID()}`);
+      db.close();
+      db = openDatabase(dbPath);
+      const reopened = new SkillLibrary(db);
+      const listed = reopened.list(library).skills as unknown as Array<{
+        name: string;
+        licence: string | null;
+      }>;
+      expect(listed).toEqual([
+        expect.objectContaining({ name: "recovered", licence: "MIT" }),
+      ]);
+      expect(
+        (
+          db
+            .prepare("SELECT COUNT(*) AS n FROM skill_import_operations")
+            .get() as { n: number }
+        ).n,
+      ).toBe(0);
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
