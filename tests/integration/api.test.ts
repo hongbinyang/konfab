@@ -220,6 +220,31 @@ describe("page API", () => {
         }
       ).count,
     ).toBe(before.count);
+    const stalePublic = await call(
+      "POST",
+      `/api/rooms/${room.id}/members/codex/role-from-public`,
+      {
+        source_id: result.source_id,
+        commit,
+        path: result.path,
+        preview_hash: preview.preview_hash,
+        role_name: "public-sample",
+        title: "Public sample",
+        description: "Invoice workflow",
+        base_revision: 99,
+      },
+    );
+    expect(stalePublic.statusCode).toBe(409);
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM skills").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(before.count);
+    expect(existsSync(join(attachmentDir, "skills", "public-sample"))).toBe(
+      false,
+    );
     const assigned = await call(
       "POST",
       `/api/rooms/${room.id}/members/codex/role-from-public`,
@@ -449,6 +474,48 @@ describe("page API", () => {
         expect.objectContaining({ skill_revision_id: revision }),
       ]),
     );
+  });
+
+  it("customizes and assigns a skill atomically, leaving no copy on stale assignment", async () => {
+    const room = service.createRoom("custom-picker", "", ["codex"]);
+    const created = await call("POST", "/api/library/skills", {
+      scope: "personal",
+      name: "original",
+      description: "Original skill",
+    });
+    const id = created.json().id as string;
+    const revision = (await call("GET", `/api/library/skills/${id}`)).json()
+      .current_revision_id;
+    const url = `/api/rooms/${room.id}/members/codex/customize-and-assign`;
+    const payload = {
+      source_scope: "personal",
+      scope: "personal",
+      skill_id: id,
+      skill_revision: revision,
+      copy_name: "original-copy",
+      manifest:
+        "---\nname: original-copy\ndescription: Edited skill\n---\nEdited",
+      role_name: "edited-role",
+      title: "Edited role",
+      description: "Edited skill",
+      instructions: "Follow the skill",
+      base_revision: 9,
+    };
+    expect((await call("POST", url, payload)).statusCode).toBe(409);
+    expect(
+      (await call("GET", "/api/library?scope=personal")).json().skills,
+    ).toHaveLength(1);
+    expect(
+      (await call("GET", "/api/roles"))
+        .json()
+        .roles.some((role: { name: string }) => role.name === "edited-role"),
+    ).toBe(false);
+    const success = await call("POST", url, { ...payload, base_revision: 0 });
+    expect(success.statusCode).toBe(200);
+    expect(success.json().pending).toBe(false);
+    expect(
+      (await call("GET", "/api/library?scope=personal")).json().skills,
+    ).toHaveLength(2);
   });
 
   it("creates and lists a local skill through authenticated page routes", async () => {

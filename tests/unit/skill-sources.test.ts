@@ -7,6 +7,7 @@ import { pack } from "tar-stream";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/server/db/index.js";
 import { SkillSources } from "../../src/server/domain/skill-sources.js";
+import { SkillLibrary } from "../../src/server/domain/skills.js";
 
 async function fixture(): Promise<Buffer> {
   const tar = pack();
@@ -118,6 +119,127 @@ describe("public skill sources", () => {
     expect(sources.browse(source.id).commit).toBe("b".repeat(40));
     await sources.close();
     db.close();
+  });
+
+  it("checks enabled source commits through the shared cache", async () => {
+    let calls = 0;
+    const db = openDatabase(":memory:");
+    const sources = new SkillSources(db, {
+      fetch: async () => {
+        calls++;
+        return new Response(JSON.stringify({ sha: "a".repeat(40) }));
+      },
+    });
+    expect(await sources.latestPublicCommit("anthropics/skills")).toBe(
+      "a".repeat(40),
+    );
+    expect(await sources.latestPublicCommit("anthropics/skills")).toBe(
+      "a".repeat(40),
+    );
+    expect(await sources.latestPublicCommit("missing/source")).toBeNull();
+    expect(calls).toBe(1);
+    await sources.close();
+    db.close();
+  });
+
+  it("detects changes to the skill folder rather than unrelated repository commits", async () => {
+    const db = openDatabase(":memory:");
+    const pinned = "a".repeat(40);
+    const latest = "b".repeat(40);
+    const latestFolder: string | null = "c".repeat(40);
+    const sources = new SkillSources(db, {
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/commits/"))
+          return new Response(JSON.stringify({ sha: latest }));
+        const folder = url.includes(pinned) ? "c".repeat(40) : latestFolder;
+        return new Response(
+          JSON.stringify({
+            truncated: false,
+            tree: folder
+              ? [{ path: "skills/report", type: "tree", sha: folder }]
+              : [],
+          }),
+        );
+      },
+    });
+    expect(
+      await sources.publicSkillUpdate(
+        "anthropics/skills",
+        pinned,
+        "skills/report/SKILL.md",
+      ),
+    ).toBe("unchanged");
+    await sources.close();
+    db.close();
+  });
+  it.each([
+    ["d".repeat(40), "changed"],
+    [null, "removed"],
+  ] as const)(
+    "reports changed or removed skill folders",
+    async (latestFolder, expected) => {
+      const db = openDatabase(":memory:");
+      const pinned = "a".repeat(40);
+      const latest = "b".repeat(40);
+      const sources = new SkillSources(db, {
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/commits/"))
+            return new Response(JSON.stringify({ sha: latest }));
+          const folder = url.includes(pinned) ? "c".repeat(40) : latestFolder;
+          return new Response(
+            JSON.stringify({
+              truncated: false,
+              tree: folder
+                ? [{ path: "skills/report", type: "tree", sha: folder }]
+                : [],
+            }),
+          );
+        },
+      });
+      expect(
+        await sources.publicSkillUpdate(
+          "anthropics/skills",
+          pinned,
+          "skills/report/SKILL.md",
+        ),
+      ).toBe(expected);
+      await sources.close();
+      db.close();
+    },
+  );
+
+  it("removes old source indexes without touching saved skills", async () => {
+    const archive = await fixture();
+    const db = openDatabase(":memory:");
+    const sources = new SkillSources(db, {
+      fetch: async (input) =>
+        String(input).includes("api.github.com")
+          ? new Response(JSON.stringify({ sha: "d".repeat(40) }))
+          : new Response(archive),
+    });
+    const source = sources.list().find((item) => item.owner === "anthropics")!;
+    sources.startRefresh(source.id);
+    await sources.waitForRefresh();
+    expect(sources.browse(source.id).skills.length).toBeGreaterThan(0);
+    const root = mkdtempSync(join(tmpdir(), "konfab-saved-skill-"));
+    const library = new SkillLibrary(db);
+    const libraryId = library.registerLibrary("personal", root);
+    library.create(libraryId, "saved-skill", "Saved skill");
+    const beforeSkills = (
+      db.prepare("SELECT COUNT(*) AS n FROM skills").get() as { n: number }
+    ).n;
+    expect(sources.legacyIndexSize()).toBeGreaterThan(0);
+    sources.removeLegacyIndexes();
+    expect(sources.legacyIndexSize()).toBe(0);
+    expect(sources.browse(source.id).skills).toHaveLength(0);
+    expect(
+      (db.prepare("SELECT COUNT(*) AS n FROM skills").get() as { n: number }).n,
+    ).toBe(beforeSkills);
+    await sources.close();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
   });
 
   it("keeps a token opt-in and never sends it to codeload", async () => {

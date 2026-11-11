@@ -441,6 +441,12 @@ const MIGRATIONS: readonly string[] = [
     reverted_at INTEGER
   );
   `,
+  `
+  CREATE TABLE skill_workspace_operations (
+    skill_id TEXT PRIMARY KEY REFERENCES skills(id), revision_id TEXT NOT NULL REFERENCES skill_revisions(id),
+    state TEXT NOT NULL CHECK(state IN ('pending','complete')), created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

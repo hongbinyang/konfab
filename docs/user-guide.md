@@ -142,11 +142,17 @@ Record results as you go.
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |
 
+## Choose a role or skill
+
+On a room member card, select **Change role**. Search your roles and skills, project skills, and enabled public sources; choose a result to preview its instructions, files, licence and source. Public descriptions load progressively, so results can be incomplete while searching or when a source is rate-limited. Select **Review & assign** to approve and pin the shown revision, or **Customize** to edit a separate copy before **Save and assign**. The assigned revision continues to work offline. An update notice means the source skill folder has changed; the assignment stays pinned until you change it. If the folder disappears, the notice says it was removed.
+
+Public search and preview use temporary memory; a selected skill is saved only when you use or customize it. If GitHub limits requests, retry after the displayed reset time. In **⚙ Manage library → Public sources**, you may opt in to a GitHub token for a higher limit; the token is sent only after you enable it. To reclaim previous downloaded indexes, choose **Remove old fetched indexes** there and confirm the estimated size. Saved skills, roles and assignments remain.
+
 ## Local skill library
 
 For a step-by-step walkthrough from finding a skill to assigning and updating a role, see [Skills and roles: lifecycle guide](skills-and-roles.md).
 
-Choose **Library** in the sidebar to manage personal skills. To use a project library, first set an existing absolute **Project folder** in a room's Edit form, select that room, and choose **Project** in the library. Personal skills live under the Konfab home in `skills/`; project skills live under `.konfab/skills/` in the selected project. Existing standard skill folders appear as **Untracked** and can be adopted.
+Choose **⚙ Manage library** in the sidebar to manage personal skills. To use a project library, first set an existing absolute **Project folder** in a room's Edit form, select that room, and choose **Project** in the library. Personal skills live under the Konfab home in `skills/`; project skills live under `.konfab/skills/` in the selected project. Existing standard skill folders appear as **Untracked** and can be adopted.
 
 Choose **Public** to manage remote source indexes. Opening the tab never contacts GitHub. Select **Fetch** for an enabled source after reviewing the download notice; later updates use **Refresh**. Konfab stores a complete index at the resolved commit, so search and preview continue to work when GitHub is unavailable. Search covers all enabled cached sources at once. A failed or rate-limited refresh leaves the previous cached commit in place. Suggested sources are disabled until you enable them, and custom sources accept a public GitHub owner and repository.
 
@@ -158,7 +164,7 @@ Create a skill with a name and description. Edit `SKILL.md`, add or remove packa
 
 Review applies to an exact saved revision. New revisions start unreviewed. **Move to Trash** is blocked when a skill is in use; Trash can restore it. Saved revision content remains in the database. The library never runs scripts.
 
-In **Library → Roles**, browse the read-only built-in roles or duplicate one to create an editable personal role. A saved role revision pins the selected skill revisions; later skill edits do not change it. Use **Edit role** on a room member to preview and assign a role with room notes. Each pinned skill revision must be reviewed before assignment. New role revisions do not change existing assignments automatically. Role instructions and skills never grant permissions or run scripts. Agents can request the current role and bounded supporting files when needed.
+In **Manage library → Roles**, browse the read-only built-in roles or duplicate one to create an editable personal role. A saved role revision pins the selected skill revisions; later skill edits do not change it. Use **Edit role** on a room member to preview and assign a role with room notes. Each pinned skill revision must be reviewed before assignment. New role revisions do not change existing assignments automatically. Role instructions and skills never grant permissions or run scripts. Agents can request the current role and bounded supporting files when needed.
 
 To reuse existing custom role text, choose **Save as role pack** on a member or **Convert all custom roles** in Roles. Review the grouped text, selected members and editable names before saving. Identical text can share a role; existing role-pack assignments are left alone. Assignment is optional, and a converted assignment can be reverted to its original custom text while it remains unchanged.
 

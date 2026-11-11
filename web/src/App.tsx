@@ -320,9 +320,6 @@ function Sidebar({
     <nav className="sidebar" aria-label="Rooms">
       <h1>Konfab</h1>
       <ul>{openRooms.map(roomButton)}</ul>
-      <button type="button" onClick={onLibrary}>
-        Library
-      </button>
       <form className="stack" onSubmit={create}>
         <h2>New room</h2>
         <label>
@@ -369,6 +366,9 @@ function Sidebar({
         }}
       >
         Break for all rooms
+      </button>
+      <button type="button" className="secondary" onClick={onLibrary}>
+        ⚙ Manage library
       </button>
       {archived.length > 0 && (
         <details>
@@ -2341,6 +2341,29 @@ function AgentDetails({
   const { stats } = agent;
   const [editingRole, setEditingRole] = useState(false);
   const [choosingRole, setChoosingRole] = useState(false);
+  const [availableUpdates, setAvailableUpdates] = useState<
+    Array<{ name: string; status: string }>
+  >([]);
+  useEffect(() => {
+    let active = true;
+    void request<{ updates: Array<{ name: string; status: string }> }>(
+      `/api/rooms/${roomId}/members/${encodeURIComponent(agent.id)}/role-updates`,
+    )
+      .then((result) => {
+        if (active)
+          setAvailableUpdates(
+            result.updates.filter(
+              (item) => item.status === "changed" || item.status === "removed",
+            ),
+          );
+      })
+      .catch(() => {
+        if (active) setAvailableUpdates([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [roomId, agent.id, agent.role, agent.role_pack_label]);
   const [convertingRole, setConvertingRole] = useState(false);
   const [role, setRole] = useState(agent.role);
   const [canEdit, setCanEdit] = useState(agent.can_edit);
@@ -2404,6 +2427,17 @@ function AgentDetails({
         </p>
       )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}
+      {availableUpdates.length > 0 && (
+        <p className="muted">
+          {availableUpdates
+            .map(
+              (item) =>
+                `${item.name}: ${item.status === "removed" ? "Removed from source" : "Update available"}`,
+            )
+            .join(" · ")}
+          . Current assignments stay pinned.
+        </p>
+      )}
       {choosingRole && (
         <RolePicker
           roomId={roomId}
