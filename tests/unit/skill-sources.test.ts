@@ -33,6 +33,7 @@ describe("public skill sources", () => {
     const archive = await fixture();
     const calls: { url: string; authorization?: string; etag?: string }[] = [];
     let conditional = false;
+    let currentTime = 1_000_000;
     const fakeFetch: typeof fetch = async (input, init) => {
       const url = String(input);
       const headers = new Headers(init?.headers);
@@ -53,6 +54,7 @@ describe("public skill sources", () => {
     const db = openDatabase(":memory:");
     const sources = new SkillSources(db, {
       fetch: fakeFetch,
+      now: () => currentTime,
       token: "test-token",
     });
     expect(calls).toHaveLength(0);
@@ -85,10 +87,35 @@ describe("public skill sources", () => {
     expect(preview.files).toHaveLength(2);
 
     conditional = true;
+    currentTime += 3_600_001;
     sources.startRefresh(source.id);
     await sources.waitForRefresh();
     expect(calls.at(-1)?.etag).toBe('"one"');
     expect(sources.browse(source.id).generation_id).toBe(browse.generation_id);
+    await sources.close();
+    db.close();
+  });
+
+  it("explicit refresh sees a changed commit within the cache hour", async () => {
+    const archive = await fixture();
+    let revision = "a";
+    const db = openDatabase(":memory:");
+    const sources = new SkillSources(db, {
+      fetch: async (input) =>
+        String(input).startsWith("https://api.github.com/")
+          ? new Response(JSON.stringify({ sha: revision.repeat(40) }), {
+              headers: { etag: `"${revision}"` },
+            })
+          : new Response(archive),
+    });
+    const source = sources.list().find((item) => item.owner === "anthropics")!;
+    sources.startRefresh(source.id);
+    await sources.waitForRefresh();
+    expect(sources.browse(source.id).commit).toBe("a".repeat(40));
+    revision = "b";
+    sources.startRefresh(source.id);
+    await sources.waitForRefresh();
+    expect(sources.browse(source.id).commit).toBe("b".repeat(40));
     await sources.close();
     db.close();
   });
@@ -122,8 +149,10 @@ describe("public skill sources", () => {
   it("records rate limits without discarding an existing cached generation", async () => {
     const archive = await fixture();
     let limited = false;
+    let currentTime = 1_000_000;
     const db = openDatabase(":memory:");
     const sources = new SkillSources(db, {
+      now: () => currentTime,
       fetch: async (input) => {
         if (String(input).startsWith("https://codeload.github.com/"))
           return new Response(archive, { status: 200 });
@@ -146,6 +175,7 @@ describe("public skill sources", () => {
     await sources.waitForRefresh();
     const cached = sources.browse(source.id).generation_id;
     limited = true;
+    currentTime += 3_600_001;
     sources.startRefresh(source.id);
     await sources.waitForRefresh();
     const state = sources.list().find((item) => item.id === source.id)!;
