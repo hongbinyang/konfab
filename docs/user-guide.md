@@ -124,7 +124,9 @@ If `KONFAB_GITHUB_TOKEN` is present in the server environment, Public shows an o
 
 Create a skill with a name and description. Edit `SKILL.md`, add or remove package files, and choose **Save revision** to validate and snapshot the whole package. External folder edits appear as drafts when reopened. The working folder path can be copied for use in another editor. A stale editor receives a conflict instead of overwriting newer changes. History lets you view or restore a revision as a new one. Rename keeps the skill's identity; Duplicate makes a separate skill from the selected saved revision.
 
-Review applies to an exact saved revision. New revisions start unreviewed. **Move to Trash** is blocked when a skill is in use; Trash can restore it. Saved revision content remains in the database. The library never runs scripts. Remote sources and role assignments are not available in this phase.
+Review applies to an exact saved revision. New revisions start unreviewed. **Move to Trash** is blocked when a skill is in use; Trash can restore it. Saved revision content remains in the database. The library never runs scripts.
+
+In **Library → Roles**, browse the read-only built-in roles or duplicate one to create an editable personal role. A saved role revision pins the selected skill revisions; later skill edits do not change it. Use **Edit role** on a room member to preview and assign a role with room notes. Each pinned skill revision must be reviewed before assignment. New role revisions do not change existing assignments automatically. Role instructions and skills never grant permissions or run scripts. Agents can request the current role and bounded supporting files when needed.
 
 ## Automatic continuation
 

@@ -2243,7 +2243,12 @@ function Agents({
                     )
                   }
                 />
-                <strong>{agent.display_name}</strong>
+                <strong>
+                  {agent.display_name}
+                  {member?.role_pack_label
+                    ? ` · ${member.role_pack_label}`
+                    : ""}
+                </strong>
               </label>
               {member && (
                 <>
@@ -2332,13 +2337,45 @@ function AgentDetails({
   const [editingRole, setEditingRole] = useState(false);
   const [role, setRole] = useState(agent.role);
   const [canEdit, setCanEdit] = useState(agent.can_edit);
+  const [rolePacks, setRolePacks] = useState<
+    Array<{
+      id: string;
+      revision_id: string;
+      title: string;
+      library_id: string;
+    }>
+  >([]);
+  const [rolePack, setRolePack] = useState("");
+  const [roleNotes, setRoleNotes] = useState("");
+  const [packPreview, setPackPreview] = useState("");
+  const [packSkills, setPackSkills] = useState<
+    Array<{
+      name: string;
+      reviewed: number;
+      skill_id: string;
+      skill_revision_id: string;
+    }>
+  >([]);
+  const [reviewSkill, setReviewSkill] = useState<null | {
+    skill_id: string;
+    revision_id: string;
+    text: string;
+    files: Array<{ path: string; size: number }>;
+  }>(null);
+  const [assignmentRevision, setAssignmentRevision] = useState<
+    number | undefined
+  >();
 
   const saveRole = (event: FormEvent) => {
     event.preventDefault();
     void act(async () => {
       await request(`/api/rooms/${roomId}/members/${agent.id}`, {
         method: "PUT",
-        body: { role, can_edit: canEdit },
+        body: {
+          role,
+          can_edit: canEdit,
+          base_role_revision: assignmentRevision,
+        },
       });
       setEditingRole(false);
     });
@@ -2393,6 +2430,182 @@ function AgentDetails({
         {editingRole ? (
           <form className="stack role-form" onSubmit={saveRole}>
             <label>
+              Role pack
+              <select
+                value={rolePack}
+                onChange={(event) => {
+                  const id = event.target.value;
+                  setRolePack(id);
+                  setPackPreview("");
+                  setPackSkills([]);
+                  setReviewSkill(null);
+                  if (id)
+                    void request<{
+                      role_md: string;
+                      skills: Array<{
+                        name: string;
+                        reviewed: number;
+                        skill_id: string;
+                        skill_revision_id: string;
+                      }>;
+                    }>(`/api/roles/${encodeURIComponent(id)}`).then(
+                      (detail) => {
+                        setPackPreview(detail.role_md);
+                        setPackSkills(detail.skills);
+                      },
+                    );
+                }}
+              >
+                <option value="">Custom text</option>
+                {rolePacks.map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.title} ·{" "}
+                    {pack.library_id === "builtin" ? "built-in" : "personal"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {rolePack && (
+              <>
+                <section>
+                  <h4>Preview role</h4>
+                  <pre>{packPreview}</pre>
+                  {packSkills.map((skill) => (
+                    <p key={skill.name}>
+                      {skill.name} ·{" "}
+                      {skill.reviewed
+                        ? "Reviewed"
+                        : "Review this skill before assignment"}
+                      {!skill.reviewed && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void act(async () => {
+                              const data = await request<{
+                                content_base64: string;
+                              }>(
+                                `/api/library/skills/${skill.skill_id}/revisions/${skill.skill_revision_id}/files?path=SKILL.md`,
+                              );
+                              const listing = await request<{
+                                files: Array<{ path: string; size: number }>;
+                              }>(
+                                `/api/library/skills/${skill.skill_id}/revisions/${skill.skill_revision_id}`,
+                              );
+                              setReviewSkill({
+                                skill_id: skill.skill_id,
+                                revision_id: skill.skill_revision_id,
+                                files: listing.files,
+                                text: new TextDecoder().decode(
+                                  Uint8Array.from(
+                                    atob(data.content_base64),
+                                    (c) => c.charCodeAt(0),
+                                  ),
+                                ),
+                              });
+                            })
+                          }
+                        >
+                          Review now
+                        </button>
+                      )}
+                    </p>
+                  ))}
+                  {reviewSkill && (
+                    <section>
+                      <h4>Skill revision preview</h4>
+                      <pre>{reviewSkill.text}</pre>
+                      {reviewSkill.files.map((file) => (
+                        <p key={file.path}>
+                          {file.path} ({file.size} bytes){" "}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void act(async () => {
+                                const data = await request<{
+                                  content_base64: string;
+                                }>(
+                                  `/api/library/skills/${reviewSkill.skill_id}/revisions/${reviewSkill.revision_id}/files?path=${encodeURIComponent(file.path)}`,
+                                );
+                                setReviewSkill({
+                                  ...reviewSkill,
+                                  text: new TextDecoder().decode(
+                                    Uint8Array.from(
+                                      atob(data.content_base64),
+                                      (c) => c.charCodeAt(0),
+                                    ),
+                                  ),
+                                });
+                              })
+                            }
+                          >
+                            View file
+                          </button>
+                        </p>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void act(async () => {
+                            await request(
+                              `/api/library/skills/${reviewSkill.skill_id}/reviews/${reviewSkill.revision_id}`,
+                              { method: "PUT" },
+                            );
+                            setPackSkills(
+                              packSkills.map((skill) =>
+                                skill.skill_revision_id ===
+                                reviewSkill.revision_id
+                                  ? { ...skill, reviewed: 1 }
+                                  : skill,
+                              ),
+                            );
+                            setReviewSkill(null);
+                          })
+                        }
+                      >
+                        Mark this revision reviewed
+                      </button>
+                    </section>
+                  )}
+                  <p>Room notes: {roleNotes || "None"}</p>
+                </section>
+                <label>
+                  Room notes
+                  <textarea
+                    value={roleNotes}
+                    onChange={(event) => setRoleNotes(event.target.value)}
+                    maxLength={4000}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void act(async () => {
+                      const pack = rolePacks.find(
+                        (item) => item.id === rolePack,
+                      );
+                      if (!pack) return;
+                      await request(
+                        `/api/rooms/${roomId}/members/${agent.id}/role-pack`,
+                        {
+                          method: "PUT",
+                          body: {
+                            role_id: pack.id,
+                            role_revision_id: pack.revision_id,
+                            notes: roleNotes,
+                            base_revision: assignmentRevision,
+                            can_edit: canEdit,
+                          },
+                        },
+                      );
+                      setEditingRole(false);
+                    })
+                  }
+                >
+                  Assign role pack
+                </button>
+              </>
+            )}
+            <label>
               Start from
               <select
                 defaultValue=""
@@ -2427,7 +2640,7 @@ function AgentDetails({
               Can edit files and repos
             </label>
             <div className="row">
-              <button type="submit">Save role</button>
+              {!rolePack && <button type="submit">Save role</button>}
               <button
                 type="button"
                 className="secondary"
@@ -2478,6 +2691,37 @@ function AgentDetails({
               setRole(agent.role);
               setCanEdit(agent.can_edit);
               setEditingRole(true);
+              void request<{
+                roles: Array<{
+                  id: string;
+                  revision_id: string;
+                  title: string;
+                  library_id: string;
+                }>;
+              }>("/api/roles").then((result) => setRolePacks(result.roles));
+              void request<{
+                assignment: null | {
+                  role_id?: string;
+                  notes?: string;
+                  revision: number;
+                };
+              }>(`/api/rooms/${roomId}/members/${agent.id}/role-preview`).then(
+                (result) => {
+                  setRolePack(result.assignment?.role_id ?? "");
+                  setRoleNotes(result.assignment?.notes ?? "");
+                  setAssignmentRevision(result.assignment?.revision);
+                  if (result.assignment?.role_id)
+                    void request<{
+                      role_md: string;
+                      skills: typeof packSkills;
+                    }>(
+                      `/api/roles/${encodeURIComponent(result.assignment.role_id)}`,
+                    ).then((detail) => {
+                      setPackPreview(detail.role_md);
+                      setPackSkills(detail.skills);
+                    });
+                },
+              );
             }}
           >
             Edit role

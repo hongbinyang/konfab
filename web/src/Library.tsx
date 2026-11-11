@@ -37,6 +37,8 @@ export function Library({
 }) {
   const [scope, setScope] = useState<"personal" | "project">("personal");
   const [publicTab, setPublicTab] = useState(false);
+  const [rolesTab, setRolesTab] = useState(false);
+  const [roleDirty, setRoleDirty] = useState(false);
   const [trash, setTrash] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [untracked, setUntracked] = useState<string[]>([]);
@@ -87,17 +89,17 @@ export function Library({
   }, [refresh]);
   const dirty = !!selected && body !== loadedBody;
   useEffect(() => {
-    onDirtyChange(dirty);
-  }, [dirty, onDirtyChange]);
+    onDirtyChange(dirty || roleDirty);
+  }, [dirty, roleDirty, onDirtyChange]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (dirty) event.preventDefault();
+      if (dirty || roleDirty) event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, roleDirty]);
   const canLeave = () =>
-    !dirty || window.confirm("Discard unsaved editor changes?");
+    (!dirty && !roleDirty) || window.confirm("Discard unsaved editor changes?");
   async function open(id: string) {
     const detail = await request<Detail>(`/api/library/skills/${id}`);
     const history = await request<Revision[]>(
@@ -174,392 +176,440 @@ export function Library({
   return (
     <div className="library">
       <h1>Skill Library</h1>
-      {error && (
-        <p className="banner error" role="alert">
-          {error}
-        </p>
-      )}
       <div className="row">
         <button
-          aria-pressed={!publicTab && scope === "personal" && !trash}
+          aria-pressed={!rolesTab}
           onClick={() => {
-            if (!canLeave()) return;
-            setPublicTab(false);
-            setTrash(false);
-            setScope("personal");
-            setSelected(null);
+            if (canLeave()) setRolesTab(false);
           }}
         >
-          Mine
+          Skills
         </button>
         <button
-          aria-pressed={!publicTab && scope === "project" && !trash}
+          aria-pressed={rolesTab}
           onClick={() => {
-            if (!canLeave()) return;
-            setPublicTab(false);
-            setTrash(false);
-            setScope("project");
-            setSelected(null);
+            if (canLeave()) setRolesTab(true);
           }}
         >
-          Project
-        </button>
-        <button
-          aria-pressed={!publicTab && trash}
-          onClick={() => {
-            if (!canLeave()) return;
-            setPublicTab(false);
-            setTrash(!trash);
-            setSelected(null);
-          }}
-        >
-          {trash ? "Active" : "Trash"}
-        </button>
-        <button
-          aria-pressed={publicTab}
-          onClick={() => {
-            if (!canLeave()) return;
-            setPublicTab(true);
-            setSelected(null);
-          }}
-        >
-          Public
+          Roles
         </button>
       </div>
-      {publicTab && <PublicSources roomId={roomId} />}
-      <div hidden={publicTab}>
-        <p>
-          {scope === "personal"
-            ? "Personal library"
-            : "Project library for the selected room"}
-        </p>
-        <input
-          aria-label="Search skills"
-          placeholder="Search skills"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <ul>
-          {skills
-            .filter((s) =>
-              `${s.name} ${s.description}`
-                .toLowerCase()
-                .includes(query.toLowerCase()),
-            )
-            .map((s) => (
-              <li key={s.id}>
-                <button
-                  onClick={() => {
-                    if (canLeave()) void run(() => open(s.id));
-                  }}
-                >
-                  {s.name}
-                  {s.is_draft ? " · Draft" : ""}
-                </button>{" "}
-                {s.description} · {s.reviewed_at ? "Reviewed" : "Not reviewed"}{" "}
-                · {s.licence ?? "Licence not specified"} · used by{" "}
-                {s.usage_count}
-              </li>
-            ))}
-        </ul>
-        {!trash &&
-          untracked.map((folder) => (
-            <p key={folder}>
-              {folder} · Untracked{" "}
-              {untrackedDetails.find((item) => item.folder === folder)
-                ?.diagnostic ? (
-                <span>
-                  {
-                    untrackedDetails.find((item) => item.folder === folder)
-                      ?.diagnostic
-                  }{" "}
-                  · Fix the folder before adopting
-                </span>
-              ) : (
-                <button
-                  onClick={() => {
-                    if (!canLeave()) return;
-                    void run(async () => {
-                      const result = await request<{ id: string }>(
-                        "/api/library/adopt",
-                        { method: "POST", body: { ...context, folder } },
-                      );
-                      await open(result.id);
-                    });
-                  }}
-                >
-                  Adopt
-                </button>
-              )}
-            </p>
-          ))}
-        {!trash && (
-          <form onSubmit={create} className="stack">
-            <h2>New skill</h2>
-            <label>
-              Name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Description
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                required
-              />
-            </label>
-            <button>Create</button>
-          </form>
+      {rolesTab && <RolesView onDirtyChange={setRoleDirty} />}
+      <div hidden={rolesTab}>
+        {error && (
+          <p className="banner error" role="alert">
+            {error}
+          </p>
         )}
-        {selected && (
-          <section>
-            <h2>{selected.name}</h2>
-            <p>
-              Licence: {selected.licence ?? "Not specified"} · Provenance:{" "}
-              {selected.provenance_json === "{}"
-                ? "Created or adopted locally"
-                : "Derived from another saved skill revision"}
-            </p>
-            <p>
-              Working folder:{" "}
-              <code>
-                {selected.root_path}/{selected.folder_name}
-              </code>{" "}
-              <button
-                onClick={() =>
-                  void run(async () =>
-                    navigator.clipboard.writeText(
-                      `${selected.root_path}/${selected.folder_name}`,
-                    ),
-                  )
-                }
-              >
-                Copy path
-              </button>
-            </p>
-            {selected.draft_error ? (
-              <p>{selected.draft_error}</p>
-            ) : (
-              <>
-                <p>
-                  {selected.is_draft
-                    ? "Draft has unsaved changes"
-                    : "Saved revision"}
-                </p>
-                <label>
-                  SKILL.md
-                  <textarea
-                    rows={16}
-                    value={body}
-                    onChange={(e) => setBody(e.target.value)}
-                  />
-                </label>
-                <h3>Preview</h3>
-                <Markdown>
-                  {body.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")}
-                </Markdown>
-                <h3>Files</h3>
-                <ul>
-                  {selected.files.map((file) => (
-                    <li key={file.path}>
-                      {file.path} ({file.size} bytes){" "}
-                      <button
-                        onClick={() =>
-                          void run(async () => {
-                            const data = await request<{
-                              content_base64: string;
-                            }>(
-                              `/api/library/skills/${selected.id}/files?path=${encodeURIComponent(file.path)}`,
-                            );
-                            const bytes = Uint8Array.from(
-                              atob(data.content_base64),
-                              (c) => c.charCodeAt(0),
-                            );
-                            const url = URL.createObjectURL(new Blob([bytes]));
-                            const link = document.createElement("a");
-                            link.href = url;
-                            link.download =
-                              file.path.split("/").at(-1) ?? "file";
-                            link.click();
-                            URL.revokeObjectURL(url);
-                          })
-                        }
-                      >
-                        Download
-                      </button>
-                      {!trash && file.path !== "SKILL.md" && (
+        <div className="row">
+          <button
+            aria-pressed={!publicTab && scope === "personal" && !trash}
+            onClick={() => {
+              if (!canLeave()) return;
+              setPublicTab(false);
+              setTrash(false);
+              setScope("personal");
+              setSelected(null);
+            }}
+          >
+            Mine
+          </button>
+          <button
+            aria-pressed={!publicTab && scope === "project" && !trash}
+            onClick={() => {
+              if (!canLeave()) return;
+              setPublicTab(false);
+              setTrash(false);
+              setScope("project");
+              setSelected(null);
+            }}
+          >
+            Project
+          </button>
+          <button
+            aria-pressed={!publicTab && trash}
+            onClick={() => {
+              if (!canLeave()) return;
+              setPublicTab(false);
+              setTrash(!trash);
+              setSelected(null);
+            }}
+          >
+            {trash ? "Active" : "Trash"}
+          </button>
+          <button
+            aria-pressed={publicTab}
+            onClick={() => {
+              if (!canLeave()) return;
+              setPublicTab(true);
+              setSelected(null);
+            }}
+          >
+            Public
+          </button>
+        </div>
+        {publicTab && <PublicSources roomId={roomId} />}
+        <div hidden={publicTab}>
+          <p>
+            {scope === "personal"
+              ? "Personal library"
+              : "Project library for the selected room"}
+          </p>
+          <input
+            aria-label="Search skills"
+            placeholder="Search skills"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <ul>
+            {skills
+              .filter((s) =>
+                `${s.name} ${s.description}`
+                  .toLowerCase()
+                  .includes(query.toLowerCase()),
+              )
+              .map((s) => (
+                <li key={s.id}>
+                  <button
+                    onClick={() => {
+                      if (canLeave()) void run(() => open(s.id));
+                    }}
+                  >
+                    {s.name}
+                    {s.is_draft ? " · Draft" : ""}
+                  </button>{" "}
+                  {s.description} ·{" "}
+                  {s.reviewed_at ? "Reviewed" : "Not reviewed"} ·{" "}
+                  {s.licence ?? "Licence not specified"} · used by{" "}
+                  {s.usage_count}
+                </li>
+              ))}
+          </ul>
+          {!trash &&
+            untracked.map((folder) => (
+              <p key={folder}>
+                {folder} · Untracked{" "}
+                {untrackedDetails.find((item) => item.folder === folder)
+                  ?.diagnostic ? (
+                  <span>
+                    {
+                      untrackedDetails.find((item) => item.folder === folder)
+                        ?.diagnostic
+                    }{" "}
+                    · Fix the folder before adopting
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (!canLeave()) return;
+                      void run(async () => {
+                        const result = await request<{ id: string }>(
+                          "/api/library/adopt",
+                          { method: "POST", body: { ...context, folder } },
+                        );
+                        await open(result.id);
+                      });
+                    }}
+                  >
+                    Adopt
+                  </button>
+                )}
+              </p>
+            ))}
+          {!trash && (
+            <form onSubmit={create} className="stack">
+              <h2>New skill</h2>
+              <label>
+                Name
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Description
+                <input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  required
+                />
+              </label>
+              <button>Create</button>
+            </form>
+          )}
+          {selected && (
+            <section>
+              <h2>{selected.name}</h2>
+              <p>
+                Licence: {selected.licence ?? "Not specified"} · Provenance:{" "}
+                {selected.provenance_json === "{}"
+                  ? "Created or adopted locally"
+                  : "Derived from another saved skill revision"}
+              </p>
+              <p>
+                Working folder:{" "}
+                <code>
+                  {selected.root_path}/{selected.folder_name}
+                </code>{" "}
+                <button
+                  onClick={() =>
+                    void run(async () =>
+                      navigator.clipboard.writeText(
+                        `${selected.root_path}/${selected.folder_name}`,
+                      ),
+                    )
+                  }
+                >
+                  Copy path
+                </button>
+              </p>
+              {selected.draft_error ? (
+                <p>{selected.draft_error}</p>
+              ) : (
+                <>
+                  <p>
+                    {selected.is_draft
+                      ? "Draft has unsaved changes"
+                      : "Saved revision"}
+                  </p>
+                  <label>
+                    SKILL.md
+                    <textarea
+                      rows={16}
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                    />
+                  </label>
+                  <h3>Preview</h3>
+                  <Markdown>
+                    {body.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")}
+                  </Markdown>
+                  <h3>Files</h3>
+                  <ul>
+                    {selected.files.map((file) => (
+                      <li key={file.path}>
+                        {file.path} ({file.size} bytes){" "}
                         <button
-                          disabled={dirty}
                           onClick={() =>
                             void run(async () => {
-                              await request(
-                                `/api/library/skills/${selected.id}/files/delete`,
-                                {
-                                  method: "POST",
-                                  body: {
-                                    path: file.path,
-                                    base_revision_id:
-                                      selected.current_revision_id,
-                                    base_draft_hash: selected.draft_hash,
-                                  },
-                                },
+                              const data = await request<{
+                                content_base64: string;
+                              }>(
+                                `/api/library/skills/${selected.id}/files?path=${encodeURIComponent(file.path)}`,
                               );
-                              await open(selected.id);
+                              const bytes = Uint8Array.from(
+                                atob(data.content_base64),
+                                (c) => c.charCodeAt(0),
+                              );
+                              const url = URL.createObjectURL(
+                                new Blob([bytes]),
+                              );
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.download =
+                                file.path.split("/").at(-1) ?? "file";
+                              link.click();
+                              URL.revokeObjectURL(url);
                             })
                           }
                         >
-                          Remove
+                          Download
                         </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                {!trash && (
-                  <div>
-                    <label>
-                      File path
-                      <input
-                        value={filePath}
-                        onChange={(e) => setFilePath(e.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Choose file
-                      <input
-                        type="file"
-                        onChange={(e) => setUpload(e.target.files?.[0] ?? null)}
-                      />
-                    </label>
-                    <button
-                      disabled={dirty || !upload || !filePath}
-                      onClick={() =>
-                        void run(async () => {
-                          if (!upload || !selected.draft_hash)
-                            throw new Error("Choose a file");
-                          if (upload.size > 512 * 1024)
-                            throw new Error("File exceeds 512 KiB");
-                          const bytes = new Uint8Array(
-                            await upload.arrayBuffer(),
-                          );
-                          let binary = "";
-                          for (const byte of bytes)
-                            binary += String.fromCharCode(byte);
-                          await request(
-                            `/api/library/skills/${selected.id}/files`,
-                            {
-                              method: "PUT",
-                              body: {
-                                path: filePath,
-                                content_base64: btoa(binary),
-                                base_revision_id: selected.current_revision_id,
-                                base_draft_hash: selected.draft_hash,
+                        {!trash && file.path !== "SKILL.md" && (
+                          <button
+                            disabled={dirty}
+                            onClick={() =>
+                              void run(async () => {
+                                await request(
+                                  `/api/library/skills/${selected.id}/files/delete`,
+                                  {
+                                    method: "POST",
+                                    body: {
+                                      path: file.path,
+                                      base_revision_id:
+                                        selected.current_revision_id,
+                                      base_draft_hash: selected.draft_hash,
+                                    },
+                                  },
+                                );
+                                await open(selected.id);
+                              })
+                            }
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {!trash && (
+                    <div>
+                      <label>
+                        File path
+                        <input
+                          value={filePath}
+                          onChange={(e) => setFilePath(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Choose file
+                        <input
+                          type="file"
+                          onChange={(e) =>
+                            setUpload(e.target.files?.[0] ?? null)
+                          }
+                        />
+                      </label>
+                      <button
+                        disabled={dirty || !upload || !filePath}
+                        onClick={() =>
+                          void run(async () => {
+                            if (!upload || !selected.draft_hash)
+                              throw new Error("Choose a file");
+                            if (upload.size > 512 * 1024)
+                              throw new Error("File exceeds 512 KiB");
+                            const bytes = new Uint8Array(
+                              await upload.arrayBuffer(),
+                            );
+                            let binary = "";
+                            for (const byte of bytes)
+                              binary += String.fromCharCode(byte);
+                            await request(
+                              `/api/library/skills/${selected.id}/files`,
+                              {
+                                method: "PUT",
+                                body: {
+                                  path: filePath,
+                                  content_base64: btoa(binary),
+                                  base_revision_id:
+                                    selected.current_revision_id,
+                                  base_draft_hash: selected.draft_hash,
+                                },
                               },
+                            );
+                            setFilePath("");
+                            setUpload(null);
+                            await open(selected.id);
+                          })
+                        }
+                      >
+                        Add file to draft
+                      </button>
+                    </div>
+                  )}
+                  {!trash && <button onClick={save}>Save revision</button>}
+                </>
+              )}
+              {!trash && (
+                <>
+                  {body !== loadedBody && (
+                    <p>
+                      Save the editor changes before changing or leaving this
+                      skill.
+                    </p>
+                  )}
+                  <label>
+                    New name
+                    <input
+                      value={renameTo}
+                      onChange={(e) => setRenameTo(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    disabled={body !== loadedBody}
+                    onClick={() =>
+                      void run(async () => {
+                        if (!selected.draft_hash)
+                          throw new Error("Draft unavailable");
+                        await request(
+                          `/api/library/skills/${selected.id}/rename`,
+                          {
+                            method: "POST",
+                            body: {
+                              name: renameTo,
+                              base_revision_id: selected.current_revision_id,
+                              base_draft_hash: selected.draft_hash,
                             },
-                          );
-                          setFilePath("");
-                          setUpload(null);
-                          await open(selected.id);
-                        })
-                      }
-                    >
-                      Add file to draft
-                    </button>
-                  </div>
-                )}
-                {!trash && <button onClick={save}>Save revision</button>}
-              </>
-            )}
-            {!trash && (
-              <>
-                {body !== loadedBody && (
-                  <p>
-                    Save the editor changes before changing or leaving this
-                    skill.
-                  </p>
-                )}
-                <label>
-                  New name
-                  <input
-                    value={renameTo}
-                    onChange={(e) => setRenameTo(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={body !== loadedBody}
-                  onClick={() =>
-                    void run(async () => {
-                      if (!selected.draft_hash)
-                        throw new Error("Draft unavailable");
-                      await request(
-                        `/api/library/skills/${selected.id}/rename`,
-                        {
-                          method: "POST",
-                          body: {
-                            name: renameTo,
-                            base_revision_id: selected.current_revision_id,
-                            base_draft_hash: selected.draft_hash,
                           },
-                        },
-                      );
-                      setRenameTo("");
-                      await open(selected.id);
-                    })
-                  }
-                >
-                  Rename
-                </button>
-                <label>
-                  Copy name
-                  <input
-                    value={copyName}
-                    onChange={(e) => setCopyName(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={body !== loadedBody}
-                  onClick={() =>
-                    void run(async () => {
-                      const result = await request<{ id: string }>(
-                        `/api/library/skills/${selected.id}/duplicate`,
-                        {
-                          method: "POST",
-                          body: {
-                            ...context,
-                            revision_id: selected.current_revision_id,
-                            name: copyName,
+                        );
+                        setRenameTo("");
+                        await open(selected.id);
+                      })
+                    }
+                  >
+                    Rename
+                  </button>
+                  <label>
+                    Copy name
+                    <input
+                      value={copyName}
+                      onChange={(e) => setCopyName(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    disabled={body !== loadedBody}
+                    onClick={() =>
+                      void run(async () => {
+                        const result = await request<{ id: string }>(
+                          `/api/library/skills/${selected.id}/duplicate`,
+                          {
+                            method: "POST",
+                            body: {
+                              ...context,
+                              revision_id: selected.current_revision_id,
+                              name: copyName,
+                            },
                           },
-                        },
-                      );
-                      setCopyName("");
-                      await open(result.id);
-                    })
-                  }
-                >
-                  Duplicate revision
-                </button>
+                        );
+                        setCopyName("");
+                        await open(result.id);
+                      })
+                    }
+                  >
+                    Duplicate revision
+                  </button>
+                  <button
+                    onClick={() =>
+                      void run(async () => {
+                        await request(
+                          `/api/library/skills/${selected.id}/reviews/${selected.current_revision_id}`,
+                          { method: "PUT" },
+                        );
+                        await open(selected.id);
+                      })
+                    }
+                  >
+                    Mark saved revision reviewed
+                  </button>
+                  <button
+                    disabled={body !== loadedBody}
+                    onClick={() =>
+                      void run(async () => {
+                        await request(
+                          `/api/library/skills/${selected.id}/trash`,
+                          {
+                            method: "POST",
+                            body: {
+                              base_revision_id: selected.current_revision_id,
+                              base_draft_hash: selected.draft_hash,
+                            },
+                          },
+                        );
+                        setSelected(null);
+                      })
+                    }
+                  >
+                    Move to Trash
+                  </button>
+                </>
+              )}
+              {trash && (
                 <button
                   onClick={() =>
                     void run(async () => {
                       await request(
-                        `/api/library/skills/${selected.id}/reviews/${selected.current_revision_id}`,
-                        { method: "PUT" },
-                      );
-                      await open(selected.id);
-                    })
-                  }
-                >
-                  Mark saved revision reviewed
-                </button>
-                <button
-                  disabled={body !== loadedBody}
-                  onClick={() =>
-                    void run(async () => {
-                      await request(
-                        `/api/library/skills/${selected.id}/trash`,
+                        `/api/library/skills/${selected.id}/restore`,
                         {
                           method: "POST",
                           body: {
@@ -572,104 +622,593 @@ export function Library({
                     })
                   }
                 >
-                  Move to Trash
+                  Restore
                 </button>
-              </>
-            )}
-            {trash && (
-              <button
-                onClick={() =>
-                  void run(async () => {
-                    await request(
-                      `/api/library/skills/${selected.id}/restore`,
-                      {
-                        method: "POST",
-                        body: {
-                          base_revision_id: selected.current_revision_id,
-                          base_draft_hash: selected.draft_hash,
-                        },
-                      },
-                    );
-                    setSelected(null);
-                  })
-                }
-              >
-                Restore
-              </button>
-            )}
-            <h3>History</h3>
-            <ul>
-              {revisions.map((r) => (
-                <li key={r.id}>
-                  Revision {r.number}: {r.name} ·{" "}
-                  {r.reviewed_at ? "Reviewed" : "Not reviewed"}{" "}
-                  <button
-                    onClick={() =>
-                      void run(async () => {
-                        const data = await request<{ content_base64: string }>(
-                          `/api/library/skills/${selected.id}/revisions/${r.id}/files?path=SKILL.md`,
-                        );
-                        setHistoryText(
-                          new TextDecoder().decode(
-                            Uint8Array.from(atob(data.content_base64), (c) =>
-                              c.charCodeAt(0),
-                            ),
-                          ),
-                        );
-                      })
-                    }
-                  >
-                    View
-                  </button>
-                  {!trash && (
+              )}
+              <h3>History</h3>
+              <ul>
+                {revisions.map((r) => (
+                  <li key={r.id}>
+                    Revision {r.number}: {r.name} ·{" "}
+                    {r.reviewed_at ? "Reviewed" : "Not reviewed"}{" "}
                     <button
-                      disabled={body !== loadedBody || !selected.draft_hash}
                       onClick={() =>
                         void run(async () => {
-                          if (
-                            selected.is_draft &&
-                            !window.confirm(
-                              "Replace the saved draft with this revision?",
-                            )
-                          )
-                            return;
-                          await request(
-                            `/api/library/skills/${selected.id}/revisions/${r.id}/restore`,
-                            {
-                              method: "POST",
-                              body: {
-                                base_revision_id: selected.current_revision_id,
-                                base_draft_hash: selected.draft_hash,
-                              },
-                            },
+                          const data = await request<{
+                            content_base64: string;
+                          }>(
+                            `/api/library/skills/${selected.id}/revisions/${r.id}/files?path=SKILL.md`,
                           );
-                          await open(selected.id);
-                          setHistoryText("");
+                          setHistoryText(
+                            new TextDecoder().decode(
+                              Uint8Array.from(atob(data.content_base64), (c) =>
+                                c.charCodeAt(0),
+                              ),
+                            ),
+                          );
                         })
                       }
                     >
-                      Restore as new revision
+                      View
                     </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {historyText && (
-              <section>
-                <h4>Historical revision</h4>
-                <Markdown>
-                  {historyText.replace(
-                    /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,
-                    "",
-                  )}
-                </Markdown>
-                <button onClick={() => setHistoryText("")}>Close</button>
-              </section>
-            )}
-          </section>
-        )}
+                    {!trash && (
+                      <button
+                        disabled={body !== loadedBody || !selected.draft_hash}
+                        onClick={() =>
+                          void run(async () => {
+                            if (
+                              selected.is_draft &&
+                              !window.confirm(
+                                "Replace the saved draft with this revision?",
+                              )
+                            )
+                              return;
+                            await request(
+                              `/api/library/skills/${selected.id}/revisions/${r.id}/restore`,
+                              {
+                                method: "POST",
+                                body: {
+                                  base_revision_id:
+                                    selected.current_revision_id,
+                                  base_draft_hash: selected.draft_hash,
+                                },
+                              },
+                            );
+                            await open(selected.id);
+                            setHistoryText("");
+                          })
+                        }
+                      >
+                        Restore as new revision
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {historyText && (
+                <section>
+                  <h4>Historical revision</h4>
+                  <Markdown>
+                    {historyText.replace(
+                      /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,
+                      "",
+                    )}
+                  </Markdown>
+                  <button onClick={() => setHistoryText("")}>Close</button>
+                </section>
+              )}
+            </section>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function RolesView({
+  onDirtyChange,
+}: {
+  onDirtyChange: (dirty: boolean) => void;
+}) {
+  const [roles, setRoles] = useState<
+    Array<{
+      id: string;
+      title: string;
+      description: string;
+      library_id: string;
+      revision_id: string;
+      number: number;
+    }>
+  >([]);
+  const [selected, setSelected] = useState<null | {
+    id: string;
+    title: string;
+    library_id: string;
+    revision_id: string;
+    role_md: string;
+    workspace_state: string | null;
+    is_draft: boolean | null;
+    root_path: string;
+    folder_name: string;
+    skills: Array<{
+      skill_id: string;
+      skill_revision_id: string;
+      name: string;
+      reviewed: number;
+    }>;
+  }>(null);
+  const [name, setName] = useState("");
+  const [availableSkills, setAvailableSkills] = useState<
+    Array<{
+      id: string;
+      name: string;
+      current_revision_id: string;
+      reviewed_at: number | null;
+    }>
+  >([]);
+  const [skillChoice, setSkillChoice] = useState("");
+  const [showTrash, setShowTrash] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [history, setHistory] = useState<
+    Array<{ id: string; number: number; title: string }>
+  >([]);
+  const [externalDraft, setExternalDraft] = useState<null | {
+    revision_id: string;
+    draft_hash: string;
+    manifest: string;
+  }>(null);
+  const [loadedRole, setLoadedRole] = useState("");
+  const roleValue = (item: NonNullable<typeof selected>) =>
+    JSON.stringify([
+      item.role_md,
+      item.skills.map((skill) => [skill.skill_id, skill.skill_revision_id]),
+    ]);
+  const [error, setError] = useState("");
+  const load = useCallback(
+    async () =>
+      setRoles(
+        (
+          await request<{ roles: typeof roles }>(
+            `/api/roles?trash=${showTrash}`,
+          )
+        ).roles,
+      ),
+    [showTrash],
+  );
+  useEffect(() => {
+    void load().catch((e) =>
+      setError(e instanceof Error ? e.message : "Roles unavailable"),
+    );
+    void request<{ skills: typeof availableSkills }>(
+      "/api/library?scope=personal",
+    ).then((result) => setAvailableSkills(result.skills));
+  }, [load]);
+  async function open(id: string, force = false) {
+    if (
+      !force &&
+      selected &&
+      roleValue(selected) !== loadedRole &&
+      !window.confirm("Discard unsaved role edits?")
+    )
+      return;
+    const detail = await request<NonNullable<typeof selected>>(
+      `/api/roles/${encodeURIComponent(id)}`,
+    );
+    setSelected(detail);
+    setLoadedRole(roleValue(detail));
+    setHistory(await request(`/api/roles/${encodeURIComponent(id)}/revisions`));
+    setExternalDraft(null);
+  }
+  useEffect(() => {
+    onDirtyChange(!!selected && roleValue(selected) !== loadedRole);
+    return () => onDirtyChange(false);
+  }, [selected, loadedRole, onDirtyChange]);
+  async function act(action: () => Promise<void>) {
+    try {
+      await action();
+      setError("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Operation failed");
+    }
+  }
+  return (
+    <section>
+      <h2>Roles</h2>
+      <button
+        onClick={() => {
+          setShowTrash(!showTrash);
+          setSelected(null);
+        }}
+      >
+        {showTrash ? "Active roles" : "Role Trash"}
+      </button>
+      {error && <p className="banner error">{error}</p>}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void act(async () => {
+            const result = await request<{ id: string }>("/api/roles", {
+              method: "POST",
+              body: { name, title: newTitle, description: newDescription },
+            });
+            setName("");
+            setNewTitle("");
+            setNewDescription("");
+            await open(result.id);
+          });
+        }}
+      >
+        <h3>New role</h3>
+        <label>
+          Name
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+          />
+        </label>
+        <label>
+          Title
+          <input
+            value={newTitle}
+            onChange={(event) => setNewTitle(event.target.value)}
+            required
+          />
+        </label>
+        <label>
+          Description
+          <input
+            value={newDescription}
+            onChange={(event) => setNewDescription(event.target.value)}
+            required
+          />
+        </label>
+        <button>Create role</button>
+      </form>
+      {roles.map((role) => (
+        <article key={role.id}>
+          <button
+            disabled={showTrash}
+            onClick={() => void act(() => open(role.id))}
+          >
+            {role.title}
+          </button>{" "}
+          · {role.library_id === "builtin" ? "Built-in · read-only" : "Mine"} ·
+          revision {role.number}
+          <p>{role.description}</p>
+          {showTrash && (
+            <button
+              onClick={() =>
+                void act(async () => {
+                  await request(
+                    `/api/roles/${encodeURIComponent(role.id)}/restore`,
+                    {
+                      method: "POST",
+                      body: { base_revision: role.revision_id },
+                    },
+                  );
+                })
+              }
+            >
+              Restore
+            </button>
+          )}
+        </article>
+      ))}
+      {selected && (
+        <section>
+          <h3>{selected.title}</h3>
+          {selected.library_id === "personal" && (
+            <p>
+              Working folder:{" "}
+              <code>
+                {selected.root_path}/{selected.folder_name}
+              </code>{" "}
+              <button
+                onClick={() =>
+                  void navigator.clipboard.writeText(
+                    `${selected.root_path}/${selected.folder_name}`,
+                  )
+                }
+              >
+                Copy path
+              </button>
+            </p>
+          )}
+          {selected.workspace_state === "pending" && (
+            <p className="banner error">
+              The role folder needs recovery. Your files have been preserved.
+            </p>
+          )}
+          {selected.is_draft && (
+            <p className="banner error">
+              The working folder has changes. Review them before saving.
+            </p>
+          )}
+          {selected.is_draft && (
+            <button
+              onClick={() =>
+                void act(async () => {
+                  setExternalDraft(
+                    await request(
+                      `/api/roles/${encodeURIComponent(selected.id)}/draft`,
+                    ),
+                  );
+                })
+              }
+            >
+              Review working draft
+            </button>
+          )}
+          {externalDraft && (
+            <section>
+              <h4>Working draft</h4>
+              <pre>{externalDraft.manifest}</pre>
+              <button
+                onClick={() =>
+                  void act(async () => {
+                    await request(
+                      `/api/roles/${encodeURIComponent(selected.id)}/draft/save`,
+                      {
+                        method: "POST",
+                        body: {
+                          base_revision: externalDraft.revision_id,
+                          draft_hash: externalDraft.draft_hash,
+                          pins: selected.skills.map((skill) => ({
+                            skill_id: skill.skill_id,
+                            revision_id: skill.skill_revision_id,
+                          })),
+                        },
+                      },
+                    );
+                    await open(selected.id, true);
+                  })
+                }
+              >
+                Save working draft
+              </button>
+            </section>
+          )}
+          {selected.library_id === "personal" ? (
+            <textarea
+              rows={15}
+              value={selected.role_md}
+              onChange={(e) =>
+                setSelected({ ...selected, role_md: e.target.value })
+              }
+            />
+          ) : (
+            <pre>{selected.role_md}</pre>
+          )}
+          <p>
+            Skills:{" "}
+            {selected.skills.length
+              ? selected.skills.map((s) => s.name).join(", ")
+              : "None"}
+          </p>
+          {selected.library_id === "personal" && (
+            <div>
+              <select
+                value={skillChoice}
+                onChange={(event) => setSkillChoice(event.target.value)}
+                aria-label="Add a skill revision"
+              >
+                <option value="">Choose a skill revision</option>
+                {availableSkills.map((skill) => (
+                  <option key={skill.id} value={skill.id}>
+                    {skill.name} ·{" "}
+                    {skill.reviewed_at ? "Reviewed" : "Not reviewed"}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  const skill = availableSkills.find(
+                    (item) => item.id === skillChoice,
+                  );
+                  if (
+                    skill &&
+                    !selected.skills.some((item) => item.skill_id === skill.id)
+                  )
+                    setSelected({
+                      ...selected,
+                      skills: [
+                        ...selected.skills,
+                        {
+                          skill_id: skill.id,
+                          skill_revision_id: skill.current_revision_id,
+                          name: skill.name,
+                          reviewed: skill.reviewed_at ? 1 : 0,
+                        },
+                      ],
+                    });
+                }}
+              >
+                Add skill
+              </button>
+              {selected.skills.map((skill, index) => (
+                <p key={skill.skill_id}>
+                  {skill.name} ·{" "}
+                  {skill.reviewed ? "Reviewed" : "Review before assignment"}{" "}
+                  <button
+                    disabled={index === 0}
+                    onClick={() => {
+                      const pins = [...selected.skills];
+                      [pins[index - 1], pins[index]] = [
+                        pins[index]!,
+                        pins[index - 1]!,
+                      ];
+                      setSelected({ ...selected, skills: pins });
+                    }}
+                  >
+                    Move up
+                  </button>{" "}
+                  <button
+                    disabled={index === selected.skills.length - 1}
+                    onClick={() => {
+                      const pins = [...selected.skills];
+                      [pins[index], pins[index + 1]] = [
+                        pins[index + 1]!,
+                        pins[index]!,
+                      ];
+                      setSelected({ ...selected, skills: pins });
+                    }}
+                  >
+                    Move down
+                  </button>{" "}
+                  {availableSkills.some(
+                    (item) =>
+                      item.id === skill.skill_id &&
+                      item.current_revision_id !== skill.skill_revision_id,
+                  ) && (
+                    <button
+                      onClick={() => {
+                        const latest = availableSkills.find(
+                          (item) => item.id === skill.skill_id,
+                        )!;
+                        setSelected({
+                          ...selected,
+                          skills: selected.skills.map((item) =>
+                            item.skill_id === skill.skill_id
+                              ? {
+                                  ...item,
+                                  skill_revision_id: latest.current_revision_id,
+                                  reviewed: latest.reviewed_at ? 1 : 0,
+                                }
+                              : item,
+                          ),
+                        });
+                      }}
+                    >
+                      Update skill revision
+                    </button>
+                  )}{" "}
+                  <button
+                    onClick={() =>
+                      setSelected({
+                        ...selected,
+                        skills: selected.skills.filter(
+                          (item) => item.skill_id !== skill.skill_id,
+                        ),
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                </p>
+              ))}
+            </div>
+          )}
+          {selected.library_id === "personal" && (
+            <section>
+              <h4>History</h4>
+              {history.map((item) => (
+                <p key={item.id}>
+                  Revision {item.number}: {item.title}{" "}
+                  <button
+                    disabled={item.id === selected.revision_id}
+                    onClick={() =>
+                      void act(async () => {
+                        if (
+                          roleValue(selected) !== loadedRole &&
+                          !window.confirm("Discard unsaved role edits?")
+                        )
+                          return;
+                        await request(
+                          `/api/roles/${encodeURIComponent(selected.id)}/revisions/${item.id}/restore`,
+                          {
+                            method: "POST",
+                            body: { base_revision: selected.revision_id },
+                          },
+                        );
+                        await open(selected.id, true);
+                      })
+                    }
+                  >
+                    Restore as new revision
+                  </button>
+                </p>
+              ))}
+            </section>
+          )}
+          {selected.library_id === "personal" && (
+            <button
+              onClick={() =>
+                void act(async () => {
+                  await request(
+                    `/api/roles/${encodeURIComponent(selected.id)}/save`,
+                    {
+                      method: "POST",
+                      body: {
+                        base_revision: selected.revision_id,
+                        manifest: selected.role_md,
+                        pins: selected.skills.map((s) => ({
+                          skill_id: s.skill_id,
+                          revision_id: s.skill_revision_id,
+                        })),
+                      },
+                    },
+                  );
+                  await open(selected.id, true);
+                })
+              }
+            >
+              Save revision
+            </button>
+          )}
+          {selected.library_id === "personal" && (
+            <button
+              onClick={() =>
+                void act(async () => {
+                  if (
+                    roleValue(selected) !== loadedRole &&
+                    !window.confirm("Discard unsaved role edits?")
+                  )
+                    return;
+                  await request(
+                    `/api/roles/${encodeURIComponent(selected.id)}/trash`,
+                    {
+                      method: "POST",
+                      body: { base_revision: selected.revision_id },
+                    },
+                  );
+                  setSelected(null);
+                })
+              }
+            >
+              Move to Trash
+            </button>
+          )}
+          <label>
+            Copy name
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <button
+            onClick={() =>
+              void act(async () => {
+                if (
+                  roleValue(selected) !== loadedRole &&
+                  !window.confirm(
+                    "Duplicate the saved revision and discard unsaved edits?",
+                  )
+                )
+                  return;
+                const result = await request<{ id: string }>(
+                  `/api/roles/${encodeURIComponent(selected.id)}/duplicate`,
+                  { method: "POST", body: { name } },
+                );
+                setName("");
+                await open(result.id, true);
+              })
+            }
+          >
+            Duplicate role
+          </button>
+        </section>
+      )}
+    </section>
   );
 }
 

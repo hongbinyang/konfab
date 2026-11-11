@@ -9,6 +9,7 @@ import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { SkillLibrary } from "../../src/server/domain/skills.js";
 import { SkillSources } from "../../src/server/domain/skill-sources.js";
 import { KonfabService } from "../../src/server/domain/service.js";
+import { RoleLibrary } from "../../src/server/domain/roles.js";
 
 const PORT = 18788;
 const HOST = `127.0.0.1:${PORT}`;
@@ -47,10 +48,16 @@ describe("page API", () => {
         throw new Error("unexpected network request");
       },
     });
+    const roles = new RoleLibrary(db);
+    roles.seedBuiltins("src/server/roles/builtin");
+    db.prepare(
+      "INSERT INTO role_libraries(id,kind,root_path) VALUES ('personal','personal',?)",
+    ).run(join(attachmentDir, "roles"));
     app = await buildApp({
       service,
       skills: new SkillLibrary(db),
       sources,
+      roles,
       skillsHome: attachmentDir,
       port: PORT,
     });
@@ -61,6 +68,44 @@ describe("page API", () => {
       headers: { host: HOST },
     });
     cookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
+  });
+
+  it("assigns a pinned built-in role and serves its preview", async () => {
+    const room = service.createRoom("role-test", "", ["codex"]);
+    const list = (await call("GET", "/api/roles")).json().roles as Array<{
+      id: string;
+      revision_id: string;
+    }>;
+    const role = list[0]!;
+    expect(
+      (
+        await call("PUT", `/api/rooms/${room.id}/members/codex/role-pack`, {
+          role_id: role.id,
+          role_revision_id: role.revision_id,
+          notes: "Example notes",
+        })
+      ).statusCode,
+    ).toBe(200);
+    const preview = await call(
+      "GET",
+      `/api/rooms/${room.id}/members/codex/role-preview`,
+    );
+    expect(preview.json().role).toEqual(
+      expect.objectContaining({
+        notes: "Example notes",
+        revision_id: role.revision_id,
+      }),
+    );
+    expect(
+      (
+        await call("PUT", `/api/rooms/${room.id}/members/codex/role-pack`, {
+          role_id: role.id,
+          role_revision_id: role.revision_id,
+          notes: "stale",
+          base_revision: 4,
+        })
+      ).statusCode,
+    ).toBe(409);
   });
 
   afterEach(async () => {

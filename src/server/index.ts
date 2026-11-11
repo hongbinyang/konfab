@@ -6,7 +6,7 @@ import { createRuntime } from "./runtime.js";
 const home = konfabHome();
 ensureHome(home);
 const config = loadConfig(home);
-const { db, service, skills, sources } = createRuntime(
+const { db, service, skills, sources, roles } = createRuntime(
   databasePath(home),
   config,
 );
@@ -16,6 +16,7 @@ const app = await buildApp({
   service,
   skills,
   sources,
+  roles,
   skillsHome: home,
   port: config.server.port,
   webDir: resolve(import.meta.dirname, "../web"),

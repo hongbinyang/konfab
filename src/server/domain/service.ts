@@ -12,6 +12,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import type { Db } from "../db/index.js";
+import { RoleLibrary } from "./roles.js";
+import { fileChunk } from "./file-chunk.js";
 
 export class KonfabError extends Error {
   constructor(
@@ -77,6 +79,7 @@ export type WaitResult = (
       room: string;
       topic: string;
       rules: string;
+      role?: ReturnType<RoleLibrary["envelope"]>;
       messages: MessageView[];
       truncated: boolean;
       decisions: DecisionView[];
@@ -302,6 +305,58 @@ export function parseMentions(body: string): string[] {
 }
 
 export class KonfabService {
+  readAssignedRole(agentId: string, sessionId: string) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    return new RoleLibrary(this.db).envelope(
+      session.room_id,
+      agentId,
+      false,
+      true,
+    );
+  }
+
+  readAssignedRoleFile(
+    agentId: string,
+    sessionId: string,
+    revisionId: string,
+    path: string,
+    offset: number,
+    max: number,
+  ) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    const assigned = this.db
+      .prepare(
+        "SELECT 1 FROM room_member_roles WHERE room_id = ? AND agent_id = ? AND role_revision_id = ?",
+      )
+      .get(session.room_id, agentId, revisionId);
+    if (!assigned)
+      throw new KonfabError("forbidden", 403, "Role revision is not assigned");
+    return new RoleLibrary(this.db).readFile(revisionId, path, offset, max);
+  }
+
+  readAssignedSkillFile(
+    agentId: string,
+    sessionId: string,
+    skillRevisionId: string,
+    path: string,
+    offset: number,
+    max: number,
+  ) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    const row = this.db
+      .prepare(
+        `SELECT b.content FROM room_member_roles a JOIN role_revision_skills p ON p.role_revision_id = a.role_revision_id JOIN skill_revision_files f ON f.revision_id = p.skill_revision_id JOIN skill_blobs b ON b.hash = f.blob_hash WHERE a.room_id = ? AND a.agent_id = ? AND p.skill_revision_id = ? AND f.path = ?`,
+      )
+      .get(session.room_id, agentId, skillRevisionId, path) as
+      { content: Buffer } | undefined;
+    if (!row)
+      throw new KonfabError("forbidden", 403, "Skill file is not assigned");
+    return fileChunk(row.content, offset, max);
+  }
+  rolesChanged(roomId: number, agentId: string): void {
+    this.logEvent("role_changed", roomId, agentId, { kind: "role_pack" });
+    this.notify();
+  }
   private readonly changes = new EventEmitter();
   private readonly now: () => number;
   private readonly liveWindowMs: number;
@@ -527,16 +582,32 @@ export class KonfabService {
   setMemberRole(
     ref: RoomRef,
     agentId: string,
-    settings: { role: string; can_edit: boolean },
+    settings: { role: string; can_edit: boolean; base_role_revision?: number },
   ): void {
     const room = this.room(ref);
     this.requireMember(room.id, agentId);
     this.validateLength(settings.role, MAX_ROLE_CHARS, "Roles");
-    this.db
-      .prepare(
-        "UPDATE room_members SET role = ?, can_edit = ? WHERE room_id = ? AND agent_id = ?",
+    this.db.transaction(() => {
+      const current = this.db
+        .prepare(
+          "SELECT role_assignment_revision FROM room_members WHERE room_id = ? AND agent_id = ?",
+        )
+        .get(room.id, agentId) as { role_assignment_revision: number };
+      if (
+        current.role_assignment_revision !== (settings.base_role_revision ?? 0)
       )
-      .run(settings.role.trim(), settings.can_edit ? 1 : 0, room.id, agentId);
+        throw new KonfabError("role_conflict", 409, "Role assignment changed");
+      this.db
+        .prepare(
+          "DELETE FROM room_member_roles WHERE room_id = ? AND agent_id = ?",
+        )
+        .run(room.id, agentId);
+      this.db
+        .prepare(
+          "UPDATE room_members SET role = ?, can_edit = ?, role_assignment_revision = role_assignment_revision + 1 WHERE room_id = ? AND agent_id = ?",
+        )
+        .run(settings.role.trim(), settings.can_edit ? 1 : 0, room.id, agentId);
+    })();
     this.logEvent("role_changed", room.id, agentId, {
       can_edit: settings.can_edit,
     });
@@ -827,8 +898,11 @@ export class KonfabService {
     const room = this.room(ref);
     const agents = this.db
       .prepare(
-        `SELECT a.id, a.display_name, a.bridge_protocol, m.role, m.can_edit FROM room_members m
+        `SELECT a.id, a.display_name, a.bridge_protocol, m.role, m.can_edit,
+         rr.title AS role_title, rr.number AS role_number FROM room_members m
          JOIN agents a ON a.id = m.agent_id
+         LEFT JOIN room_member_roles mr ON mr.room_id = m.room_id AND mr.agent_id = m.agent_id
+         LEFT JOIN role_revisions rr ON rr.id = mr.role_revision_id
          WHERE m.room_id = ? ORDER BY m.position`,
       )
       .all(room.id) as {
@@ -837,6 +911,8 @@ export class KonfabService {
       role: string;
       can_edit: number;
       bridge_protocol: number | null;
+      role_title: string | null;
+      role_number: number | null;
     }[];
     const queued = this.db
       .prepare(
@@ -863,7 +939,12 @@ export class KonfabService {
         return {
           id: agent.id,
           display_name: agent.display_name,
-          role: agent.role,
+          role: agent.role_title
+            ? `${agent.role_title} · rev ${agent.role_number}`
+            : agent.role,
+          role_pack_label: agent.role_title
+            ? `${agent.role_title} rev ${agent.role_number}`
+            : null,
           can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
           bridge_outdated:
@@ -1011,6 +1092,7 @@ export class KonfabService {
       room: room.name,
       topic: room.topic,
       rules: this.instructionsFor(room.id, agentId),
+      role: new RoleLibrary(this.db).envelope(room.id, agentId, false, true),
       members: this.memberIds(room.id),
       recent_messages: this.withAttachments(
         room.id,
@@ -3300,6 +3382,27 @@ export class KonfabService {
   }
 
   private buildTurn(room: RoomRow, turn: TurnRow): WaitResult {
+    const savedRole = this.db
+      .prepare("SELECT role_envelope_json FROM turns WHERE id = ?")
+      .get(turn.id) as { role_envelope_json: string | null };
+    let roleEnvelope: ReturnType<RoleLibrary["envelope"]>;
+    if (savedRole.role_envelope_json !== null) {
+      roleEnvelope = JSON.parse(savedRole.role_envelope_json) as ReturnType<
+        RoleLibrary["envelope"]
+      >;
+    } else {
+      roleEnvelope = this.db.transaction(() => {
+        const role = new RoleLibrary(this.db).envelope(
+          room.id,
+          turn.agent_id,
+          true,
+        );
+        this.db
+          .prepare("UPDATE turns SET role_envelope_json = ? WHERE id = ?")
+          .run(JSON.stringify(role), turn.id);
+        return role;
+      })();
+    }
     const member = this.db
       .prepare(
         "SELECT agent_id, last_seen_message_id, decision_seen_event_id FROM room_members WHERE room_id = ? AND agent_id = ?",
@@ -3396,6 +3499,7 @@ export class KonfabService {
       room: room.name,
       topic: room.topic,
       rules: this.instructionsFor(room.id, turn.agent_id),
+      role: roleEnvelope,
       messages: this.withAttachments(room.id, messages),
       truncated,
       wait_seconds: this.options.waitTimeoutSeconds,

@@ -112,6 +112,7 @@ export interface RoomAgent {
   closes_at: number | null;
   join_prompt: string;
   role: string;
+  role_pack_label?: string | null;
   can_edit: boolean;
   stats: {
     session_started_at: number | null;

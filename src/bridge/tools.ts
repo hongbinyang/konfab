@@ -179,6 +179,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "/agent/wait",
       "/agent/wait-finished",
       "/agent/history",
+      "/agent/read-role",
+      "/agent/read-role-file",
+      "/agent/read-skill-file",
       "/agent/decisions/read",
       "/agent/decisions/propose",
       "/agent/permission/wait",
@@ -227,6 +230,67 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   };
 
   const server = new McpServer({ name: "konfab", version: "0.1.0" });
+
+  server.registerTool(
+    "read_role",
+    {
+      description: "Read your currently assigned role context.",
+      inputSchema: { session_id: z.string() },
+    },
+    async (body, extra) => {
+      try {
+        return asToolResult(await call("/agent/read-role", body, extra.signal));
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+  server.registerTool(
+    "read_role_file",
+    {
+      description:
+        "Read a bounded chunk of a file from your assigned role revision.",
+      inputSchema: {
+        session_id: z.string(),
+        role_revision_id: z.string().uuid(),
+        path: z.string(),
+        offset: z.number().int().nonnegative().optional(),
+        max_bytes: z.number().int().min(1).max(131072).optional(),
+      },
+    },
+    async (body, extra) => {
+      try {
+        return asToolResult(
+          await call("/agent/read-role-file", body, extra.signal),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+  server.registerTool(
+    "read_skill_file",
+    {
+      description:
+        "Read a bounded chunk from a skill pinned by your assigned role.",
+      inputSchema: {
+        session_id: z.string(),
+        skill_revision_id: z.string().uuid(),
+        path: z.string(),
+        offset: z.number().int().nonnegative().optional(),
+        max_bytes: z.number().int().min(1).max(131072).optional(),
+      },
+    },
+    async (body, extra) => {
+      try {
+        return asToolResult(
+          await call("/agent/read-skill-file", body, extra.signal),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
 
   server.registerTool(
     "join_room",
