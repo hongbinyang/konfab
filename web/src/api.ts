@@ -77,7 +77,7 @@ export interface Attachment {
 
 export interface Message {
   id: number;
-  sender_type: "user" | "agent";
+  sender_type: "user" | "agent" | "system";
   sender_id: string;
   body: string;
   created_at: number;

@@ -142,6 +142,10 @@ Record results as you go.
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |
 
+## Reorganize team roles
+
+Select **Roles** in the room header, or open **Role actions → Swap role…** on a member card. Drag a role onto another member or use **Swap with**; repeat to make a rotation. You can also preview a saved role and give it to someone, or remove a role. Review the pending before-and-after list, use **Undo** or **Reset** if needed, and select **Apply** to make the changes together. Room notes move with their role; file and repository edit access stays with each member. If a role changed while the window was open, nothing is applied: close and reopen the window to review current roles. A system message asks the affected agents to hand over their work; an active turn continues with its existing role until its next turn.
+
 ## Choose a role or skill
 
 On a room member card, select **Change role**. Search your roles and skills, project skills, and enabled public sources; choose a result to preview its instructions, files, licence and source. Public descriptions load progressively, so results can be incomplete while searching or when a source is rate-limited. Select **Review & assign** to approve and pin the shown revision, or **Customize** to edit a separate copy before **Save and assign**. The assigned revision continues to work offline. An update notice means the source skill folder has changed; the assignment stays pinned until you change it. If the folder disappears, the notice says it was removed.
