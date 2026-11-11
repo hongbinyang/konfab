@@ -26,6 +26,8 @@ npm ci
 npm run setup
 ```
 
+Setup configures both desktop clients at user scope and backs up changed config files. See the [user guide](docs/user-guide.md) for manual setup and migration.
+
 ## Run
 
 ```bash

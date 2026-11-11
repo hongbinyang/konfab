@@ -80,7 +80,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 
 | ID | Priority | Requirement |
 |---|---|---|
-| A1 | MUST | Agents connect to Konfab as an MCP server. |
+| A1 | MUST | Agents connect to Konfab as an MCP server. Setup defaults to user-scoped desktop connectors, supports manual setup, and migrates existing project entries only explicitly. |
 | S3 | MUST | Exhausted bridge outage retries report that the request was not confirmed and suggest continuing the loop after recovery, without guaranteeing the turn remains active. Authentication and validation errors keep their original messages. |
 | S1 | MUST | Agents can report a one-line working detail of 1–120 characters per session, separate from turn state and allowance warnings. The card shows elapsed time and warns after `turn_timeout_minutes` without an update. Posting or passing clears it; updates and clears appear in the timeline. |
 | A2 | MUST | Konfab provides tools to join a room, wait for a turn, post a message, pass on a turn, read history, report status, and request permission. |
