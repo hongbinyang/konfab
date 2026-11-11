@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Markdown from "react-markdown";
 import { request } from "./api";
 import { ConvertRoles } from "./ConvertRoles";
+import { NameField } from "./NameField";
+import { suggestName, validName } from "./name-validation";
 
 type Skill = {
   id: string;
@@ -320,14 +322,12 @@ export function Library({
           {!trash && (
             <form onSubmit={create} className="stack">
               <h2>New skill</h2>
-              <label>
-                Name
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </label>
+              <NameField
+                label="Name"
+                value={name}
+                onChange={setName}
+                required
+              />
               <label>
                 Description
                 <input
@@ -336,7 +336,7 @@ export function Library({
                   required
                 />
               </label>
-              <button>Create</button>
+              <button disabled={!validName(name)}>Create</button>
             </form>
           )}
           {selected && (
@@ -510,15 +510,13 @@ export function Library({
                       skill.
                     </p>
                   )}
-                  <label>
-                    New name
-                    <input
-                      value={renameTo}
-                      onChange={(e) => setRenameTo(e.target.value)}
-                    />
-                  </label>
+                  <NameField
+                    label="New name"
+                    value={renameTo}
+                    onChange={setRenameTo}
+                  />
                   <button
-                    disabled={body !== loadedBody}
+                    disabled={body !== loadedBody || !validName(renameTo)}
                     onClick={() =>
                       void run(async () => {
                         if (!selected.draft_hash)
@@ -541,15 +539,13 @@ export function Library({
                   >
                     Rename
                   </button>
-                  <label>
-                    Copy name
-                    <input
-                      value={copyName}
-                      onChange={(e) => setCopyName(e.target.value)}
-                    />
-                  </label>
+                  <NameField
+                    label="Copy name"
+                    value={copyName}
+                    onChange={setCopyName}
+                  />
                   <button
-                    disabled={body !== loadedBody}
+                    disabled={body !== loadedBody || !validName(copyName)}
                     onClick={() =>
                       void run(async () => {
                         const result = await request<{ id: string }>(
@@ -751,6 +747,8 @@ function RolesView({
   const [showTrash, setShowTrash] = useState(false);
   const [converting, setConverting] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
+  const [roleCopyName, setRoleCopyName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [history, setHistory] = useState<
     Array<{ id: string; number: number; title: string }>
@@ -848,25 +846,30 @@ function RolesView({
             });
             setName("");
             setNewTitle("");
+            setNameEdited(false);
             setNewDescription("");
             await open(result.id);
           });
         }}
       >
         <h3>New role</h3>
-        <label>
-          Name
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-          />
-        </label>
+        <NameField
+          label="Name"
+          value={name}
+          onChange={(value) => {
+            setName(value);
+            setNameEdited(true);
+          }}
+          required
+        />
         <label>
           Title
           <input
             value={newTitle}
-            onChange={(event) => setNewTitle(event.target.value)}
+            onChange={(event) => {
+              setNewTitle(event.target.value);
+              if (!nameEdited) setName(suggestName(event.target.value));
+            }}
             required
           />
         </label>
@@ -878,7 +881,7 @@ function RolesView({
             required
           />
         </label>
-        <button>Create role</button>
+        <button disabled={!validName(name)}>Create role</button>
       </form>
       {roles.map((role) => (
         <article key={role.id}>
@@ -1194,11 +1197,13 @@ function RolesView({
               Move to Trash
             </button>
           )}
-          <label>
-            Copy name
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
+          <NameField
+            label="Copy name"
+            value={roleCopyName}
+            onChange={setRoleCopyName}
+          />
           <button
+            disabled={!validName(roleCopyName)}
             onClick={() =>
               void act(async () => {
                 if (
@@ -1210,9 +1215,9 @@ function RolesView({
                   return;
                 const result = await request<{ id: string }>(
                   `/api/roles/${encodeURIComponent(selected.id)}/duplicate`,
-                  { method: "POST", body: { name } },
+                  { method: "POST", body: { name: roleCopyName } },
                 );
-                setName("");
+                setRoleCopyName("");
                 await open(result.id, true);
               })
             }
@@ -1572,15 +1577,13 @@ function PublicSources({ roomId }: { roomId: number | null }) {
               </li>
             ))}
           </ul>
-          <label>
-            Destination name
-            <input
-              value={importName}
-              onChange={(event) => setImportName(event.target.value)}
-            />
-          </label>
+          <NameField
+            label="Destination name"
+            value={importName}
+            onChange={setImportName}
+          />
           <button
-            disabled={!!preview.diagnostic || !importName}
+            disabled={!!preview.diagnostic || !validName(importName)}
             onClick={() =>
               void act(async () => {
                 await request(
@@ -1603,7 +1606,7 @@ function PublicSources({ roomId }: { roomId: number | null }) {
           </button>
           {roomId && (
             <button
-              disabled={!!preview.diagnostic || !importName}
+              disabled={!!preview.diagnostic || !validName(importName)}
               onClick={() =>
                 void act(async () => {
                   await request(
@@ -1627,7 +1630,7 @@ function PublicSources({ roomId }: { roomId: number | null }) {
             </button>
           )}
           <button
-            disabled={!importName}
+            disabled={!validName(importName)}
             onClick={() =>
               void act(async () => {
                 const result = await request<{ draft_id: string }>(

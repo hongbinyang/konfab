@@ -70,6 +70,49 @@ describe("page API", () => {
     cookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
   });
 
+  it("reports actionable field errors for role and skill requests", async () => {
+    for (const [url, payload, field] of [
+      ["/api/roles", { name: "valid", title: "", description: "ok" }, "title"],
+      [
+        "/api/roles/convert-custom",
+        { groups: [{ name: "valid" }] },
+        "groups.0.title",
+      ],
+      [
+        "/api/library/skills",
+        { scope: "personal", name: "valid", description: "" },
+        "description",
+      ],
+      ["/api/library/sources/example/import", { name: "valid" }, "sourceId"],
+    ] as const) {
+      const response = await call("POST", url, payload);
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toContain(field);
+      expect(response.json().message).not.toBe("Invalid request");
+    }
+    const assignment = await call(
+      "PUT",
+      "/api/rooms/1/members/codex/role-pack",
+      {},
+    );
+    expect(assignment.statusCode).toBe(400);
+    expect(assignment.json().message).toContain("role_id");
+    expect(assignment.json().message).not.toBe("Invalid request");
+    const badOwner = await call("POST", "/api/library/sources", {
+      owner: "a b",
+      repository: "skills",
+      ref: "HEAD",
+    });
+    expect(badOwner.json().message).toContain("Owner");
+    expect(badOwner.json().message).toContain("no spaces");
+    const metadata = await call("POST", "/api/roles", {
+      name: "valid",
+      title: "  ",
+      description: "ok",
+    });
+    expect(metadata.json().message).toContain("Title");
+  });
+
   it("assigns a pinned built-in role and serves its preview", async () => {
     const room = service.createRoom("role-test", "", ["codex"]);
     const list = (await call("GET", "/api/roles")).json().roles as Array<{
