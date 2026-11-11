@@ -105,6 +105,16 @@ describe("server and bridge", () => {
       payload: { session_id: second.session_id, timeout_seconds: 0 },
     });
     expect(forbidden.statusCode).toBe(403);
+    const before = service.roomState(ROOM).messages.length;
+    const missing = await app.inject({
+      method: "POST",
+      url: "/agent/post",
+      headers: { host: `127.0.0.1:${PORT}`, authorization: `Bearer ${token}` },
+      payload: { turn_id: 1, body: "Must not post" },
+    });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().message).toBe("session_id required");
+    expect(service.roomState(ROOM).messages).toHaveLength(before);
     service.postUserMessage(ROOM, "@claude @claude-dev take turns");
     const turn1 = (
       await callTool("wait_for_turn", { session_id: first.session_id })

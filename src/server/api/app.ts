@@ -278,10 +278,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   };
   const requireAgent = (request: FastifyRequest): string => {
     const appId = requireApp(request);
+    const path = request.url.split("?")[0];
+    if (path === "/agent/join" || path === "/agent/protocol")
+      return service.appAgent(appId);
     const body = request.body as { session_id?: unknown } | null;
-    return typeof body?.session_id === "string"
-      ? service.sessionAgent(appId, body.session_id)
-      : service.appAgent(appId);
+    if (typeof body?.session_id !== "string" || !body.session_id)
+      throw new KonfabError("session_required", 400, "session_id required");
+    return service.sessionAgent(appId, body.session_id);
   };
 
   app.addHook("preHandler", async (request) => {
