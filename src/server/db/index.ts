@@ -388,6 +388,51 @@ const MIGRATIONS: readonly string[] = [
     FOREIGN KEY(generation_id, manifest_path) REFERENCES source_cached_packages(generation_id, manifest_path) ON DELETE CASCADE
   );
   `,
+  `
+  CREATE TABLE role_libraries (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('builtin','personal')),
+    root_path TEXT NOT NULL UNIQUE
+  );
+  ALTER TABLE turns ADD COLUMN role_envelope_json TEXT;
+  ALTER TABLE room_members ADD COLUMN role_assignment_revision INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE roles (
+    id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES role_libraries(id),
+    folder_name TEXT NOT NULL, current_revision_id TEXT, created_at INTEGER NOT NULL,
+    trashed_at INTEGER, UNIQUE(library_id, folder_name),
+    FOREIGN KEY(id, current_revision_id) REFERENCES role_revisions(role_id, id) DEFERRABLE INITIALLY DEFERRED
+  );
+  CREATE TABLE role_revisions (
+    id TEXT PRIMARY KEY, role_id TEXT NOT NULL REFERENCES roles(id), number INTEGER NOT NULL,
+    content_hash TEXT NOT NULL, name TEXT NOT NULL, title TEXT NOT NULL,
+    description TEXT NOT NULL, created_at INTEGER NOT NULL,
+    restored_from_revision_id TEXT REFERENCES role_revisions(id),
+    UNIQUE(role_id, id), UNIQUE(role_id, number)
+  );
+  CREATE TABLE role_revision_files (
+    revision_id TEXT NOT NULL REFERENCES role_revisions(id), path TEXT NOT NULL,
+    blob_hash TEXT NOT NULL REFERENCES skill_blobs(hash), mode INTEGER NOT NULL,
+    PRIMARY KEY(revision_id, path)
+  );
+  CREATE TABLE role_revision_skills (
+    role_revision_id TEXT NOT NULL REFERENCES role_revisions(id), position INTEGER NOT NULL,
+    skill_id TEXT NOT NULL, skill_revision_id TEXT NOT NULL,
+    PRIMARY KEY(role_revision_id, position), UNIQUE(role_revision_id, skill_id),
+    FOREIGN KEY(skill_id, skill_revision_id) REFERENCES skill_revisions(skill_id, id)
+  );
+  CREATE TABLE room_member_roles (
+    room_id INTEGER NOT NULL, agent_id TEXT NOT NULL, role_id TEXT NOT NULL,
+    role_revision_id TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0,
+    generation INTEGER NOT NULL DEFAULT 1, delivered_generation INTEGER NOT NULL DEFAULT 0,
+    assigned_at INTEGER NOT NULL, PRIMARY KEY(room_id, agent_id),
+    FOREIGN KEY(room_id, agent_id) REFERENCES room_members(room_id, agent_id) ON DELETE CASCADE,
+    FOREIGN KEY(role_id, role_revision_id) REFERENCES role_revisions(role_id, id)
+  );
+  CREATE TABLE role_workspace_operations (
+    role_id TEXT PRIMARY KEY REFERENCES roles(id), revision_id TEXT NOT NULL REFERENCES role_revisions(id),
+    previous_revision_id TEXT REFERENCES role_revisions(id),
+    state TEXT NOT NULL CHECK(state IN ('pending','complete')), created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

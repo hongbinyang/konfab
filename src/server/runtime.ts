@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { openDatabase, type Db } from "./db/index.js";
 import { SkillLibrary } from "./domain/skills.js";
 import { SkillSources, type SourceOptions } from "./domain/skill-sources.js";
+import { RoleLibrary } from "./domain/roles.js";
 import { KonfabService } from "./domain/service.js";
 
 export interface Runtime {
@@ -11,6 +12,7 @@ export interface Runtime {
   service: KonfabService;
   skills: SkillLibrary;
   sources: SkillSources;
+  roles: RoleLibrary;
 }
 
 export function createRuntime(
@@ -43,6 +45,12 @@ export function createRuntime(
   for (const [id, agent] of Object.entries(config.agents)) {
     service.ensureAgent(id, agent.display_name);
   }
+  const roles = new RoleLibrary(db);
+  const builtinRoot = join(import.meta.dirname, "roles", "builtin");
+  if (existsSync(builtinRoot)) roles.seedBuiltins(builtinRoot);
+  db.prepare(
+    "INSERT OR IGNORE INTO role_libraries(id, kind, root_path) VALUES ('personal', 'personal', ?)",
+  ).run(join(dirname(databaseFile), "roles"));
   return {
     db,
     service,
@@ -52,5 +60,6 @@ export function createRuntime(
       token: process.env.KONFAB_GITHUB_TOKEN,
       ...sourceOptions,
     }),
+    roles,
   };
 }

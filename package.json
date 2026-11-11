@@ -9,7 +9,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-role-assets.mjs && vite build",
     "start": "npm run build && node dist/server/index.js",
     "setup": "npm run build && node dist/cli/setup.js",
     "login-link": "npm run build --silent && node dist/cli/login-link.js",

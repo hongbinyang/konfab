@@ -13,6 +13,7 @@ import { parseDocument } from "yaml";
 import { SkillError } from "../domain/skill-error.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
+import type { RoleLibrary } from "../domain/roles.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 
 const MAX_SERVER_WAIT_SECONDS = 30;
@@ -89,7 +90,11 @@ const memberParams = z.object({
   id: z.coerce.number().int().positive(),
   agentId: z.string().min(1),
 });
-const roleBody = z.object({ role: z.string(), can_edit: z.boolean() });
+const roleBody = z.object({
+  role: z.string(),
+  can_edit: z.boolean(),
+  base_role_revision: z.number().int().nonnegative().optional(),
+});
 const membersBody = z.object({ members: z.array(z.string()) });
 const pauseBody = z.object({ paused: z.boolean() });
 const userMessageBody = z.object({
@@ -105,6 +110,7 @@ export interface AppOptions {
   service: KonfabService;
   skills?: SkillLibrary;
   sources?: SkillSources;
+  roles?: RoleLibrary;
   skillsHome?: string;
   port: number;
   webDir?: string;
@@ -396,6 +402,52 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const body = reportBody.parse(request.body);
     return repeatMutation(request, agentId, () =>
       service.reportStatus(agentId, body.session_id, body.kind, body.detail),
+    );
+  });
+
+  app.post("/agent/read-role", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z.object(session).parse(request.body);
+    return { role: service.readAssignedRole(agentId, body.session_id) };
+  });
+  app.post("/agent/read-role-file", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z
+      .object({
+        ...session,
+        role_revision_id: z.string().uuid(),
+        path: z.string().min(1).max(512),
+        offset: z.number().int().nonnegative().default(0),
+        max_bytes: z.number().int().min(1).max(131072).default(32768),
+      })
+      .parse(request.body);
+    return service.readAssignedRoleFile(
+      agentId,
+      body.session_id,
+      body.role_revision_id,
+      body.path,
+      body.offset,
+      body.max_bytes,
+    );
+  });
+  app.post("/agent/read-skill-file", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z
+      .object({
+        ...session,
+        skill_revision_id: z.string().uuid(),
+        path: z.string().min(1).max(512),
+        offset: z.number().int().nonnegative().default(0),
+        max_bytes: z.number().int().min(1).max(131072).default(32768),
+      })
+      .parse(request.body);
+    return service.readAssignedSkillFile(
+      agentId,
+      body.session_id,
+      body.skill_revision_id,
+      body.path,
+      body.offset,
+      body.max_bytes,
     );
   });
 
@@ -891,6 +943,182 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       skillService().markReviewed(id, revisionId);
       return { ok: true };
     });
+  });
+
+  const roleService = () => {
+    if (!options.roles)
+      throw new KonfabError("unavailable", 503, "Roles unavailable");
+    return options.roles;
+  };
+  app.get("/api/roles", async (request) => {
+    const { trash } = z
+      .object({ trash: z.enum(["true", "false"]).default("false") })
+      .parse(request.query);
+    return { roles: roleService().list(trash === "true") };
+  });
+  app.post("/api/roles", async (request) => {
+    const body = z
+      .object({
+        name: z.string().min(1).max(128),
+        title: z.string().min(1).max(100),
+        description: z.string().min(1).max(1024),
+      })
+      .parse(request.body);
+    const content = Buffer.from(
+      `---\nname: ${JSON.stringify(body.name)}\ntitle: ${JSON.stringify(body.title)}\ndescription: ${JSON.stringify(body.description)}\nskills: []\n---\n\n# ${body.title}\n`,
+    );
+    return {
+      id: roleService().createPersonal(
+        "personal",
+        body.name,
+        [{ path: "ROLE.md", content, mode: 0o600 }],
+        [],
+      ),
+    };
+  });
+  app.get("/api/roles/:id", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    return roleService().detail(id);
+  });
+  app.post("/api/roles/:id/duplicate", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    const { name } = z
+      .object({ name: z.string().min(1).max(128) })
+      .parse(request.body);
+    return { id: roleService().duplicate(id, name) };
+  });
+  app.get("/api/roles/:id/revisions", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    return roleService().revisions(id);
+  });
+  app.post("/api/roles/:id/revisions/:revisionId/restore", async (request) => {
+    const { id, revisionId } = z
+      .object({ id: z.string().min(1).max(200), revisionId: z.string().uuid() })
+      .parse(request.params);
+    const { base_revision } = z
+      .object({ base_revision: z.string().uuid() })
+      .parse(request.body);
+    return {
+      revision_id: roleService().restoreRevision(id, revisionId, base_revision),
+    };
+  });
+  app.post("/api/roles/:id/trash", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    const { base_revision } = z
+      .object({ base_revision: z.string().uuid() })
+      .parse(request.body);
+    roleService().trash(id, base_revision);
+    return { ok: true };
+  });
+  app.post("/api/roles/:id/restore", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    const { base_revision } = z
+      .object({ base_revision: z.string().uuid() })
+      .parse(request.body);
+    roleService().restore(id, base_revision);
+    return { ok: true };
+  });
+  app.post("/api/roles/:id/save", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    const body = z
+      .object({
+        base_revision: z.string().uuid(),
+        manifest: z
+          .string()
+          .refine((value) => Buffer.byteLength(value) <= 512 * 1024),
+        pins: z
+          .array(
+            z.object({
+              skill_id: z.string().uuid(),
+              revision_id: z.string().uuid(),
+            }),
+          )
+          .max(100),
+      })
+      .parse(request.body);
+    return {
+      revision_id: roleService().saveManifest(
+        id,
+        body.base_revision,
+        body.manifest,
+        body.pins,
+      ),
+    };
+  });
+  app.get("/api/roles/:id/draft", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    return roleService().workingDraft(id);
+  });
+  app.post("/api/roles/:id/draft/save", async (request) => {
+    const { id } = z
+      .object({ id: z.string().min(1).max(200) })
+      .parse(request.params);
+    const body = z
+      .object({
+        base_revision: z.string().uuid(),
+        draft_hash: z.string().regex(/^[a-f0-9]{64}$/),
+        pins: z
+          .array(
+            z.object({
+              skill_id: z.string().uuid(),
+              revision_id: z.string().uuid(),
+            }),
+          )
+          .max(100),
+      })
+      .parse(request.body);
+    return {
+      revision_id: roleService().saveWorkingDraft(
+        id,
+        body.base_revision,
+        body.draft_hash,
+        body.pins,
+      ),
+    };
+  });
+  app.put("/api/rooms/:id/members/:agentId/role-pack", async (request) => {
+    const params = memberParams.parse(request.params);
+    const body = z
+      .object({
+        role_id: z.string().min(1).max(200),
+        role_revision_id: z.string().uuid(),
+        notes: z.string().max(4000).default(""),
+        base_revision: z.number().int().nonnegative().optional(),
+        can_edit: z.boolean().optional(),
+      })
+      .parse(request.body);
+    roleService().assign(
+      params.id,
+      params.agentId,
+      body.role_id,
+      body.role_revision_id,
+      body.notes,
+      body.base_revision,
+      body.can_edit,
+    );
+    service.rolesChanged(params.id, params.agentId);
+    return { ok: true };
+  });
+  app.get("/api/rooms/:id/members/:agentId/role-preview", async (request) => {
+    const params = memberParams.parse(request.params);
+    return {
+      role: roleService().envelope(params.id, params.agentId, false, true),
+      assignment: roleService().assignment(params.id, params.agentId),
+    };
   });
 
   app.get("/api/overview", async () => service.overview());
