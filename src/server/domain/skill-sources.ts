@@ -6,6 +6,7 @@ import type { Db } from "../db/index.js";
 import { extractVerifiedPackage, indexArchive } from "./source-archive.js";
 import { skillMetadata, type SkillFile } from "./skill-files.js";
 import { SkillError } from "./skill-error.js";
+import { GitHubClient } from "./github-client.js";
 
 const DEFAULTS = [
   ["anthropics", "skills", "vendor", 1],
@@ -40,7 +41,7 @@ export type SourceOptions = {
 };
 
 export class SkillSources {
-  private readonly fetcher: typeof fetch;
+  private readonly github: GitHubClient;
   private readonly now: () => number;
   private readonly cacheBytes: number;
   private readonly token: string | undefined;
@@ -54,7 +55,10 @@ export class SkillSources {
     private readonly db: Db,
     options: SourceOptions = {},
   ) {
-    this.fetcher = options.fetch ?? fetch;
+    this.github = new GitHubClient(
+      options.fetch ?? fetch,
+      options.now ?? Date.now,
+    );
     this.now = options.now ?? Date.now;
     this.cacheBytes = options.cacheBytes ?? 500 * 1024 * 1024;
     this.token = options.token;
@@ -364,31 +368,9 @@ export class SkillSources {
     url: string,
     headers: Record<string, string>,
     signal: AbortSignal,
+    options?: { revalidate?: boolean },
   ): Promise<Response> {
-    const parsed = new URL(url);
-    if (
-      parsed.protocol !== "https:" ||
-      !["api.github.com", "codeload.github.com"].includes(parsed.hostname) ||
-      parsed.username ||
-      parsed.password
-    )
-      throw new SkillError("invalid_source", 400, "Source host is not allowed");
-    const response = await this.fetcher(url, {
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
-    });
-    if (
-      response.status >= 300 &&
-      response.status < 400 &&
-      response.status !== 304
-    )
-      throw new SkillError(
-        "source_redirect",
-        502,
-        "Source redirected to an unexpected location",
-      );
-    return response;
+    return this.github.request(url, headers, signal, options);
   }
   private async boundedJson(
     response: Response,
@@ -767,7 +749,24 @@ export class SkillSources {
         `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/commits/${encodeURIComponent(source.ref)}`,
         headers,
         signal,
+        { revalidate: true },
       );
+      if (api.headers.get("x-konfab-stale") === "1") {
+        const resetAt = Number(api.headers.get("x-konfab-reset"));
+        this.db
+          .prepare("UPDATE skill_sources SET rate_limit_reset = ? WHERE id = ?")
+          .run(resetAt, source.id);
+        const time = new Date(resetAt).toLocaleTimeString("en-GB", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
+        throw new SkillError(
+          "source_rate_limited",
+          429,
+          `GitHub limit reached; resets at ${time}. Add a token for more.`,
+        );
+      }
       if (api.status === 304) {
         this.db
           .prepare(
