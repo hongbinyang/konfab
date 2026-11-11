@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { z, ZodError } from "zod";
 import { parseDocument } from "yaml";
 import { SkillError } from "../domain/skill-error.js";
+import { skillMetadata } from "../domain/skill-files.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
 import type { RoleLibrary } from "../domain/roles.js";
@@ -546,6 +547,44 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .object({ q: z.string().max(200).default("") })
       .parse(request.query);
     return sourceService().browse(id, q);
+  });
+  app.get("/api/library/live", async (request) => {
+    const { q } = z
+      .object({ q: z.string().max(200).default("") })
+      .parse(request.query);
+    return sourceService().live.search(q);
+  });
+  app.get("/api/library/live/preview", async (request) => {
+    const query = z
+      .object({
+        source_id: z.string().uuid(),
+        commit: z.string().regex(/^[a-f0-9]{40}$/),
+        path: z.string().min(1).max(1024),
+      })
+      .parse(request.query);
+    return sourceService().live.preview(
+      query.source_id,
+      query.commit,
+      query.path,
+    );
+  });
+  app.get("/api/library/live/file", async (request) => {
+    const query = z
+      .object({
+        source_id: z.string().uuid(),
+        commit: z.string().regex(/^[a-f0-9]{40}$/),
+        path: z.string().min(1).max(1024),
+        file: z.string().min(1).max(1024),
+      })
+      .parse(request.query);
+    return {
+      content_base64: await sourceService().live.previewFile(
+        query.source_id,
+        query.commit,
+        query.path,
+        query.file,
+      ),
+    };
   });
   app.get("/api/library/public", async (request) => {
     const { q } = z
@@ -1215,6 +1254,98 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       )
         throw new SkillError("name_conflict", 409, "Skill name already exists");
       return { ok: true };
+    },
+  );
+  app.post(
+    "/api/rooms/:id/members/:agentId/role-from-public",
+    async (request) => {
+      const params = memberParams.parse(request.params);
+      const body = z
+        .object({
+          source_id: z.string().uuid(),
+          scope: z.enum(["personal", "project"]).default("personal"),
+          custom_manifest: z.string().max(512000).optional(),
+          copy_name: z.string().min(1).max(128).optional(),
+          commit: z.string().regex(/^[a-f0-9]{40}$/),
+          path: z.string().min(1).max(1024),
+          preview_hash: z.string().regex(/^[a-f0-9]{64}$/),
+          role_name: z.string().min(1).max(128),
+          title: z.string().min(1).max(100),
+          description: z.string().min(1).max(1024),
+          notes: z.string().max(4000).default(""),
+          base_revision: z.number().int().nonnegative().optional(),
+        })
+        .parse(request.body);
+      roleService().checkPersonalName(body.role_name);
+      const { library, libraryId } = skillScope(body.scope, params.id, true);
+      if (!libraryId)
+        throw new SkillError(
+          "unavailable",
+          404,
+          "Personal skill library unavailable",
+        );
+      const pack = await sourceService().live.packageFiles(
+        body.source_id,
+        body.commit,
+        body.path,
+        body.preview_hash,
+      );
+      if (body.custom_manifest !== undefined) {
+        if (!body.copy_name)
+          throw new SkillError(
+            "invalid_skill",
+            400,
+            "Enter a name for the skill copy.",
+          );
+        const manifest = pack.files.find((file) => file.path === "SKILL.md");
+        if (!manifest)
+          throw new SkillError("invalid_skill", 400, "SKILL.md is required");
+        manifest.content = Buffer.from(body.custom_manifest);
+      }
+      const metadata = skillMetadata(pack.files);
+      if (
+        body.custom_manifest !== undefined &&
+        metadata.name !== body.copy_name
+      )
+        throw new SkillError(
+          "invalid_skill",
+          400,
+          "SKILL.md name must match the skill copy name.",
+        );
+      const skillId = library.importFiles(
+        libraryId,
+        metadata.name,
+        pack.files,
+        { ...pack.provenance, customized: body.custom_manifest !== undefined },
+        pack.licence,
+      );
+      const detail = library.detail(skillId);
+      try {
+        const result = roleService().createAndAssignSkill({
+          roomId: params.id,
+          agentId: params.agentId,
+          libraryId,
+          skillId,
+          skillRevision: String(detail.current_revision_id),
+          name: body.role_name,
+          title: body.title,
+          description: body.description,
+          instructions: `Follow the ${metadata.name} skill.`,
+          notes: body.notes,
+          baseRevision: body.base_revision,
+          review: true,
+        });
+        service.rolesChanged(params.id, params.agentId);
+        return result;
+      } catch (error) {
+        const detail =
+          error instanceof Error ? error.message : "Assignment failed";
+        throw new SkillError(
+          "assignment_incomplete",
+          409,
+          `${detail} The skill was saved to the selected library; review it there before retrying.`,
+        );
+      }
     },
   );
   app.post(

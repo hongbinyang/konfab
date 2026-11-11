@@ -1,9 +1,16 @@
 import { Writable } from "node:stream";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../../src/server/api/app.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { SkillLibrary } from "../../src/server/domain/skills.js";
@@ -19,6 +26,7 @@ describe("page API", () => {
   let service: KonfabService;
   let app: FastifyInstance;
   let sources: SkillSources;
+  let sourceFetch: typeof fetch;
   let cookie: string;
   let attachmentDir: string;
 
@@ -43,10 +51,11 @@ describe("page API", () => {
     });
     service.ensureAgent("claude", "Claude");
     service.ensureAgent("codex", "Codex");
+    sourceFetch = async () => {
+      throw new Error("unexpected network request");
+    };
     sources = new SkillSources(db, {
-      fetch: async () => {
-        throw new Error("unexpected network request");
-      },
+      fetch: (input, init) => sourceFetch(input, init),
     });
     const roles = new RoleLibrary(db);
     roles.seedBuiltins("src/server/roles/builtin");
@@ -111,6 +120,126 @@ describe("page API", () => {
       description: "ok",
     });
     expect(metadata.json().message).toContain("Title");
+  });
+
+  it("discovers, previews and assigns a pinned public skill without persisting the search", async () => {
+    const commit = "a".repeat(40);
+    const manifest =
+      "---\nname: public-sample\ndescription: Invoice workflow\nlicense: MIT\n---\nBody";
+    const hash = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(manifest)}\0`)
+      .update(manifest)
+      .digest("hex");
+    sourceFetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/commits/"))
+        return new Response(JSON.stringify({ sha: commit }));
+      if (url.includes("/git/trees/"))
+        return new Response(
+          JSON.stringify({
+            truncated: false,
+            tree: [
+              {
+                path: "skills/public-sample/SKILL.md",
+                type: "blob",
+                mode: "100644",
+                sha: hash,
+                size: Buffer.byteLength(manifest),
+              },
+            ],
+          }),
+        );
+      return new Response(manifest);
+    };
+    const room = service.createRoom("live-picker", "", ["codex"]);
+    const snapshotFiles = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true })
+        .flatMap((entry) => {
+          const path = join(dir, entry.name);
+          return entry.isDirectory()
+            ? snapshotFiles(path)
+            : [
+                `${path.slice(attachmentDir.length)}:${createHash("sha256").update(readFileSync(path)).digest("hex")}`,
+              ];
+        })
+        .sort();
+    const snapshotRows = () =>
+      (
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+          )
+          .all() as Array<{ name: string }>
+      ).map(({ name }) => [
+        name,
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM "${name.replaceAll('"', '""')}"`,
+            )
+            .get() as { n: number }
+        ).n,
+      ]);
+    const beforeFiles = snapshotFiles(attachmentDir);
+    const beforeRows = snapshotRows();
+    const before = db.prepare("SELECT COUNT(*) AS count FROM skills").get() as {
+      count: number;
+    };
+    await call("GET", "/api/library/live?q=invoice");
+    await vi.waitFor(async () =>
+      expect(
+        (await call("GET", "/api/library/live?q=invoice")).json().items.length,
+      ).toBeGreaterThan(0),
+    );
+    const result = (await call("GET", "/api/library/live?q=invoice")).json()
+      .items[0];
+    const query = new URLSearchParams({
+      source_id: result.source_id,
+      commit,
+      path: result.path,
+    });
+    const preview = (
+      await call("GET", `/api/library/live/preview?${query}`)
+    ).json();
+    expect(preview.content).toBe(manifest);
+    const previewFile = new URLSearchParams({
+      source_id: result.source_id,
+      commit,
+      path: result.path,
+      file: "SKILL.md",
+    });
+    expect(
+      (await call("GET", `/api/library/live/file?${previewFile}`)).statusCode,
+    ).toBe(200);
+    expect(snapshotFiles(attachmentDir)).toEqual(beforeFiles);
+    expect(snapshotRows()).toEqual(beforeRows);
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM skills").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(before.count);
+    const assigned = await call(
+      "POST",
+      `/api/rooms/${room.id}/members/codex/role-from-public`,
+      {
+        source_id: result.source_id,
+        commit,
+        path: result.path,
+        preview_hash: preview.preview_hash,
+        role_name: "public-sample",
+        title: "Public sample",
+        description: "Invoice workflow",
+        base_revision: 0,
+      },
+    );
+    expect(assigned.statusCode).toBe(200);
+    expect(
+      (
+        await call("GET", `/api/rooms/${room.id}/members/codex/role-preview`)
+      ).json().role.title,
+    ).toBe("Public sample");
   });
 
   it("assigns a pinned built-in role and serves its preview", async () => {

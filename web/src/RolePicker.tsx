@@ -20,7 +20,32 @@ type Skill = {
   reviewed_at: number | null;
   licence: string | null;
 };
+type PublicItem = {
+  source_id: string;
+  source: string;
+  badge: string;
+  commit: string;
+  path: string;
+  name: string;
+  description: string | null;
+  licence: string | null;
+  diagnostic: string | null;
+};
+const resultKey = (item: Result): string =>
+  item.kind === "role"
+    ? `role:${item.role.id}`
+    : item.kind === "skill"
+      ? `${item.scope}:${item.skill.id}`
+      : `public:${item.public.source_id}:${item.public.path}:${item.public.commit}`;
+type SourceProgress = {
+  source: string;
+  done: number;
+  total: number;
+  complete: boolean;
+  error: string | null;
+};
 type Result =
+  | { kind: "public"; public: PublicItem }
   | { kind: "role"; role: Role }
   | { kind: "skill"; skill: Skill; scope: "personal" | "project" };
 
@@ -45,8 +70,12 @@ export function RolePicker({
   const [results, setResults] = useState<Result[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<
-    "all" | "roles" | "personal" | "project"
+    "all" | "roles" | "personal" | "project" | "public"
   >("all");
+  const [publicItems, setPublicItems] = useState<PublicItem[]>([]);
+  const [progress, setProgress] = useState<SourceProgress[]>([]);
+  const [publicHash, setPublicHash] = useState("");
+  const [previewLicence, setPreviewLicence] = useState<string | null>(null);
   const [selected, setSelected] = useState<Result | null>(null);
   const [preview, setPreview] = useState("");
   const [filePreview, setFilePreview] = useState("");
@@ -123,6 +152,33 @@ export function RolePicker({
       active = false;
     };
   }, [roomId, agentId]);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const response = await request<{
+          items: PublicItem[];
+          sources: SourceProgress[];
+        }>(`/api/library/live?q=${encodeURIComponent(query)}`);
+        if (!active) return;
+        setPublicItems(response.items);
+        setProgress(response.sources);
+        if (response.sources.some((source) => !source.complete))
+          timer = setTimeout(() => void poll(), 1000);
+      } catch (e) {
+        if (active)
+          setError(
+            e instanceof Error ? e.message : "Public search unavailable",
+          );
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [query]);
   const choose = async (item: Result) => {
     const version = ++selectionVersion.current;
     setSelected(item);
@@ -132,6 +188,8 @@ export function RolePicker({
     setError("");
     setCustomize(false);
     setCopyId("");
+    setPublicHash("");
+    setPreviewLicence(null);
     try {
       if (item.kind === "role") {
         const result = await request<{ role_md: string }>(
@@ -139,6 +197,56 @@ export function RolePicker({
         );
         if (version !== selectionVersion.current) return;
         setPreview(result.role_md);
+      } else if (item.kind === "public") {
+        const value = item.public;
+        const params = new URLSearchParams({
+          source_id: value.source_id,
+          commit: value.commit,
+          path: value.path,
+        });
+        const data = await request<{
+          content: string;
+          preview_hash: string;
+          licence: string | null;
+          files: Array<{ path: string; size: number }>;
+        }>(`/api/library/live/preview?${params}`);
+        if (version !== selectionVersion.current) return;
+        setPreview(data.content);
+        setFiles(data.files);
+        setPublicHash(data.preview_hash);
+        setPreviewLicence(data.licence);
+        const taken = new Set(
+          results
+            .filter((entry) => entry.kind === "role")
+            .map((entry) => (entry.kind === "role" ? entry.role.name : "")),
+        );
+        const base = suggestName(value.name) || "skill";
+        let candidate = base;
+        let n = 2;
+        while (taken.has(candidate)) {
+          const suffix = `-${n++}`;
+          candidate = `${[...base]
+            .slice(0, 64 - suffix.length)
+            .join("")
+            .replace(/-+$/, "")}${suffix}`;
+        }
+        setName(candidate);
+        setTitle(value.name);
+        setDescription(value.description || value.name);
+        setInstructions(`Follow the ${value.name} skill.`);
+        const proposed = suggestName(`${value.name}-copy`);
+        setCopyName(proposed);
+        setCopyScope("personal");
+        const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(
+          data.content,
+        );
+        if (match?.[1]) {
+          const doc = parseDocument(match[1]);
+          doc.set("name", proposed);
+          setManifestDraft(
+            `---\n${doc.toString()}---\n${data.content.slice(match[0].length)}`,
+          );
+        } else setManifestDraft(data.content);
       } else {
         const { skill } = item;
         const root = `/api/library/skills/${skill.id}/revisions/${skill.current_revision_id}`;
@@ -210,16 +318,23 @@ export function RolePicker({
       assign.current?.focus();
     }
   }, [preview]);
-  const items = results.filter((item) => {
+  const items: Result[] = [
+    ...results,
+    ...publicItems.map((item): Result => ({ kind: "public", public: item })),
+  ].filter((item) => {
     const matchesFilter =
       filter === "all" ||
       (filter === "roles"
         ? item.kind === "role"
-        : item.kind === "skill" && item.scope === filter);
+        : filter === "public"
+          ? item.kind === "public"
+          : item.kind === "skill" && item.scope === filter);
     const text =
       item.kind === "role"
         ? `${item.role.title} ${item.role.description}`
-        : `${item.skill.name} ${item.skill.description}`;
+        : item.kind === "public"
+          ? `${item.public.path} ${item.public.name} ${item.public.description ?? ""}`
+          : `${item.skill.name} ${item.skill.description}`;
     return matchesFilter && text.toLowerCase().includes(query.toLowerCase());
   });
   const submit = async () => {
@@ -241,7 +356,33 @@ export function RolePicker({
             },
           },
         );
-      else {
+      else if (selected.kind === "public") {
+        const item = selected.public;
+        const result = await request<{ pending: boolean }>(
+          `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/role-from-public`,
+          {
+            method: "POST",
+            body: {
+              source_id: item.source_id,
+              commit: item.commit,
+              path: item.path,
+              preview_hash: publicHash,
+              scope: customize ? copyScope : "personal",
+              custom_manifest: customize ? manifestDraft : undefined,
+              copy_name: customize ? copyName : undefined,
+              role_name: name,
+              title,
+              description,
+              notes,
+              base_revision: baseRevision,
+            },
+          },
+        );
+        if (result.pending) {
+          setError("Assigned, but the role folder needs recovery.");
+          return;
+        }
+      } else {
         let skillId = selected.skill.id;
         let skillRevision = selected.skill.current_revision_id;
         let scope = selected.scope;
@@ -399,6 +540,7 @@ export function RolePicker({
                 ["roles", "My roles"],
                 ["personal", "My skills"],
                 ["project", "Project"],
+                ["public", "Public"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -411,15 +553,30 @@ export function RolePicker({
               </button>
             ))}
           </div>
+          {progress.map((source) => (
+            <p key={source.source} role="status">
+              {source.error
+                ? `${source.source}: ${source.error}`
+                : !source.complete
+                  ? `Searching ${source.source} descriptions… ${source.done}/${source.total}`
+                  : ""}
+            </p>
+          ))}
           {items.length === 0 && <p>No matching roles or skills.</p>}
           <ul>
             {items.map((item) => {
               const id =
                 item.kind === "role"
                   ? item.role.id
-                  : `${item.scope}:${item.skill.id}`;
+                  : item.kind === "public"
+                    ? `${item.public.source_id}:${item.public.path}`
+                    : `${item.scope}:${item.skill.id}`;
               const label =
-                item.kind === "role" ? item.role.title : item.skill.name;
+                item.kind === "role"
+                  ? item.role.title
+                  : item.kind === "public"
+                    ? item.public.name
+                    : item.skill.name;
               return (
                 <li key={id}>
                   <button
@@ -429,7 +586,11 @@ export function RolePicker({
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        if (selected === item && preview)
+                        if (
+                          selected &&
+                          resultKey(selected) === resultKey(item) &&
+                          preview
+                        )
                           assign.current?.focus();
                         else {
                           focusAssignOnPreview.current = true;
@@ -451,14 +612,19 @@ export function RolePicker({
                           ?.focus();
                       }
                     }}
-                    aria-pressed={selected === item}
+                    aria-pressed={
+                      selected !== null &&
+                      resultKey(selected) === resultKey(item)
+                    }
                   >
                     {label} ·{" "}
                     {item.kind === "role"
                       ? "Role"
-                      : item.scope === "project"
-                        ? "Project skill"
-                        : "My skill"}
+                      : item.kind === "public"
+                        ? `Public · ${item.public.source}`
+                        : item.scope === "project"
+                          ? "Project skill"
+                          : "My skill"}
                   </button>
                 </li>
               );
@@ -477,17 +643,22 @@ export function RolePicker({
                   {files.map((file) => (
                     <li key={file.path}>
                       {file.path} ({file.size} bytes){" "}
-                      {selected.kind === "skill" && (
+                      {(selected.kind === "skill" ||
+                        selected.kind === "public") && (
                         <button
                           type="button"
                           onClick={() =>
                             void (async () => {
                               try {
+                                const url =
+                                  selected.kind === "skill"
+                                    ? `/api/library/skills/${selected.skill.id}/revisions/${selected.skill.current_revision_id}/files?path=${encodeURIComponent(file.path)}`
+                                    : selected.kind === "public"
+                                      ? `/api/library/live/file?${new URLSearchParams({ source_id: selected.public.source_id, commit: selected.public.commit, path: selected.public.path, file: file.path })}`
+                                      : "";
                                 const data = await request<{
                                   content_base64: string;
-                                }>(
-                                  `/api/library/skills/${selected.skill.id}/revisions/${selected.skill.current_revision_id}/files?path=${encodeURIComponent(file.path)}`,
-                                );
+                                }>(url);
                                 setFilePreview(
                                   new TextDecoder().decode(
                                     Uint8Array.from(
@@ -514,15 +685,26 @@ export function RolePicker({
                 </ul>
               )}
               {filePreview && <pre>{filePreview}</pre>}
-              {selected.kind === "skill" && (
+              {selected.kind === "public" && (
+                <p>
+                  Public · {selected.public.source} ·{" "}
+                  {selected.public.commit.slice(0, 12)} · Licence:{" "}
+                  {previewLicence ?? "Not specified"}. Preview only; the skill
+                  is saved when assigned.
+                </p>
+              )}
+              {(selected.kind === "skill" ||
+                (selected.kind === "public" && customize)) && (
                 <>
-                  <p>
-                    Licence: {selected.skill.licence ?? "Not specified"} ·{" "}
-                    {selected.skill.reviewed_at
-                      ? "Reviewed"
-                      : "Review required"}
-                  </p>
-                  {!selected.skill.reviewed_at && (
+                  {selected.kind === "skill" && (
+                    <p>
+                      Licence: {selected.skill.licence ?? "Not specified"} ·{" "}
+                      {selected.skill.reviewed_at
+                        ? "Reviewed"
+                        : "Review required"}
+                    </p>
+                  )}
+                  {selected.kind === "skill" && !selected.skill.reviewed_at && (
                     <button
                       type="button"
                       disabled={!preview || busy}
@@ -650,7 +832,7 @@ export function RolePicker({
         </section>
       </div>
       <footer>
-        {selected?.kind === "skill" && (
+        {(selected?.kind === "skill" || selected?.kind === "public") && (
           <button type="button" onClick={() => setCustomize(!customize)}>
             {customize ? "Back to preview" : "Customize"}
           </button>
@@ -663,6 +845,10 @@ export function RolePicker({
             !selected ||
             !preview ||
             baseRevision === undefined ||
+            (selected.kind === "public" &&
+              (!publicHash ||
+                !validName(name) ||
+                (customize && (!validName(copyName) || !manifestDraft)))) ||
             (selected.kind === "skill" &&
               ((customize &&
                 (!validName(copyName) || !manifestDraft || !!copyId)) ||
@@ -674,7 +860,8 @@ export function RolePicker({
         >
           {customize
             ? "Save and assign"
-            : selected?.kind === "skill" && !selected.skill.reviewed_at
+            : selected?.kind === "public" ||
+                (selected?.kind === "skill" && !selected.skill.reviewed_at)
               ? `Review & assign to ${agentName}`
               : `Assign to ${agentName}`}
         </button>
