@@ -79,7 +79,9 @@ export type WaitResult = (
       room: string;
       topic: string;
       rules: string;
-      role?: ReturnType<RoleLibrary["envelope"]>;
+      role?:
+        | ReturnType<RoleLibrary["envelope"]>
+        | { changed: true; notice: string; removed?: true };
       messages: MessageView[];
       truncated: boolean;
       decisions: DecisionView[];
@@ -635,6 +637,7 @@ export class KonfabService {
         current.role_assignment_revision !== (settings.base_role_revision ?? 0)
       )
         throw new KonfabError("role_conflict", 409, "Role assignment changed");
+      new RoleLibrary(this.db).snapshotActiveTurn(room.id, agentId);
       this.db
         .prepare(
           "DELETE FROM room_member_roles WHERE room_id = ? AND agent_id = ?",
@@ -3638,22 +3641,77 @@ export class KonfabService {
     const savedRole = this.db
       .prepare("SELECT role_envelope_json FROM turns WHERE id = ?")
       .get(turn.id) as { role_envelope_json: string | null };
-    let roleEnvelope: ReturnType<RoleLibrary["envelope"]>;
+    let roleEnvelope:
+      | ReturnType<RoleLibrary["envelope"]>
+      | { changed: true; notice: string; removed?: true };
     if (savedRole.role_envelope_json !== null) {
-      roleEnvelope = JSON.parse(savedRole.role_envelope_json) as ReturnType<
-        RoleLibrary["envelope"]
-      >;
+      roleEnvelope = JSON.parse(
+        savedRole.role_envelope_json,
+      ) as typeof roleEnvelope;
     } else {
       roleEnvelope = this.db.transaction(() => {
+        const current = this.db
+          .prepare(
+            `SELECT m.delivered_role_identity, m.delivered_role_label,
+          json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS identity,
+          COALESCE(r.title,CASE WHEN length(trim(m.role))>0 THEN 'custom role' ELSE 'no role' END) AS label
+          FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id
+          LEFT JOIN role_revisions r ON r.id=p.role_revision_id WHERE m.room_id=? AND m.agent_id=?`,
+          )
+          .get(room.id, turn.agent_id) as {
+          delivered_role_identity: string;
+          delivered_role_label: string;
+          identity: string;
+          label: string;
+        };
+        type Identity = {
+          role: string;
+          role_id: string | null;
+          revision: string | null;
+          notes: string | null;
+        };
+        const before = JSON.parse(current.delivered_role_identity) as Identity;
+        const after = JSON.parse(current.identity) as Identity;
+        const changed = current.identity !== current.delivered_role_identity;
         const role = new RoleLibrary(this.db).envelope(
           room.id,
           turn.agent_id,
           true,
+          changed,
         );
+        let delivered: typeof roleEnvelope = role;
+        if (changed) {
+          const first = !before.role_id && !before.role;
+          const removed = !after.role_id && !after.role;
+          const notesOnly =
+            !!after.role_id &&
+            before.role_id === after.role_id &&
+            before.revision === after.revision &&
+            before.role === after.role;
+          const notice = notesOnly
+            ? `Your room notes for ${current.label} changed: ${after.notes || "(none)"}. Your role and duties remain the same.`
+            : first
+              ? `You have been assigned the role ${current.label}. Read it before continuing.`
+              : removed
+                ? `Your role ${current.delivered_role_label} was removed. Stop its duties and hand over open work, branches, reviews and pending pushes.`
+                : `Your role changed from ${current.delivered_role_label} to ${current.label}. Stop your previous role's duties, read your new role, and hand over open work, branches, reviews and pending pushes.`;
+          delivered = role
+            ? { ...role, notice }
+            : {
+                changed: true,
+                notice,
+                ...(removed ? { removed: true as const } : {}),
+              };
+          this.db
+            .prepare(
+              "UPDATE room_members SET delivered_role_identity=?, delivered_role_label=? WHERE room_id=? AND agent_id=?",
+            )
+            .run(current.identity, current.label, room.id, turn.agent_id);
+        }
         this.db
           .prepare("UPDATE turns SET role_envelope_json = ? WHERE id = ?")
-          .run(JSON.stringify(role), turn.id);
-        return role;
+          .run(JSON.stringify(delivered), turn.id);
+        return delivered;
       })();
     }
     const member = this.db
@@ -3811,6 +3869,29 @@ export class KonfabService {
       )
       .run(this.now(), turn.id);
     this.enqueue(turn.room_id, turn.agent_id, turn.reason);
+    const prior = this.db
+      .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
+      .get(turn.id) as { role_envelope_json: string | null };
+    const identity = this.db
+      .prepare(
+        `SELECT m.delivered_role_identity, json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS current_identity FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
+      )
+      .get(turn.room_id, turn.agent_id) as
+      { delivered_role_identity: string; current_identity: string } | undefined;
+    if (
+      prior.role_envelope_json &&
+      identity?.delivered_role_identity === identity?.current_identity
+    ) {
+      const role = JSON.parse(prior.role_envelope_json) as {
+        notice?: string;
+      } | null;
+      if (role?.notice)
+        this.db
+          .prepare(
+            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND state='queued' AND role_envelope_json IS NULL",
+          )
+          .run(prior.role_envelope_json, turn.room_id, turn.agent_id);
+    }
     this.db
       .prepare(
         `UPDATE turns SET timeout_retry_count = MAX(timeout_retry_count, ?),
