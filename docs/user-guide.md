@@ -114,6 +114,8 @@ Record results as you go.
 
 ## Local skill library
 
+For a step-by-step walkthrough from finding a skill to assigning and updating a role, see [Skills and roles: lifecycle guide](skills-and-roles.md).
+
 Choose **Library** in the sidebar to manage personal skills. To use a project library, first set an existing absolute **Project folder** in a room's Edit form, select that room, and choose **Project** in the library. Personal skills live under the Konfab home in `skills/`; project skills live under `.konfab/skills/` in the selected project. Existing standard skill folders appear as **Untracked** and can be adopted.
 
 Choose **Public** to manage remote source indexes. Opening the tab never contacts GitHub. Select **Fetch** for an enabled source after reviewing the download notice; later updates use **Refresh**. Konfab stores a complete index at the resolved commit, so search and preview continue to work when GitHub is unavailable. Search covers all enabled cached sources at once. A failed or rate-limited refresh leaves the previous cached commit in place. Suggested sources are disabled until you enable them, and custom sources accept a public GitHub owner and repository.
