@@ -44,6 +44,9 @@ const defaultsSchema = z.object({
 });
 
 const configSchema = z.object({
+  connectors: z
+    .object({ install: z.enum(["user", "manual"]).default("user") })
+    .default({ install: "user" }),
   server: z
     .object({
       port: z.number().int().min(1024).max(65535).default(8787),

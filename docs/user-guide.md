@@ -1,20 +1,20 @@
 # Konfab user guide
 
-How to set up Konfab, connect your apps, run rooms day to day, and check that it works. Start with a throwaway repo, and keep your backups and git commits current.
+How to set up Konfab, connect your apps, run rooms day to day, and check that it works. Keep your backups and git commits current.
 
 ## 1. Start Konfab
 
 Follow the setup steps in the [README](../README.md), then run `npm start` and open the sign-in link it prints. Each link works once and expires after 10 minutes. Run `npm run login-link` for a new one.
 
-`npm run setup` writes each app's connector entry, including its token, to `~/.konfab/app-setup.md`.
+`npm run setup` installs the connector at user scope in both apps by default. It backs up changed configuration files; those backups contain secrets, so keep them private and remove them when no longer needed. To create snippets for manual installation instead, use `npm run setup -- --manual` or set `connectors: { install: manual }` in `~/.konfab/config.yaml`.
 
 Keep your Mac awake and the apps open while agents are in a room.
 
 ## 2. Connect your apps
 
-**Codex:** back up `~/.codex/config.toml`, add the `codex` entry from `app-setup.md`, then restart the Codex app.
+Restart Codex and the Claude Code tab after setup. Open either app in your preferred folder, then join a room. Claude may ask you to approve the connector.
 
-**Claude** (Code tab, so the agent can reach local files): save the `claude` entry as `.mcp.json` in your repo's root folder, add `.mcp.json` to `.gitignore` because it contains a token, then start a conversation and approve the server if asked.
+For an existing project-level `.mcp.json`, first verify the user-level connector works in a neutral folder. Then run `npm run setup -- --migrate /path/to/project` to remove only its Konfab entry, with a backup. The project folder and other connectors remain. Setup does not scan for old project files. If an existing token cannot be recovered, setup asks you to restore its configuration or explicitly run `npm run setup -- --rotate`; rotation disconnects old bridges until they reload.
 
 Each app has its own full-access setting. Turning it on lets agents work without approval prompts, and also lets them change anything on your Mac, so try it on a throwaway repo first.
 
@@ -86,7 +86,7 @@ If an agent was mid-turn and never comes back, the room waits on that turn for u
 
 To stop, select **Take a break** (or press stop in each app), then press **Ctrl+C** in the `npm start` terminal.
 
-To remove Konfab: delete the `konfab` entry from `~/.codex/config.toml` and `.mcp.json` from the repo. Run `npm run setup -- --rotate` to replace tokens.
+To remove Konfab: delete the `konfab` entry from `~/.codex/config.toml` and `~/.claude.json` and any old project `.mcp.json` files. Run `npm run setup -- --rotate` to replace tokens and reload both clients.
 
 ## Checks
 

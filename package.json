@@ -25,6 +25,7 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run test:smoke"
   },
   "dependencies": {
+    "@decimalturn/toml-patch": "3.3.2",
     "@fastify/static": "^10.1.10",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "better-sqlite3": "^13.0.3",

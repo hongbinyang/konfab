@@ -151,6 +151,7 @@ describe("built app over real processes", () => {
       join(home, "config.yaml"),
       [
         `server:\n  port: ${port}\n  tick_seconds: 1`,
+        "connectors:\n  install: manual",
         "defaults:",
         `  wait_timeout_seconds: ${WAIT_SECONDS}`,
         "  auto_continue_delay_seconds: 10",
