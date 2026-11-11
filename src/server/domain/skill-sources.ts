@@ -7,6 +7,7 @@ import { extractVerifiedPackage, indexArchive } from "./source-archive.js";
 import { skillMetadata, type SkillFile } from "./skill-files.js";
 import { SkillError } from "./skill-error.js";
 import { GitHubClient } from "./github-client.js";
+import { LiveSources } from "./live-sources.js";
 
 const DEFAULTS = [
   ["anthropics", "skills", "vendor", 1],
@@ -42,6 +43,7 @@ export type SourceOptions = {
 
 export class SkillSources {
   private readonly github: GitHubClient;
+  readonly live: LiveSources;
   private readonly now: () => number;
   private readonly cacheBytes: number;
   private readonly token: string | undefined;
@@ -62,6 +64,12 @@ export class SkillSources {
     this.now = options.now ?? Date.now;
     this.cacheBytes = options.cacheBytes ?? 500 * 1024 * 1024;
     this.token = options.token;
+    this.live = new LiveSources(
+      this.github,
+      () => this.list(),
+      () => (this.tokenState().enabled ? this.token : undefined),
+      this.now,
+    );
     this.notify = options.notify ?? (() => {});
     this.db.transaction(() => {
       this.db
@@ -361,6 +369,7 @@ export class SkillSources {
     await this.job?.promise;
   }
   async close(): Promise<void> {
+    this.live.close();
     this.job?.controller.abort();
     await this.job?.promise;
   }
