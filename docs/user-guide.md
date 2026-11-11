@@ -142,6 +142,10 @@ Record results as you go.
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |
 
+## Advisory write locks
+
+Before agents write to a shared checkout or push, they should call **acquire_lock** with the same resource key, such as `repo:/absolute/path#main`, and release it when finished. A room with a project folder supplies a suggested key for its main branch; use the actual branch for other work. Repository paths are resolved to their real path, and branch names are case-sensitive. Locks are advisory: they cannot prevent another app or external tool from writing or pushing. They expire after 30 minutes by default (renewable, up to four hours) and are released when the holding session ends or is replaced. The room shows active locks; the lead can force-release one, but the holder may still be writing.
+
 ## Multiple agents in one app
 
 In a room's **Agents** panel, choose **+ Add agent** under an app. Choose an agent ID and display name; **Add to this room** is selected by default. Copy the new agent's join prompt and paste it into a separate conversation in that desktop app. Each agent has its own room session and role; joining again as the same agent replaces its earlier session in that room. Conversations can wait at the same time, and the room gives one agent a turn at a time.

@@ -444,6 +444,36 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     );
   });
 
+  app.post("/agent/lock/acquire", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z
+      .object({
+        ...session,
+        resource: z.string().min(1).max(1000),
+        purpose: z.string().min(1).max(300),
+        lease_minutes: z.number().int().min(1).max(240).default(30),
+      })
+      .parse(request.body);
+    return repeatMutation(request, agentId, () =>
+      service.acquireLock(
+        agentId,
+        body.session_id,
+        body.resource,
+        body.purpose,
+        body.lease_minutes,
+      ),
+    );
+  });
+  app.post("/agent/lock/release", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z
+      .object({ ...session, resource: z.string().min(1).max(1000) })
+      .parse(request.body);
+    return repeatMutation(request, agentId, () =>
+      service.releaseLock(agentId, body.session_id, body.resource),
+    );
+  });
+
   app.post("/agent/read-role", async (request) => {
     const agentId = requireAgent(request);
     const body = z.object(session).parse(request.body);
@@ -1572,6 +1602,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .object({ agentId: z.string().min(1) })
       .parse(request.params);
     service.archiveAppAgent(agentId);
+    return { ok: true };
+  });
+
+  app.post("/api/rooms/:id/locks/release", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const body = z
+      .object({ resource: z.string().min(1).max(1000) })
+      .parse(request.body);
+    service.forceReleaseLock(id, body.resource);
     return { ok: true };
   });
 

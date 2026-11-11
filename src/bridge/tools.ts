@@ -109,6 +109,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "/agent/join",
       "/agent/permission",
       "/agent/report",
+      "/agent/lock/acquire",
+      "/agent/lock/release",
     ].includes(path);
     let protocolChecked = !receiptProtected;
     const send = async () => {
@@ -170,6 +172,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     };
     // Mutations use stable turn/proposal IDs or durable server receipts.
     const repeatSafe = new Set([
+      "/agent/lock/acquire",
+      "/agent/lock/release",
       "/agent/join",
       "/agent/permission",
       "/agent/report",
@@ -230,6 +234,48 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   };
 
   const server = new McpServer({ name: "konfab", version: "0.1.0" });
+
+  server.registerTool(
+    "acquire_lock",
+    {
+      description:
+        "Acquire or renew an advisory write lock. All collaborators must use the same resource key; it does not enforce filesystem access.",
+      inputSchema: {
+        session_id: z.string(),
+        resource: z.string().min(1).max(1000),
+        purpose: z.string().min(1).max(300),
+        lease_minutes: z.number().int().min(1).max(240).optional(),
+      },
+    },
+    async (body, extra) => {
+      try {
+        return asToolResult(
+          await call("/agent/lock/acquire", body, extra.signal),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+  server.registerTool(
+    "release_lock",
+    {
+      description: "Release a write lock held by this session.",
+      inputSchema: {
+        session_id: z.string(),
+        resource: z.string().min(1).max(1000),
+      },
+    },
+    async (body, extra) => {
+      try {
+        return asToolResult(
+          await call("/agent/lock/release", body, extra.signal),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
 
   server.registerTool(
     "read_role",

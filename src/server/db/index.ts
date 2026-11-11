@@ -466,6 +466,14 @@ const MIGRATIONS: readonly string[] = [
   UPDATE agents SET app_id=id;
   CREATE INDEX agents_by_app ON agents(app_id,archived_at);
   `,
+  `
+  CREATE TABLE write_locks (
+    resource TEXT PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id), session_id TEXT NOT NULL REFERENCES sessions(id),
+    purpose TEXT NOT NULL, acquired_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX write_locks_session ON write_locks(session_id);
+  `,
 ];
 
 export function openDatabase(path: string): Db {

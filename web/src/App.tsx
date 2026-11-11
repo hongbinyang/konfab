@@ -2413,6 +2413,40 @@ function Agents({
                       </>
                     )}
                   </div>
+                  {room.locks
+                    .filter((lock) => lock.agent_id === agent.id)
+                    .map((lock) => (
+                      <div className="lock-chip" key={lock.resource}>
+                        <span>
+                          🔒 Advisory lock: {lock.resource} · {lock.purpose} ·
+                          expires {formatTime(lock.expires_at)}
+                        </span>{" "}
+                        {!room.room.archived && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Force-release the advisory lock ${lock.resource}? The holder may still be writing.`,
+                                )
+                              )
+                                void act(() =>
+                                  request(
+                                    `/api/rooms/${room.room.id}/locks/release`,
+                                    {
+                                      method: "POST",
+                                      body: { resource: lock.resource },
+                                    },
+                                  ),
+                                );
+                            }}
+                          >
+                            Force-release
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   {overview.reports
                     .filter(
                       (report) =>
