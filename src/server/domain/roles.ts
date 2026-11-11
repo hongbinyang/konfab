@@ -930,6 +930,133 @@ export class RoleLibrary {
     return id;
   }
 
+  checkPersonalName(name: string): void {
+    if (!validSkillName(name))
+      throw new SkillError("invalid_role", 400, invalidNameMessage(name));
+    const library = this.db
+      .prepare("SELECT root_path FROM role_libraries WHERE id = 'personal'")
+      .get() as { root_path: string } | undefined;
+    if (!library)
+      throw new SkillError("unavailable", 404, "Personal role library missing");
+    if (
+      existsSync(join(library.root_path, name)) ||
+      this.db
+        .prepare(
+          "SELECT 1 FROM roles WHERE library_id = 'personal' AND folder_name = ?",
+        )
+        .get(name)
+    )
+      throw new SkillError("name_conflict", 409, "Role name already exists");
+  }
+
+  createAndAssignSkill(input: {
+    roomId: number;
+    agentId: string;
+    libraryId: string;
+    skillId: string;
+    skillRevision: string;
+    name: string;
+    title: string;
+    description: string;
+    instructions: string;
+    notes: string;
+    baseRevision?: number;
+    review?: boolean;
+  }): { id: string; revision: string; pending: boolean } {
+    const library = this.db
+      .prepare(
+        "SELECT kind, root_path FROM role_libraries WHERE id = 'personal'",
+      )
+      .get() as { kind: string; root_path: string } | undefined;
+    if (!library || library.kind !== "personal")
+      throw new SkillError("unavailable", 404, "Personal role library missing");
+    const manifest = Buffer.from(
+      `---\nname: ${JSON.stringify(input.name)}\ntitle: ${JSON.stringify(input.title)}\ndescription: ${JSON.stringify(input.description)}\nskills: []\n---\n\n${input.instructions}\n`,
+    );
+    const files: SkillFile[] = [
+      { path: "ROLE.md", content: manifest, mode: 0o600 },
+    ];
+    const metadata = roleMetadata(files);
+    if (existsSync(join(library.root_path, input.name)))
+      throw new SkillError("name_conflict", 409, "Role folder already exists");
+    const id = randomUUID();
+    const revision = randomUUID();
+    const pins = [
+      { skill_id: input.skillId, revision_id: input.skillRevision },
+    ];
+    this.db.transaction(() => {
+      const skill = this.db
+        .prepare(
+          `SELECT 1 FROM skills s JOIN skill_revisions r ON r.skill_id = s.id AND r.id = s.current_revision_id LEFT JOIN skill_reviews v ON v.revision_id = r.id WHERE s.id = ? AND s.library_id = ? AND s.trashed_at IS NULL AND r.id = ?`,
+        )
+        .get(input.skillId, input.libraryId, input.skillRevision);
+      if (!skill)
+        throw new SkillError(
+          "skill_unreviewed",
+          409,
+          "Select the current reviewed skill revision before assigning.",
+        );
+      const reviewed = this.db
+        .prepare("SELECT 1 FROM skill_reviews WHERE revision_id = ?")
+        .get(input.skillRevision);
+      if (!reviewed && !input.review)
+        throw new SkillError(
+          "skill_unreviewed",
+          409,
+          "Review this skill revision before assigning.",
+        );
+      if (!reviewed)
+        this.db
+          .prepare(
+            "INSERT INTO skill_reviews(revision_id, reviewed_at) VALUES (?, ?)",
+          )
+          .run(input.skillRevision, this.now());
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM roles WHERE library_id = 'personal' AND folder_name = ?",
+          )
+          .get(input.name)
+      )
+        throw new SkillError("name_conflict", 409, "Role name already exists");
+      this.db
+        .prepare(
+          "INSERT INTO roles(id, library_id, folder_name, created_at) VALUES (?, 'personal', ?, ?)",
+        )
+        .run(id, input.name, this.now());
+      this.insertRevision(
+        id,
+        revision,
+        1,
+        files,
+        pins,
+        metadata,
+        this.roleHash(files, pins),
+      );
+      this.db
+        .prepare("UPDATE roles SET current_revision_id = ? WHERE id = ?")
+        .run(revision, id);
+      this.db
+        .prepare(
+          "INSERT INTO role_workspace_operations(role_id, revision_id, state, created_at) VALUES (?, ?, 'pending', ?)",
+        )
+        .run(id, revision, this.now());
+      this.assign(
+        input.roomId,
+        input.agentId,
+        id,
+        revision,
+        input.notes,
+        input.baseRevision,
+      );
+    })();
+    this.recoverWorkspaces();
+    const state = this.db
+      .prepare("SELECT state FROM role_workspace_operations WHERE role_id = ?")
+      .get(id) as { state: string };
+    return { id, revision, pending: state.state !== "complete" };
+  }
+
   assign(
     roomId: number,
     agentId: string,

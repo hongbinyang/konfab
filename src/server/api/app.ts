@@ -112,6 +112,7 @@ export interface AppOptions {
   sources?: SkillSources;
   roles?: RoleLibrary;
   skillsHome?: string;
+  rolePicker?: boolean;
   port: number;
   webDir?: string;
   logger?: boolean;
@@ -1185,6 +1186,76 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     service.rolesChanged(params.id, params.agentId);
     return { ok: true };
   });
+  app.post(
+    "/api/rooms/:id/members/:agentId/picker-preflight",
+    async (request) => {
+      const params = memberParams.parse(request.params);
+      const body = z
+        .object({
+          scope: z.enum(["personal", "project"]),
+          role_name: z.string().min(1).max(128),
+          skill_name: z.string().min(1).max(128),
+        })
+        .parse(request.body);
+      roleService().checkPersonalName(body.role_name);
+      const { library, libraryId } = skillScope(body.scope, params.id);
+      if (!libraryId)
+        throw new SkillError(
+          "unavailable",
+          404,
+          "Skill library unavailable; create it first.",
+        );
+      const list = library.list(libraryId);
+      if (
+        list.untracked.includes(body.skill_name) ||
+        list.skills.some(
+          (skill) =>
+            (skill as Record<string, unknown>).folder_name === body.skill_name,
+        )
+      )
+        throw new SkillError("name_conflict", 409, "Skill name already exists");
+      return { ok: true };
+    },
+  );
+  app.post(
+    "/api/rooms/:id/members/:agentId/role-from-skill",
+    async (request) => {
+      const params = memberParams.parse(request.params);
+      const body = z
+        .object({
+          scope: z.enum(["personal", "project"]),
+          skill_id: z.string().uuid(),
+          skill_revision: z.string().uuid(),
+          name: z.string().min(1).max(128),
+          title: z.string().min(1).max(100),
+          description: z.string().min(1).max(1024),
+          instructions: z.string().max(20000),
+          notes: z.string().max(4000).default(""),
+          base_revision: z.number().int().nonnegative().optional(),
+          review: z.boolean().default(false),
+        })
+        .parse(request.body);
+      const { libraryId } = skillScope(body.scope, params.id);
+      if (!libraryId)
+        throw new SkillError("unavailable", 404, "Skill library unavailable");
+      const result = roleService().createAndAssignSkill({
+        roomId: params.id,
+        agentId: params.agentId,
+        libraryId,
+        skillId: body.skill_id,
+        skillRevision: body.skill_revision,
+        name: body.name,
+        title: body.title,
+        description: body.description,
+        instructions: body.instructions,
+        notes: body.notes,
+        baseRevision: body.base_revision,
+        review: body.review,
+      });
+      service.rolesChanged(params.id, params.agentId);
+      return result;
+    },
+  );
   app.get("/api/rooms/:id/members/:agentId/role-preview", async (request) => {
     const params = memberParams.parse(request.params);
     return {
@@ -1193,7 +1264,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     };
   });
 
-  app.get("/api/overview", async () => service.overview());
+  app.get("/api/overview", async () => ({
+    ...service.overview(),
+    ui: { role_picker: options.rolePicker ?? false },
+  }));
 
   app.post("/api/rooms", async (request, reply) => {
     const body = createRoomBody.parse(request.body);

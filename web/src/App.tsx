@@ -14,6 +14,7 @@ import Markdown from "react-markdown";
 import { EmojiPicker } from "./EmojiPicker";
 import { Library } from "./Library";
 import { ConvertRoles } from "./ConvertRoles";
+import { RolePicker } from "./RolePicker";
 import {
   request,
   uploadAttachment,
@@ -2297,6 +2298,7 @@ function Agents({
                 agent={member}
                 roomId={room.room.id}
                 archived={room.room.archived}
+                rolePickerEnabled={overview.ui?.role_picker ?? false}
                 act={act}
               />
             ) : (
@@ -2313,11 +2315,13 @@ function AgentDetails({
   agent,
   roomId,
   archived,
+  rolePickerEnabled,
   act,
 }: {
   agent: RoomAgent;
   roomId: number;
   archived: boolean;
+  rolePickerEnabled: boolean;
   act: Act;
 }) {
   const [clock, setClock] = useState(Date.now);
@@ -2336,6 +2340,7 @@ function AgentDetails({
   const [copied, setCopied] = useState(false);
   const { stats } = agent;
   const [editingRole, setEditingRole] = useState(false);
+  const [choosingRole, setChoosingRole] = useState(false);
   const [convertingRole, setConvertingRole] = useState(false);
   const [role, setRole] = useState(agent.role);
   const [canEdit, setCanEdit] = useState(agent.can_edit);
@@ -2399,6 +2404,15 @@ function AgentDetails({
         </p>
       )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}
+      {choosingRole && (
+        <RolePicker
+          roomId={roomId}
+          agentId={agent.id}
+          agentName={agent.display_name}
+          onClose={() => setChoosingRole(false)}
+          onAssigned={() => void act(async () => {})}
+        />
+      )}
       {convertingRole && (
         <ConvertRoles
           roomId={roomId}
@@ -2727,6 +2741,15 @@ function AgentDetails({
             }
           >
             Revert to custom text
+          </button>
+        )}
+        {!archived && rolePickerEnabled && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setChoosingRole(true)}
+          >
+            Change role
           </button>
         )}
         {!archived && (

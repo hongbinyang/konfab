@@ -44,6 +44,9 @@ const defaultsSchema = z.object({
 });
 
 const configSchema = z.object({
+  ui: z
+    .object({ role_picker: z.boolean().default(false) })
+    .default({ role_picker: false }),
   connectors: z
     .object({ install: z.enum(["user", "manual"]).default("user") })
     .default({ install: "user" }),
