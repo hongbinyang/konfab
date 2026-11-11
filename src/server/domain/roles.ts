@@ -204,6 +204,41 @@ export class RoleLibrary {
       .all(trash ? 1 : 0);
   }
 
+  assignedPublicSources(
+    roomId: number,
+    agentId: string,
+  ): Array<{ name: string; source: string; commit: string; path: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT r.name, r.provenance_json FROM room_member_roles a JOIN role_revision_skills p ON p.role_revision_id=a.role_revision_id JOIN skill_revisions r ON r.id=p.skill_revision_id WHERE a.room_id=? AND a.agent_id=?`,
+      )
+      .all(roomId, agentId) as Array<{ name: string; provenance_json: string }>;
+    return rows.flatMap((row) => {
+      try {
+        const value = JSON.parse(row.provenance_json) as {
+          source?: unknown;
+          commit?: unknown;
+          path?: unknown;
+        };
+        return typeof value.source === "string" &&
+          typeof value.commit === "string" &&
+          typeof value.path === "string" &&
+          /^[a-f0-9]{40}$/.test(value.commit)
+          ? [
+              {
+                name: row.name,
+                source: value.source,
+                commit: value.commit,
+                path: value.path,
+              },
+            ]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
   assignment(roomId: number, agentId: string) {
     const assignment = this.db
       .prepare(
@@ -930,6 +965,21 @@ export class RoleLibrary {
     return id;
   }
 
+  finishPendingWorkspaces(): void {
+    this.recoverWorkspaces();
+  }
+  workspacePending(id: string): boolean {
+    return (
+      (
+        this.db
+          .prepare(
+            "SELECT state FROM role_workspace_operations WHERE role_id=?",
+          )
+          .get(id) as { state: string }
+      ).state !== "complete"
+    );
+  }
+
   checkPersonalName(name: string): void {
     if (!validSkillName(name))
       throw new SkillError("invalid_role", 400, invalidNameMessage(name));
@@ -962,6 +1012,7 @@ export class RoleLibrary {
     notes: string;
     baseRevision?: number;
     review?: boolean;
+    deferMaterialize?: boolean;
   }): { id: string; revision: string; pending: boolean } {
     const library = this.db
       .prepare(
@@ -1050,7 +1101,7 @@ export class RoleLibrary {
         input.baseRevision,
       );
     })();
-    this.recoverWorkspaces();
+    if (!input.deferMaterialize) this.recoverWorkspaces();
     const state = this.db
       .prepare("SELECT state FROM role_workspace_operations WHERE role_id = ?")
       .get(id) as { state: string };

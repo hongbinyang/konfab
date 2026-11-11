@@ -13,6 +13,7 @@ type Skill = {
   licence: string | null;
   provenance_json: string;
   usage_count: number;
+  workspace_state?: "pending" | "complete" | null;
   is_draft?: boolean | null;
 };
 type Detail = Skill & {
@@ -285,6 +286,13 @@ export function Library({
                   {s.reviewed_at ? "Reviewed" : "Not reviewed"} ·{" "}
                   {s.licence ?? "Licence not specified"} · used by{" "}
                   {s.usage_count}
+                  {s.workspace_state === "pending" && (
+                    <p role="alert">
+                      {s.name}: the working folder could not be created. Check
+                      for a conflicting folder or access problem, then restart
+                      to retry. The assigned revision remains available.
+                    </p>
+                  )}
                 </li>
               ))}
           </ul>
@@ -1328,6 +1336,30 @@ function PublicSources({ roomId }: { roomId: number | null }) {
   }
   return (
     <section className="stack">
+      <p>
+        <button
+          type="button"
+          onClick={() =>
+            void act(async () => {
+              const { bytes } = await request<{ bytes: number }>(
+                "/api/library/legacy-indexes",
+              );
+              if (
+                !window.confirm(
+                  `Remove approximately ${(bytes / 1024 / 1024).toFixed(1)} MB of old fetched indexes? Your saved skills and roles are not affected.`,
+                )
+              )
+                return;
+              await request("/api/library/legacy-indexes", {
+                method: "DELETE",
+              });
+              await load();
+            })
+          }
+        >
+          Remove old fetched indexes
+        </button>
+      </p>
       <h2>Public sources</h2>
       <p>
         Nothing downloads automatically. The first index for anthropics/skills

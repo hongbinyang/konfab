@@ -43,7 +43,242 @@ export class SkillLibrary {
     } catch {
       /* Keep inaccessible libraries pending for later recovery. */
     }
+    try {
+      this.recoverAssignedWorkspaces();
+    } catch {
+      /* Retry inaccessible workspaces later. */
+    }
     this.cleanupTempFiles();
+  }
+
+  private recoverAssignedWorkspaces(): void {
+    const rows = this.db
+      .prepare(
+        `SELECT o.skill_id, o.revision_id, s.folder_name, l.root_path, r.content_hash FROM skill_workspace_operations o JOIN skills s ON s.id=o.skill_id JOIN skill_libraries l ON l.id=s.library_id JOIN skill_revisions r ON r.id=o.revision_id WHERE o.state='pending'`,
+      )
+      .all() as Array<{
+      skill_id: string;
+      revision_id: string;
+      folder_name: string;
+      root_path: string;
+      content_hash: string;
+    }>;
+    for (const row of rows) {
+      try {
+        const root = lstatSync(row.root_path);
+        if (!root.isDirectory() || root.isSymbolicLink()) continue;
+        const folder = join(row.root_path, row.folder_name);
+        const staging = join(row.root_path, `.konfab-pending-${row.skill_id}`);
+        const marker = join(staging, ".konfab-workspace-owner");
+        if (existsSync(folder)) {
+          const target = lstatSync(folder);
+          if (
+            target.isDirectory() &&
+            !target.isSymbolicLink() &&
+            packageHash(readSkillFiles(folder)) === row.content_hash
+          )
+            this.db
+              .prepare(
+                "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
+              )
+              .run(row.skill_id);
+          continue;
+        }
+        if (existsSync(staging)) {
+          const stat = lstatSync(staging);
+          if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
+          if (existsSync(marker)) {
+            if (
+              lstatSync(marker).isSymbolicLink() ||
+              readFileSync(marker, "utf8") !== row.skill_id
+            )
+              continue;
+            rmSync(staging, { recursive: true });
+          } else if (readdirSync(staging).length === 0)
+            rmSync(staging, { recursive: true });
+          else if (packageHash(readSkillFiles(staging)) === row.content_hash) {
+            if (!existsSync(folder)) renameSync(staging, folder);
+            if (
+              existsSync(folder) &&
+              packageHash(readSkillFiles(folder)) === row.content_hash
+            )
+              this.db
+                .prepare(
+                  "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
+                )
+                .run(row.skill_id);
+            continue;
+          } else continue;
+        }
+        mkdirSync(staging, { mode: 0o700 });
+        writeFileSync(marker, row.skill_id, { flag: "wx", mode: 0o600 });
+        const files = this.db
+          .prepare(
+            "SELECT f.path, f.mode, b.content FROM skill_revision_files f JOIN skill_blobs b ON b.hash=f.blob_hash WHERE f.revision_id=? ORDER BY f.path",
+          )
+          .all(row.revision_id) as SkillFile[];
+        for (const file of files) {
+          const destination = join(staging, file.path);
+          mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+          writeFileSync(destination, file.content, {
+            flag: "wx",
+            mode: file.mode & 0o777,
+          });
+        }
+        unlinkSync(marker);
+        if (
+          packageHash(readSkillFiles(staging)) !== row.content_hash ||
+          existsSync(folder)
+        )
+          continue;
+        // A concurrent rename can replace an empty directory, but cannot replace a non-empty one.
+        // A conflict remains pending and is shown in Manage library for the user to resolve.
+        renameSync(staging, folder);
+        this.db
+          .prepare(
+            "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
+          )
+          .run(row.skill_id);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "EEXIST" || code === "ENOTEMPTY") continue;
+        /* Leave other failures pending for a safe retry and visible diagnosis. */
+      }
+    }
+  }
+
+  copyCurrentRevision(
+    skillId: string,
+    revision: string,
+    libraryId: string,
+  ): {
+    files: SkillFile[];
+    provenance: Record<string, unknown>;
+    licence: string | null;
+  } {
+    const row = this.db
+      .prepare(
+        "SELECT r.provenance_json, r.licence FROM skills s JOIN skill_revisions r ON r.id=s.current_revision_id AND r.skill_id=s.id WHERE s.id=? AND s.library_id=? AND s.trashed_at IS NULL AND r.id=?",
+      )
+      .get(skillId, libraryId, revision) as
+      { provenance_json: string; licence: string | null } | undefined;
+    if (!row)
+      throw new SkillError(
+        "draft_conflict",
+        409,
+        "The skill revision changed; preview it again.",
+      );
+    const files = this.db
+      .prepare(
+        "SELECT f.path, f.mode, b.content FROM skill_revision_files f JOIN skill_blobs b ON b.hash=f.blob_hash WHERE f.revision_id=? ORDER BY f.path",
+      )
+      .all(revision) as SkillFile[];
+    return {
+      files,
+      provenance: {
+        parent_skill_id: skillId,
+        parent_revision_id: revision,
+        source: JSON.parse(row.provenance_json),
+      },
+      licence: row.licence,
+    };
+  }
+
+  createReviewedForAssignment<T>(
+    libraryId: string,
+    files: SkillFile[],
+    provenance: Record<string, unknown>,
+    licence: string | null,
+    assign: (id: string, revision: string) => T,
+  ): { value: T; pending: boolean } {
+    const metadata = skillMetadata(files);
+    const library = this.db
+      .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
+      .get(libraryId) as { root_path: string } | undefined;
+    if (!library)
+      throw new SkillError("unavailable", 404, "Skill library unavailable");
+    if (existsSync(join(library.root_path, metadata.name)))
+      throw new SkillError("name_conflict", 409, "Skill folder already exists");
+    if (
+      !files.length ||
+      files.length > 1000 ||
+      files.some(
+        (file) =>
+          !file.path ||
+          file.path === ".konfab-workspace-owner" ||
+          file.path.startsWith("/") ||
+          Buffer.byteLength(file.path) > 512 ||
+          file.path.split("/").length > 32 ||
+          /[\\\0]/.test(file.path) ||
+          file.path
+            .split("/")
+            .some((part) => !part || part === "." || part === "..") ||
+          file.content.length > 512 * 1024,
+      ) ||
+      new Set(files.map((file) => file.path)).size !== files.length ||
+      files.reduce((n, file) => n + file.content.length, 0) > 2 * 1024 * 1024
+    )
+      throw new SkillError(
+        "package_limits",
+        413,
+        "Skill files are invalid or exceed limits",
+      );
+    const id = randomUUID();
+    const revision = randomUUID();
+    const value = this.db.transaction(() => {
+      if (
+        this.db
+          .prepare("SELECT 1 FROM skills WHERE library_id=? AND folder_name=?")
+          .get(libraryId, metadata.name)
+      )
+        throw new SkillError("name_conflict", 409, "Skill name already exists");
+      this.db
+        .prepare(
+          "INSERT INTO skills(id, library_id, folder_name, current_revision_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(id, libraryId, metadata.name, revision, this.now());
+      this.db
+        .prepare(
+          "INSERT INTO skill_revisions(id, skill_id, number, content_hash, name, description, provenance_json, licence, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          revision,
+          id,
+          packageHash(files),
+          metadata.name,
+          metadata.description,
+          JSON.stringify(provenance),
+          licence,
+          this.now(),
+        );
+      const blob = this.db.prepare(
+        "INSERT OR IGNORE INTO skill_blobs(hash, content) VALUES (?, ?)",
+      );
+      const ref = this.db.prepare(
+        "INSERT INTO skill_revision_files(revision_id,path,blob_hash,mode) VALUES (?, ?, ?, ?)",
+      );
+      for (const file of files) {
+        const hash = createHash("sha256").update(file.content).digest("hex");
+        blob.run(hash, file.content);
+        ref.run(revision, file.path, hash, file.mode);
+      }
+      this.db
+        .prepare(
+          "INSERT INTO skill_reviews(revision_id,reviewed_at) VALUES (?, ?)",
+        )
+        .run(revision, this.now());
+      this.db
+        .prepare(
+          "INSERT INTO skill_workspace_operations(skill_id, revision_id, state, created_at) VALUES (?, ?, 'pending', ?)",
+        )
+        .run(id, revision, this.now());
+      return assign(id, revision);
+    })();
+    this.recoverAssignedWorkspaces();
+    const state = this.db
+      .prepare("SELECT state FROM skill_workspace_operations WHERE skill_id=?")
+      .get(id) as { state: string };
+    return { value, pending: state.state !== "complete" };
   }
 
   private recoverImports(): void {
@@ -182,7 +417,8 @@ export class SkillLibrary {
         .prepare(
           `SELECT s.id, s.folder_name, s.current_revision_id, s.trashed_at,
       r.name, r.description, r.content_hash, r.licence, r.provenance_json, sr.reviewed_at,
-      (SELECT COUNT(*) FROM skill_usages u WHERE u.skill_id = s.id) AS usage_count
+      (SELECT COUNT(*) FROM skill_usages u WHERE u.skill_id = s.id) AS usage_count,
+      (SELECT state FROM skill_workspace_operations o WHERE o.skill_id = s.id) AS workspace_state
       FROM skills s LEFT JOIN skill_revisions r ON r.id = s.current_revision_id
       LEFT JOIN skill_reviews sr ON sr.revision_id = r.id
       WHERE s.library_id = ? AND (s.trashed_at IS NOT NULL) = ? ORDER BY s.folder_name`,
@@ -1152,6 +1388,8 @@ export class SkillLibrary {
       if (
         !file.path ||
         file.path.startsWith("/") ||
+        Buffer.byteLength(file.path) > 512 ||
+        file.path.split("/").length > 32 ||
         /[\\\0]/.test(file.path) ||
         file.path.split("/").some((p) => !p || p === "." || p === "..")
       )

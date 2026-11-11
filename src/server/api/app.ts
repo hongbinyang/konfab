@@ -548,6 +548,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .parse(request.query);
     return sourceService().browse(id, q);
   });
+  app.get("/api/library/legacy-indexes", async () => ({
+    bytes: sourceService().legacyIndexSize(),
+  }));
+  app.delete("/api/library/legacy-indexes", async () => {
+    sourceService().removeLegacyIndexes();
+    return { ok: true };
+  });
   app.get("/api/library/live", async (request) => {
     const { q } = z
       .object({ q: z.string().max(200).default("") })
@@ -1272,6 +1279,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           role_name: z.string().min(1).max(128),
           title: z.string().min(1).max(100),
           description: z.string().min(1).max(1024),
+          instructions: z.string().max(20000).optional(),
           notes: z.string().max(4000).default(""),
           base_revision: z.number().int().nonnegative().optional(),
         })
@@ -1312,40 +1320,121 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           400,
           "SKILL.md name must match the skill copy name.",
         );
-      const skillId = library.importFiles(
+      const assigned = library.createReviewedForAssignment(
         libraryId,
-        metadata.name,
         pack.files,
         { ...pack.provenance, customized: body.custom_manifest !== undefined },
         pack.licence,
+        (skillId, skillRevision) =>
+          roleService().createAndAssignSkill({
+            roomId: params.id,
+            agentId: params.agentId,
+            libraryId,
+            skillId,
+            skillRevision,
+            name: body.role_name,
+            title: body.title,
+            description: body.description,
+            instructions:
+              body.instructions ?? `Follow the ${metadata.name} skill.`,
+            notes: body.notes,
+            baseRevision: body.base_revision,
+            deferMaterialize: true,
+          }),
       );
-      const detail = library.detail(skillId);
-      try {
-        const result = roleService().createAndAssignSkill({
-          roomId: params.id,
-          agentId: params.agentId,
-          libraryId,
-          skillId,
-          skillRevision: String(detail.current_revision_id),
-          name: body.role_name,
-          title: body.title,
-          description: body.description,
-          instructions: `Follow the ${metadata.name} skill.`,
-          notes: body.notes,
-          baseRevision: body.base_revision,
-          review: true,
-        });
-        service.rolesChanged(params.id, params.agentId);
-        return result;
-      } catch (error) {
-        const detail =
-          error instanceof Error ? error.message : "Assignment failed";
+      roleService().finishPendingWorkspaces();
+      service.rolesChanged(params.id, params.agentId);
+      return {
+        ...assigned.value,
+        pending:
+          assigned.pending || roleService().workspacePending(assigned.value.id),
+      };
+    },
+  );
+  app.post(
+    "/api/rooms/:id/members/:agentId/customize-and-assign",
+    async (request) => {
+      const params = memberParams.parse(request.params);
+      const body = z
+        .object({
+          source_scope: z.enum(["personal", "project"]),
+          scope: z.enum(["personal", "project"]),
+          skill_id: z.string().uuid(),
+          skill_revision: z.string().uuid(),
+          copy_name: z.string().min(1).max(128),
+          manifest: z.string().max(512000),
+          role_name: z.string().min(1).max(128),
+          title: z.string().min(1).max(100),
+          description: z.string().min(1).max(1024),
+          instructions: z.string().max(20000),
+          notes: z.string().max(4000).default(""),
+          base_revision: z.number().int().nonnegative().optional(),
+        })
+        .parse(request.body);
+      roleService().checkPersonalName(body.role_name);
+      const source = skillScope(body.source_scope, params.id);
+      if (!source.libraryId)
         throw new SkillError(
-          "assignment_incomplete",
-          409,
-          `${detail} The skill was saved to the selected library; review it there before retrying.`,
+          "unavailable",
+          404,
+          "Source skill library unavailable",
         );
-      }
+      const target = skillScope(body.scope, params.id, true);
+      if (!target.libraryId)
+        throw new SkillError(
+          "unavailable",
+          404,
+          "Destination skill library unavailable",
+        );
+      const pack = source.library.copyCurrentRevision(
+        body.skill_id,
+        body.skill_revision,
+        source.libraryId,
+      );
+      const manifest = pack.files.find((file) => file.path === "SKILL.md");
+      if (!manifest)
+        throw new SkillError("invalid_skill", 400, "SKILL.md is required");
+      manifest.content = Buffer.from(body.manifest);
+      if (skillMetadata(pack.files).name !== body.copy_name)
+        throw new SkillError(
+          "invalid_skill",
+          400,
+          "SKILL.md name must match the skill copy name.",
+        );
+      const assigned = target.library.createReviewedForAssignment(
+        target.libraryId,
+        pack.files,
+        pack.provenance,
+        pack.licence,
+        (skillId, skillRevision) => {
+          source.library.copyCurrentRevision(
+            body.skill_id,
+            body.skill_revision,
+            source.libraryId!,
+          );
+          return roleService().createAndAssignSkill({
+            roomId: params.id,
+            agentId: params.agentId,
+            libraryId: target.libraryId!,
+            skillId,
+            skillRevision,
+            name: body.role_name,
+            title: body.title,
+            description: body.description,
+            instructions: body.instructions,
+            notes: body.notes,
+            baseRevision: body.base_revision,
+            deferMaterialize: true,
+          });
+        },
+      );
+      roleService().finishPendingWorkspaces();
+      service.rolesChanged(params.id, params.agentId);
+      return {
+        ...assigned.value,
+        pending:
+          assigned.pending || roleService().workspacePending(assigned.value.id),
+      };
     },
   );
   app.post(
@@ -1387,6 +1476,28 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       return result;
     },
   );
+  app.get("/api/rooms/:id/members/:agentId/role-updates", async (request) => {
+    const params = memberParams.parse(request.params);
+    const items = roleService().assignedPublicSources(
+      params.id,
+      params.agentId,
+    );
+    const updates = await Promise.all(
+      items.map(async (item) => {
+        try {
+          const status = await sourceService().publicSkillUpdate(
+            item.source,
+            item.commit,
+            item.path,
+          );
+          return { ...item, status };
+        } catch {
+          return { ...item, status: "unknown" };
+        }
+      }),
+    );
+    return { updates };
+  });
   app.get("/api/rooms/:id/members/:agentId/role-preview", async (request) => {
     const params = memberParams.parse(request.params);
     return {
@@ -1397,7 +1508,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get("/api/overview", async () => ({
     ...service.overview(),
-    ui: { role_picker: options.rolePicker ?? false },
+    ui: { role_picker: options.rolePicker ?? true },
   }));
 
   app.post("/api/rooms", async (request, reply) => {

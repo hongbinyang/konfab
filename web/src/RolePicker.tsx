@@ -93,7 +93,6 @@ export function RolePicker({
     "personal",
   );
   const [manifestDraft, setManifestDraft] = useState("");
-  const [copyId, setCopyId] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     const el = dialog.current;
@@ -187,7 +186,6 @@ export function RolePicker({
     setFiles([]);
     setError("");
     setCustomize(false);
-    setCopyId("");
     setPublicHash("");
     setPreviewLicence(null);
     try {
@@ -341,7 +339,6 @@ export function RolePicker({
     if (!selected || !preview || baseRevision === undefined) return;
     setBusy(true);
     setError("");
-    let madeCopy = false;
     try {
       if (selected.kind === "role")
         await request(
@@ -373,116 +370,65 @@ export function RolePicker({
               role_name: name,
               title,
               description,
+              instructions: customize ? instructions : undefined,
               notes,
               base_revision: baseRevision,
             },
           },
         );
         if (result.pending) {
-          setError("Assigned, but the role folder needs recovery.");
+          onAssigned();
+          setBaseRevision(undefined);
+          setError(
+            "Assigned, but a workspace needs recovery. Restart the server to retry.",
+          );
           return;
         }
       } else {
-        let skillId = selected.skill.id;
-        let skillRevision = selected.skill.current_revision_id;
-        let scope = selected.scope;
-        if (customize) {
-          if (!validName(copyName))
-            throw new Error("Enter a valid name for the skill copy.");
-          const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(
-            manifestDraft,
-          );
-          if (!match?.[1]) throw new Error("The skill needs YAML frontmatter.");
-          const doc = parseDocument(match[1]);
-          if (doc.errors.length || doc.get("name") !== copyName)
-            throw new Error("The SKILL.md name must match the copy name.");
-          if (copyId)
-            throw new Error(
-              `A copy was already created. Open it in Manage library to finish or remove it: ${copyName}.`,
+        const result = customize
+          ? await request<{ pending: boolean }>(
+              `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/customize-and-assign`,
+              {
+                method: "POST",
+                body: {
+                  source_scope: selected.scope,
+                  scope: copyScope,
+                  skill_id: selected.skill.id,
+                  skill_revision: selected.skill.current_revision_id,
+                  copy_name: copyName,
+                  manifest: manifestDraft,
+                  role_name: name,
+                  title,
+                  description,
+                  instructions,
+                  notes,
+                  base_revision: baseRevision,
+                },
+              },
+            )
+          : await request<{ pending: boolean }>(
+              `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/role-from-skill`,
+              {
+                method: "POST",
+                body: {
+                  scope: selected.scope,
+                  skill_id: selected.skill.id,
+                  skill_revision: selected.skill.current_revision_id,
+                  name,
+                  title,
+                  description,
+                  instructions,
+                  notes,
+                  base_revision: baseRevision,
+                  review: true,
+                },
+              },
             );
-          await request(
-            `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/picker-preflight`,
-            {
-              method: "POST",
-              body: { scope: copyScope, role_name: name, skill_name: copyName },
-            },
-          );
-          const copied = await request<{ id: string }>(
-            `/api/library/skills/${skillId}/duplicate`,
-            {
-              method: "POST",
-              body: {
-                revision_id: skillRevision,
-                scope: copyScope,
-                room_id: copyScope === "project" ? roomId : undefined,
-                name: copyName,
-              },
-            },
-          );
-          madeCopy = true;
-          setCopyId(copied.id);
-          skillId = copied.id;
-          scope = copyScope;
-          const detail = await request<{
-            current_revision_id: string;
-            draft_hash: string;
-          }>(`/api/library/skills/${skillId}`);
-          const bytes = new TextEncoder().encode(manifestDraft);
-          let binary = "";
-          for (let index = 0; index < bytes.length; index += 8192)
-            binary += String.fromCharCode(
-              ...bytes.subarray(index, index + 8192),
-            );
-          const content = btoa(binary);
-          const written = await request<{ draft_hash: string }>(
-            `/api/library/skills/${skillId}/files`,
-            {
-              method: "PUT",
-              body: {
-                path: "SKILL.md",
-                content_base64: content,
-                base_revision_id: detail.current_revision_id,
-                base_draft_hash: detail.draft_hash,
-              },
-            },
-          );
-          const saved = await request<{ revision_id: string }>(
-            `/api/library/skills/${skillId}/save`,
-            {
-              method: "POST",
-              body: {
-                base_revision_id: detail.current_revision_id,
-                base_draft_hash: written.draft_hash,
-              },
-            },
-          );
-          skillRevision = saved.revision_id;
-          await request(
-            `/api/library/skills/${skillId}/reviews/${skillRevision}`,
-            { method: "PUT" },
-          );
-        }
-        const result = await request<{ pending: boolean }>(
-          `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/role-from-skill`,
-          {
-            method: "POST",
-            body: {
-              scope,
-              skill_id: skillId,
-              skill_revision: skillRevision,
-              name,
-              title,
-              description,
-              instructions,
-              notes,
-              base_revision: baseRevision,
-              review: true,
-            },
-          },
-        );
         if (result.pending) {
+          onAssigned();
+          setBaseRevision(undefined);
           setError(
-            "Assigned, but the role folder needs recovery. Reopen the library to check it.",
+            "Assigned, but a workspace needs recovery. Restart the server to retry.",
           );
           return;
         }
@@ -491,7 +437,7 @@ export function RolePicker({
       onClose();
     } catch (e) {
       setError(
-        `${e instanceof Error ? e.message : "Unable to assign the role"}${madeCopy ? " A skill copy was saved; find it in the library to finish or remove it." : ""}`,
+        `${e instanceof Error ? e.message : "Unable to assign the role"}`,
       );
     } finally {
       setBusy(false);
@@ -850,8 +796,7 @@ export function RolePicker({
                 !validName(name) ||
                 (customize && (!validName(copyName) || !manifestDraft)))) ||
             (selected.kind === "skill" &&
-              ((customize &&
-                (!validName(copyName) || !manifestDraft || !!copyId)) ||
+              ((customize && (!validName(copyName) || !manifestDraft)) ||
                 !validName(name) ||
                 !title.trim() ||
                 !description.trim()))

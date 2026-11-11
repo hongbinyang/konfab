@@ -225,6 +225,137 @@ export class SkillSources {
       throw new SkillError("source_missing", 404, "Source not found");
     return source;
   }
+  async latestPublicCommit(sourceName: string): Promise<string | null> {
+    const source = this.list().find(
+      (item) =>
+        `${item.owner}/${item.repository}`.toLowerCase() ===
+          sourceName.toLowerCase() && item.enabled,
+    );
+    if (!source) return null;
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Konfab",
+    };
+    if (this.token && this.tokenState().enabled)
+      headers.Authorization = `Bearer ${this.token}`;
+    const response = await this.response(
+      `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/commits/${encodeURIComponent(source.ref)}`,
+      headers,
+      AbortSignal.timeout(15_000),
+    );
+    if (!response.ok || response.headers.get("x-konfab-stale") === "1")
+      return null;
+    const value = (await this.boundedJson(response)) as { sha?: unknown };
+    return typeof value.sha === "string" && SHA.test(value.sha.toLowerCase())
+      ? value.sha.toLowerCase()
+      : null;
+  }
+
+  async publicSkillUpdate(
+    sourceName: string,
+    pinned: string,
+    manifestPath: string,
+  ): Promise<"changed" | "removed" | "unchanged" | "unknown"> {
+    if (
+      !/^[a-f0-9]{40}$/.test(pinned) ||
+      !manifestPath ||
+      manifestPath.startsWith("/") ||
+      /[\\\0]/.test(manifestPath) ||
+      manifestPath
+        .split("/")
+        .some((part) => !part || part === "." || part === "..") ||
+      manifestPath.split("/").at(-1) !== "SKILL.md"
+    )
+      return "unknown";
+    const source = this.list().find(
+      (item) =>
+        `${item.owner}/${item.repository}`.toLowerCase() ===
+          sourceName.toLowerCase() && item.enabled,
+    );
+    if (!source) return "unknown";
+    const latest = await this.latestPublicCommit(sourceName);
+    if (!latest) return "unknown";
+    if (latest === pinned) return "unchanged";
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Konfab",
+    };
+    if (this.token && this.tokenState().enabled)
+      headers.Authorization = `Bearer ${this.token}`;
+    const folder = manifestPath.includes("/")
+      ? manifestPath.slice(0, manifestPath.lastIndexOf("/"))
+      : "";
+    const findTree = async (
+      commit: string,
+    ): Promise<string | null | undefined> => {
+      const response = await this.response(
+        `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/git/trees/${commit}?recursive=1`,
+        headers,
+        AbortSignal.timeout(15_000),
+      );
+      if (!response.ok || response.headers.get("x-konfab-stale") === "1")
+        return undefined;
+      const payload = (await this.boundedJson(response, 10 * 1024 * 1024)) as {
+        sha?: unknown;
+        tree?: Array<{ path?: unknown; type?: unknown; sha?: unknown }>;
+        truncated?: boolean;
+      };
+      if (payload.truncated || !Array.isArray(payload.tree)) return undefined;
+      const value = folder
+        ? payload.tree.find(
+            (entry) => entry.path === folder && entry.type === "tree",
+          )?.sha
+        : payload.sha;
+      return typeof value === "string" && /^[a-f0-9]{40}$/i.test(value)
+        ? value.toLowerCase()
+        : null;
+    };
+    const [before, after] = await Promise.all([
+      findTree(pinned),
+      findTree(latest),
+    ]);
+    if (before === undefined || after === undefined || before === null)
+      return "unknown";
+    if (after === null) return "removed";
+    return before === after ? "unchanged" : "changed";
+  }
+
+  legacyIndexSize(): number {
+    const rows = this.db
+      .prepare(
+        "SELECT COALESCE(SUM(cache_bytes),0) AS n FROM source_generations",
+      )
+      .get() as { n: number };
+    const packages = this.db
+      .prepare(
+        "SELECT COALESCE(SUM(cache_bytes),0) AS n FROM source_cached_packages",
+      )
+      .get() as { n: number };
+    return rows.n + packages.n;
+  }
+  removeLegacyIndexes(): void {
+    if (this.job)
+      throw new SkillError(
+        "source_busy",
+        409,
+        "Wait for the current source refresh to finish.",
+      );
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "UPDATE skill_sources SET current_generation_id=NULL, etag=NULL, last_checked_at=NULL",
+        )
+        .run();
+      this.db.prepare("DELETE FROM source_generations").run();
+      this.db
+        .prepare(
+          "DELETE FROM source_cached_blobs WHERE sha NOT IN (SELECT sha FROM source_cached_files)",
+        )
+        .run();
+    })();
+    this.notify();
+  }
+
   browse(id: string, query = "") {
     const source = this.source(id);
     if (!source.current_generation_id)

@@ -185,6 +185,174 @@ describe("role assignment", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+  it("recovers a pending skill workspace after a database reopen", () => {
+    const root = mkdtempSync(join(tmpdir(), "konfab-skill-journal-"));
+    const database = join(root, "state.db");
+    let db = openDatabase(database);
+    try {
+      const skillsRoot = join(root, "skills");
+      mkdirSync(skillsRoot);
+      const skills = new SkillLibrary(db);
+      const libraryId = skills.registerLibrary("personal", skillsRoot);
+      const files = [
+        {
+          path: "SKILL.md",
+          mode: 0o600,
+          content: Buffer.from(
+            "---\nname: copied\ndescription: Copy\n---\nBody",
+          ),
+        },
+      ];
+      const created = skills.createReviewedForAssignment(
+        libraryId,
+        files,
+        {},
+        null,
+        (id) => id,
+      );
+      expect(created.pending).toBe(false);
+      rmSync(join(skillsRoot, "copied"), { recursive: true });
+      db.prepare(
+        "UPDATE skill_workspace_operations SET state='pending' WHERE skill_id=?",
+      ).run(created.value);
+      db.close();
+      db = openDatabase(database);
+      new SkillLibrary(db);
+      expect(
+        readFileSync(join(skillsRoot, "copied", "SKILL.md"), "utf8"),
+      ).toContain("Body");
+      expect(
+        (
+          db
+            .prepare(
+              "SELECT state FROM skill_workspace_operations WHERE skill_id=?",
+            )
+            .get(created.value) as { state: string }
+        ).state,
+      ).toBe("complete");
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it.each(["empty staging directory", "partially written staging file"])(
+    "recovers %s after reopening",
+    (crash) => {
+      const root = mkdtempSync(join(tmpdir(), "konfab-skill-crash-"));
+      const database = join(root, "state.db");
+      let db = openDatabase(database);
+      try {
+        const skillsRoot = join(root, "skills");
+        mkdirSync(skillsRoot);
+        const skills = new SkillLibrary(db);
+        const libraryId = skills.registerLibrary("personal", skillsRoot);
+        const files = [
+          {
+            path: "SKILL.md",
+            mode: 0o600,
+            content: Buffer.from(
+              "---\nname: copied\ndescription: Copy\n---\nBody",
+            ),
+          },
+        ];
+        const created = skills.createReviewedForAssignment(
+          libraryId,
+          files,
+          {},
+          null,
+          (id) => id,
+        );
+        rmSync(join(skillsRoot, "copied"), { recursive: true });
+        const staging = join(skillsRoot, `.konfab-pending-${created.value}`);
+        mkdirSync(staging);
+        if (crash === "partially written staging file") {
+          writeFileSync(
+            join(staging, ".konfab-workspace-owner"),
+            created.value,
+          );
+          writeFileSync(join(staging, "SKILL.md"), "partial");
+        }
+        db.prepare(
+          "UPDATE skill_workspace_operations SET state='pending' WHERE skill_id=?",
+        ).run(created.value);
+        db.close();
+        db = openDatabase(database);
+        new SkillLibrary(db);
+        expect(
+          readFileSync(join(skillsRoot, "copied", "SKILL.md"), "utf8"),
+        ).toContain("Body");
+        expect(
+          (
+            db
+              .prepare(
+                "SELECT state FROM skill_workspace_operations WHERE skill_id=?",
+              )
+              .get(created.value) as { state: string }
+          ).state,
+        ).toBe("complete");
+      } finally {
+        db.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("keeps externally changed pending skill files intact during recovery", () => {
+    const root = mkdtempSync(join(tmpdir(), "konfab-skill-conflict-"));
+    const database = join(root, "state.db");
+    let db = openDatabase(database);
+    try {
+      const skillsRoot = join(root, "skills");
+      mkdirSync(skillsRoot);
+      const skills = new SkillLibrary(db);
+      const libraryId = skills.registerLibrary("personal", skillsRoot);
+      const files = [
+        {
+          path: "SKILL.md",
+          mode: 0o600,
+          content: Buffer.from(
+            "---\nname: copied\ndescription: Copy\n---\nBody",
+          ),
+        },
+      ];
+      const created = skills.createReviewedForAssignment(
+        libraryId,
+        files,
+        {},
+        null,
+        (id) => id,
+      );
+      const folder = join(skillsRoot, "copied");
+      writeFileSync(join(folder, "SKILL.md"), "external change");
+      writeFileSync(join(folder, ".konfab-workspace-owner"), created.value);
+      db.prepare(
+        "UPDATE skill_workspace_operations SET state='pending' WHERE skill_id=?",
+      ).run(created.value);
+      db.close();
+      db = openDatabase(database);
+      new SkillLibrary(db);
+      expect(readFileSync(join(folder, "SKILL.md"), "utf8")).toBe(
+        "external change",
+      );
+      expect(
+        (
+          db
+            .prepare(
+              "SELECT state FROM skill_workspace_operations WHERE skill_id=?",
+            )
+            .get(created.value) as { state: string }
+        ).state,
+      ).toBe("pending");
+      expect(new SkillLibrary(db).list(libraryId).skills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ workspace_state: "pending" }),
+        ]),
+      );
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("reconstructs a missing journaled role file after a database reopen", () => {
     const root = mkdtempSync(join(tmpdir(), "konfab-role-recovery-"));
     const database = join(root, "state.db");
