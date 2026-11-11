@@ -61,7 +61,15 @@ export interface Overview {
   run_warnings?: RunWarning[];
   paused_all: boolean;
   rooms: RoomSummary[];
-  agents: { id: string; display_name: string }[];
+  agents: {
+    id: string;
+    display_name: string;
+    app_id: string;
+    app_name: string;
+    is_default: number;
+  }[];
+  apps: { id: string; display_name: string; default_agent_id: string }[];
+  max_agents_per_app: number;
   permissions: Permission[];
   reports: Report[];
   pre_approvals: { recipient: string; data: string }[];

@@ -47,6 +47,9 @@ const configSchema = z.object({
   ui: z
     .object({ role_picker: z.boolean().default(true) })
     .default({ role_picker: true }),
+  multi_agent: z
+    .object({ max_per_app: z.number().int().min(1).max(100).default(4) })
+    .default({ max_per_app: 4 }),
   connectors: z
     .object({ install: z.enum(["user", "manual"]).default("user") })
     .default({ install: "user" }),

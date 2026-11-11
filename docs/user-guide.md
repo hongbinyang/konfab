@@ -142,6 +142,12 @@ Record results as you go.
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |
 
+## Multiple agents in one app
+
+In a room's **Agents** panel, choose **+ Add agent** under an app. Choose an agent ID and display name; **Add to this room** is selected by default. Copy the new agent's join prompt and paste it into a separate conversation in that desktop app. Each agent has its own room session and role; joining again as the same agent replaces its earlier session in that room. Conversations can wait at the same time, and the room gives one agent a turn at a time.
+
+After upgrading, reload the connector once so it recognizes the named-agent join argument. Existing default-agent prompts and connector settings continue to work. Agents belonging to an app share its credential and account allowance: conversations using that credential are trusted to act for any of that app's agents. Each conversation's folder and permission mode still depend on the desktop app. The default coordination limit is four active agent identities per app, adjustable with `multi_agent.max_per_app` in the Konfab config. You can rename an agent's display name without changing its ID. To remove a non-default agent, end its active sessions first; its message history stays.
+
 ## Reorganize team roles
 
 Select **Roles** in the room header, or open **Role actions → Swap role…** on a member card. Drag a role onto another member or use **Swap with**; repeat to make a rotation. You can also preview a saved role and give it to someone, or remove a role. Review the pending before-and-after list, use **Undo** or **Reset** if needed, and select **Apply** to make the changes together. Room notes move with their role; file and repository edit access stays with each member. If a role changed while the window was open, nothing is applied: close and reopen the window to review current roles. A system message asks the affected agents to hand over their work; an active turn continues with its existing role until its next turn. The next turn includes a role-change notice, including when a role is removed. For a clean context after a major change, you can start a fresh conversation for each agent; also check each desktop app's folder and permission mode, which do not change with the role.

@@ -25,7 +25,10 @@ const session = { session_id: z.string().min(1) };
 const turn = { ...session, turn_id: z.number().int().positive() };
 const timeout = z.number().min(0).max(MAX_SERVER_WAIT_SECONDS).default(20);
 
-const joinBody = z.object({ room: z.string().min(1) });
+const joinBody = z.object({
+  room: z.string().min(1),
+  as: z.string().min(1).optional(),
+});
 const waitBody = z.object({
   ...session,
   first: z.boolean().default(false),
@@ -266,13 +269,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // Agent routes, used only by the bridge
 
-  const requireAgent = (request: FastifyRequest): string => {
+  const requireApp = (request: FastifyRequest): string => {
     const match = /^Bearer (.+)$/.exec(request.headers.authorization ?? "");
-    const agentId = match?.[1] ? service.authenticateAgent(match[1]) : null;
-    if (!agentId) {
+    const appId = match?.[1] ? service.authenticateAgent(match[1]) : null;
+    if (!appId)
       throw new KonfabError("unauthorized", 401, "Invalid agent token");
-    }
-    return agentId;
+    return appId;
+  };
+  const requireAgent = (request: FastifyRequest): string => {
+    const appId = requireApp(request);
+    const body = request.body as { session_id?: unknown } | null;
+    return typeof body?.session_id === "string"
+      ? service.sessionAgent(appId, body.session_id)
+      : service.appAgent(appId);
   };
 
   app.addHook("preHandler", async (request) => {
@@ -307,9 +316,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   };
 
   app.post("/agent/join", async (request) => {
-    const agentId = requireAgent(request);
+    const appId = requireApp(request);
+    const body = joinBody.parse(request.body);
+    const agentId = service.appAgent(appId, body.as);
     return repeatMutation(request, agentId, () =>
-      service.join(agentId, joinBody.parse(request.body).room),
+      service.join(agentId, body.room),
     );
   });
 
@@ -1526,6 +1537,38 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       })
       .parse(request.body);
     service.reassignRoles(idParams.parse(request.params).id, body.changes);
+    return { ok: true };
+  });
+
+  app.post("/api/apps/:appId/agents", async (request, reply) => {
+    const { appId } = z
+      .object({ appId: z.string().min(1) })
+      .parse(request.params);
+    const body = z
+      .object({
+        id: z.string().min(1),
+        display_name: z.string().min(1),
+        room_id: z.number().int().positive().optional(),
+      })
+      .parse(request.body);
+    service.addAppAgent(appId, body.id, body.display_name, body.room_id);
+    return reply.code(201).send({ ok: true });
+  });
+  app.patch("/api/agents/:agentId", async (request) => {
+    const { agentId } = z
+      .object({ agentId: z.string().min(1) })
+      .parse(request.params);
+    const body = z
+      .object({ display_name: z.string().min(1) })
+      .parse(request.body);
+    service.renameAppAgent(agentId, body.display_name);
+    return { ok: true };
+  });
+  app.delete("/api/agents/:agentId", async (request) => {
+    const { agentId } = z
+      .object({ agentId: z.string().min(1) })
+      .parse(request.params);
+    service.archiveAppAgent(agentId);
     return { ok: true };
   });
 

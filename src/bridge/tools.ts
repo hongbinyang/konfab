@@ -297,11 +297,23 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     {
       description:
         "Join a Konfab room. Returns a session_id to use with the other tools, plus the room topic, rules, members, and recent messages.",
-      inputSchema: { room: z.string().describe("Room name") },
+      inputSchema: {
+        room: z.string().describe("Room name"),
+        as: z
+          .string()
+          .optional()
+          .describe("Agent ID within this app; omit for the default agent"),
+      },
     },
-    async ({ room }, extra) => {
+    async ({ room, as }, extra) => {
       try {
-        return asToolResult(await call("/agent/join", { room }, extra.signal));
+        return asToolResult(
+          await call(
+            "/agent/join",
+            { room, ...(as ? { as } : {}) },
+            extra.signal,
+          ),
+        );
       } catch (error) {
         return asToolError(error);
       }

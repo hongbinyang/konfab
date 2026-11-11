@@ -2227,6 +2227,41 @@ function Agents({
   act: Act;
   urgent: boolean;
 }) {
+  const [addingApp, setAddingApp] = useState<string | null>(null);
+  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [addToRoom, setAddToRoom] = useState(true);
+  const [agentError, setAgentError] = useState("");
+  const openAdd = (appId: string) => {
+    const used = new Set(overview.agents.map((agent) => agent.id));
+    let candidate = `${appId.replaceAll("_", "-")}-dev`,
+      suffix = 2;
+    while (used.has(candidate))
+      candidate = `${appId.replaceAll("_", "-")}-dev-${suffix++}`;
+    setNewId(candidate);
+    setNewName(candidate);
+    setAddToRoom(true);
+    setAgentError("");
+    setAddingApp(appId);
+  };
+  const addAgent = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!addingApp) return;
+    try {
+      await request(`/api/apps/${encodeURIComponent(addingApp)}/agents`, {
+        method: "POST",
+        body: {
+          id: newId,
+          display_name: newName,
+          ...(addToRoom ? { room_id: room.room.id } : {}),
+        },
+      });
+      setAddingApp(null);
+      await act(async () => {});
+    } catch (error) {
+      setAgentError(errorMessage(error));
+    }
+  };
   const members = room.agents.map((agent) => agent.id);
   const setMembers = (next: string[]) =>
     void act(() =>
@@ -2242,94 +2277,223 @@ function Agents({
       preferenceKey="konfab.ui.v1.section.agents"
       urgent={urgent}
     >
-      {overview.agents.map((agent) => {
-        const member = room.agents.find((item) => item.id === agent.id);
-        const lastPost = [...room.messages]
-          .reverse()
-          .find(
-            (message) =>
-              message.sender_type === "agent" && message.sender_id === agent.id,
-          );
-        return (
-          <div className="card compact-agent" key={agent.id}>
-            <div className="agent-heading">
-              <label className="check">
+      {overview.apps.map((app) => (
+        <section key={app.id} className="app-agent-group">
+          <div className="row">
+            <h3>{app.display_name} app</h3>
+            <button
+              type="button"
+              disabled={
+                room.room.archived ||
+                overview.agents.filter((agent) => agent.app_id === app.id)
+                  .length >= overview.max_agents_per_app
+              }
+              onClick={() => openAdd(app.id)}
+            >
+              + Add agent
+            </button>
+          </div>
+          {addingApp === app.id && (
+            <form className="stack" onSubmit={(event) => void addAgent(event)}>
+              <label>
+                Agent ID
+                <input
+                  value={newId}
+                  onChange={(event) => setNewId(event.target.value)}
+                  required
+                  pattern="[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
+                />
+              </label>
+              <label>
+                Display name
+                <input
+                  value={newName}
+                  onChange={(event) => setNewName(event.target.value)}
+                  required
+                  maxLength={100}
+                />
+              </label>
+              <label>
                 <input
                   type="checkbox"
-                  checked={member !== undefined}
-                  disabled={room.room.archived}
-                  onChange={(event) =>
-                    setMembers(
-                      event.target.checked
-                        ? [...members, agent.id]
-                        : members.filter((id) => id !== agent.id),
-                    )
-                  }
-                />
-                <strong>
-                  {agent.display_name}
-                  {member?.role_pack_label
-                    ? ` · ${member.role_pack_label}`
-                    : ""}
-                </strong>
+                  checked={addToRoom}
+                  onChange={(event) => setAddToRoom(event.target.checked)}
+                />{" "}
+                Add to this room
               </label>
-              {member && (
-                <>
-                  <span className={`state ${member.state}`}>
-                    {STATE_LABELS[member.state]}
-                  </span>
-                  {member.state === "waiting" &&
-                    !member.working &&
-                    lastPost && (
-                      <span
-                        className="muted"
-                        title={new Date(lastPost.created_at).toLocaleString()}
-                      >
-                        last post{" "}
-                        {Math.max(
-                          0,
-                          Math.floor(
-                            (Date.now() - lastPost.created_at) / 60000,
-                          ),
-                        )}{" "}
-                        min ago
-                      </span>
-                    )}
-                  <RunCountdown agent={member} />
-                </>
-              )}
-            </div>
-            {overview.reports
-              .filter(
-                (report) =>
-                  report.agent_id === agent.id &&
-                  report.room === room.room.name &&
-                  report.kind !== "other",
-              )
-              .map((report) => (
-                <p className="warning-text" key={report.id}>
-                  {report.kind === "out_of_allowance"
-                    ? "Out of allowance"
-                    : "Low allowance"}
-                  {report.detail ? `: ${report.detail}` : ""}
+              <p className="muted">
+                Up to {overview.max_agents_per_app} agents per app for
+                coordination; they share the app account's allowance.
+              </p>
+              {agentError && (
+                <p role="alert" className="warning-text">
+                  {agentError}
                 </p>
-              ))}
-            {member ? (
-              <AgentDetails
-                agent={member}
-                peers={room.agents}
-                roomId={room.room.id}
-                archived={room.room.archived}
-                rolePickerEnabled={overview.ui?.role_picker ?? false}
-                act={act}
-              />
-            ) : (
-              <p className="muted">Not in this room</p>
-            )}
-          </div>
-        );
-      })}
+              )}
+              <div className="row">
+                <button type="submit">Add agent</button>
+                <button type="button" onClick={() => setAddingApp(null)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          {overview.agents
+            .filter((agent) => agent.app_id === app.id)
+            .map((agent) => {
+              const member = room.agents.find((item) => item.id === agent.id);
+              const lastPost = [...room.messages]
+                .reverse()
+                .find(
+                  (message) =>
+                    message.sender_type === "agent" &&
+                    message.sender_id === agent.id,
+                );
+              return (
+                <div className="card compact-agent" key={agent.id}>
+                  <div className="agent-heading">
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={member !== undefined}
+                        disabled={room.room.archived}
+                        onChange={(event) =>
+                          setMembers(
+                            event.target.checked
+                              ? [...members, agent.id]
+                              : members.filter((id) => id !== agent.id),
+                          )
+                        }
+                      />
+                      <strong>
+                        {agent.display_name}{" "}
+                        <small className="muted">
+                          {agent.app_name} · @{agent.id}
+                          {agent.is_default ? " · default" : ""}
+                        </small>
+                        {member?.role_pack_label
+                          ? ` · ${member.role_pack_label}`
+                          : ""}
+                      </strong>
+                    </label>
+                    {member && (
+                      <>
+                        <span className={`state ${member.state}`}>
+                          {STATE_LABELS[member.state]}
+                        </span>
+                        {member.state === "waiting" &&
+                          !member.working &&
+                          lastPost && (
+                            <span
+                              className="muted"
+                              title={new Date(
+                                lastPost.created_at,
+                              ).toLocaleString()}
+                            >
+                              last post{" "}
+                              {Math.max(
+                                0,
+                                Math.floor(
+                                  (Date.now() - lastPost.created_at) / 60000,
+                                ),
+                              )}{" "}
+                              min ago
+                            </span>
+                          )}
+                        <RunCountdown agent={member} />
+                      </>
+                    )}
+                  </div>
+                  {overview.reports
+                    .filter(
+                      (report) =>
+                        report.agent_id === agent.id &&
+                        report.room === room.room.name &&
+                        report.kind !== "other",
+                    )
+                    .map((report) => (
+                      <p className="warning-text" key={report.id}>
+                        {report.kind === "out_of_allowance"
+                          ? "Out of allowance"
+                          : "Low allowance"}
+                        {report.detail ? `: ${report.detail}` : ""}
+                      </p>
+                    ))}
+                  {!agent.is_default && (
+                    <AgentManagement agent={agent} act={act} />
+                  )}
+                  {member ? (
+                    <AgentDetails
+                      agent={member}
+                      peers={room.agents}
+                      roomId={room.room.id}
+                      archived={room.room.archived}
+                      rolePickerEnabled={overview.ui?.role_picker ?? false}
+                      act={act}
+                    />
+                  ) : (
+                    <p className="muted">Not in this room</p>
+                  )}
+                </div>
+              );
+            })}
+        </section>
+      ))}
     </CollapsibleSection>
+  );
+}
+
+function AgentManagement({
+  agent,
+  act,
+}: {
+  agent: Overview["agents"][number];
+  act: Act;
+}) {
+  const [name, setName] = useState(agent.display_name);
+  return (
+    <details>
+      <summary>Manage agent</summary>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void act(() =>
+            request(`/api/agents/${encodeURIComponent(agent.id)}`, {
+              method: "PATCH",
+              body: { display_name: name },
+            }),
+          );
+        }}
+      >
+        <label>
+          Display name{" "}
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+            maxLength={100}
+          />
+        </label>
+        <button type="submit">Rename</button>
+      </form>
+      <button
+        type="button"
+        onClick={() => {
+          if (
+            window.confirm(
+              `Remove ${agent.display_name}? Its history will remain.`,
+            )
+          )
+            void act(() =>
+              request(`/api/agents/${encodeURIComponent(agent.id)}`, {
+                method: "DELETE",
+              }),
+            );
+        }}
+      >
+        Remove agent
+      </button>
+    </details>
   );
 }
 
