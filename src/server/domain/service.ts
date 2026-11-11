@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import type { Db } from "../db/index.js";
@@ -680,6 +680,239 @@ export class KonfabService {
     return row !== undefined && row.expires_at > this.now();
   }
 
+  private lockKey(resource: string, allowExisting = false): string {
+    const key = resource.trim();
+    if (
+      !key ||
+      key.length > 1000 ||
+      [...key].some(
+        (character) =>
+          character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      )
+    )
+      throw new KonfabError(
+        "invalid_resource",
+        400,
+        "Provide a resource key without control characters.",
+      );
+    if (!key.startsWith("repo:")) return key;
+    const separator = key.lastIndexOf("#");
+    const folder = key.slice(5, separator),
+      branch = key.slice(separator + 1);
+    if (separator <= 5 || !isAbsolute(folder) || !branch || /\s/.test(branch))
+      throw new KonfabError(
+        "invalid_resource",
+        400,
+        "Use repo:/absolute/path#branch.",
+      );
+    try {
+      return `repo:${realpathSync(folder)}#${branch}`;
+    } catch {
+      if (
+        allowExisting &&
+        this.db.prepare("SELECT 1 FROM write_locks WHERE resource=?").get(key)
+      )
+        return key;
+      throw new KonfabError(
+        "invalid_resource",
+        400,
+        "The repository folder must exist.",
+      );
+    }
+  }
+
+  private expireLocks(): void {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM write_locks WHERE expires_at<=? OR session_id NOT IN (SELECT id FROM sessions WHERE state='active')",
+      )
+      .all(this.now()) as Array<{
+      resource: string;
+      room_id: number;
+      agent_id: string;
+    }>;
+    const remove = this.db.prepare("DELETE FROM write_locks WHERE resource=?");
+    for (const row of rows) {
+      remove.run(row.resource);
+      this.logEvent("lock_expired", row.room_id, row.agent_id, {
+        resource: row.resource,
+      });
+    }
+  }
+
+  private releaseSessionLocks(sessionId: string, reason: string): void {
+    const locks = this.db
+      .prepare(
+        "SELECT resource,room_id,agent_id FROM write_locks WHERE session_id=?",
+      )
+      .all(sessionId) as Array<{
+      resource: string;
+      room_id: number;
+      agent_id: string;
+    }>;
+    this.db
+      .prepare("DELETE FROM write_locks WHERE session_id=?")
+      .run(sessionId);
+    for (const lock of locks)
+      this.logEvent("lock_released", lock.room_id, lock.agent_id, {
+        resource: lock.resource,
+        reason,
+      });
+  }
+
+  acquireLock(
+    agentId: string,
+    sessionId: string,
+    resource: string,
+    purpose: string,
+    leaseMinutes = 30,
+  ) {
+    const key = this.lockKey(resource);
+    if (
+      !purpose.trim() ||
+      purpose.length > 300 ||
+      !Number.isInteger(leaseMinutes) ||
+      leaseMinutes < 1 ||
+      leaseMinutes > 240
+    )
+      throw new KonfabError(
+        "invalid_lock",
+        400,
+        "Provide a purpose and a lease from 1 to 240 minutes.",
+      );
+    const result = this.db.transaction(() => {
+      const session = this.requireLiveSession(agentId, sessionId);
+      if (session.state !== "active" || !this.isWindowActive(session))
+        throw new KonfabError(
+          "session_ended",
+          409,
+          "An active session is required to acquire a lock.",
+        );
+      const room = this.roomById(session.room_id);
+      if (room.archived_at !== null)
+        throw new KonfabError("room_archived", 409, "Room is archived.");
+      const member = this.db
+        .prepare(
+          "SELECT can_edit FROM room_members WHERE room_id=? AND agent_id=?",
+        )
+        .get(room.id, agentId) as { can_edit: number } | undefined;
+      if (!member?.can_edit)
+        throw new KonfabError(
+          "forbidden",
+          403,
+          "Only room members allowed to edit may acquire a write lock.",
+        );
+      this.expireLocks();
+      const existing = this.db
+        .prepare(
+          "SELECT resource,room_id,agent_id,session_id,purpose,acquired_at,expires_at FROM write_locks WHERE resource=?",
+        )
+        .get(key) as
+        | {
+            resource: string;
+            room_id: number;
+            agent_id: string;
+            session_id: string;
+            purpose: string;
+            acquired_at: number;
+            expires_at: number;
+          }
+        | undefined;
+      if (existing && existing.session_id !== sessionId) {
+        return {
+          granted: false,
+          lock: {
+            resource: existing.resource,
+            room_id: existing.room_id,
+            agent_id: existing.agent_id,
+            purpose: existing.purpose,
+            acquired_at: existing.acquired_at,
+            expires_at: existing.expires_at,
+          },
+        };
+      }
+      const now = this.now(),
+        expires = now + leaseMinutes * 60000;
+      this.db
+        .prepare(
+          `INSERT INTO write_locks(resource,room_id,agent_id,session_id,purpose,acquired_at,expires_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(resource) DO UPDATE SET purpose=excluded.purpose,expires_at=excluded.expires_at`,
+        )
+        .run(key, room.id, agentId, sessionId, purpose.trim(), now, expires);
+      this.logEvent(
+        existing ? "lock_renewed" : "lock_acquired",
+        room.id,
+        agentId,
+        { resource: key, purpose: purpose.trim(), expires_at: expires },
+      );
+      return {
+        granted: true,
+        lock: this.db
+          .prepare(
+            "SELECT resource,room_id,agent_id,purpose,acquired_at,expires_at FROM write_locks WHERE resource=?",
+          )
+          .get(key),
+      };
+    })();
+    this.notify();
+    return result;
+  }
+
+  releaseLock(agentId: string, sessionId: string, resource: string) {
+    const key = this.lockKey(resource, true);
+    const result = this.db.transaction(() => {
+      const session = this.requireLiveSession(agentId, sessionId);
+      this.expireLocks();
+      const row = this.db
+        .prepare("SELECT session_id FROM write_locks WHERE resource=?")
+        .get(key) as { session_id: string } | undefined;
+      if (!row) return { released: false };
+      if (row.session_id !== sessionId)
+        throw new KonfabError(
+          "forbidden",
+          403,
+          "Only the holding session can release this lock.",
+        );
+      this.db.prepare("DELETE FROM write_locks WHERE resource=?").run(key);
+      this.logEvent("lock_released", session.room_id, agentId, {
+        resource: key,
+      });
+      return { released: true };
+    })();
+    this.notify();
+    return result;
+  }
+
+  forceReleaseLock(ref: RoomRef, resource: string): void {
+    const room = this.room(ref),
+      key = this.lockKey(resource, true);
+    this.db.transaction(() => {
+      this.expireLocks();
+      const lock = this.db
+        .prepare(
+          "SELECT agent_id FROM write_locks WHERE resource=? AND room_id=?",
+        )
+        .get(key, room.id) as { agent_id: string } | undefined;
+      if (!lock)
+        throw new KonfabError(
+          "lock_not_found",
+          404,
+          "Active lock not found in this room.",
+        );
+      this.db.prepare("DELETE FROM write_locks WHERE resource=?").run(key);
+      this.insertMessage(
+        room.id,
+        "user",
+        "system",
+        `Lead released the advisory write lock ${key} held by ${lock.agent_id}.`,
+        [],
+      );
+      this.logEvent("lock_force_released", room.id, lock.agent_id, {
+        resource: key,
+      });
+    })();
+    this.notify();
+  }
+
   // Rooms
 
   createRoom(name: string, topic: string, agentIds: readonly string[]) {
@@ -1032,6 +1265,11 @@ export class KonfabService {
            WHERE room_id = ? AND state = 'active'`,
         )
         .run(this.now(), room.id);
+      const sessions = this.db
+        .prepare("SELECT DISTINCT session_id FROM write_locks WHERE room_id=?")
+        .all(room.id) as Array<{ session_id: string }>;
+      for (const session of sessions)
+        this.releaseSessionLocks(session.session_id, "room_archived");
       this.logEvent("room_archived", room.id, null, {});
     })();
     this.notify();
@@ -1393,6 +1631,11 @@ export class KonfabService {
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
+      locks: this.db
+        .prepare(
+          "SELECT resource,agent_id,purpose,acquired_at,expires_at FROM write_locks WHERE room_id=? AND expires_at>? ORDER BY resource",
+        )
+        .all(room.id, this.now()),
       routing: this.routingState(room),
       messages: this.decorateLeadUnread(
         room.id,
@@ -1451,6 +1694,7 @@ export class KonfabService {
     this.db.transaction(() => {
       const previous = this.activeSession(room.id, agentId);
       if (previous) {
+        this.releaseSessionLocks(previous.id, "replaced");
         this.db
           .prepare(
             "UPDATE sessions SET state = 'replaced', ended_at = ? WHERE id = ?",
@@ -2862,7 +3106,7 @@ export class KonfabService {
       .prepare(
         `SELECT id, type, agent_id, created_at, payload FROM events
       WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
-      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','handoff_repaired','automatic_scheduled','automatic_cancelled','automatic_capped','automatic_continuation','automatic_setting','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning')
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','handoff_repaired','automatic_scheduled','automatic_cancelled','automatic_capped','automatic_continuation','automatic_setting','lock_acquired','lock_renewed','lock_released','lock_expired','lock_force_released','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning')
       AND id < ? ORDER BY id DESC LIMIT ?`,
       )
       .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
@@ -3182,6 +3426,7 @@ export class KonfabService {
           this.endSession(session.id, "run_window_ended");
         }
       }
+      this.expireLocks();
       this.processAutomaticContinuations();
     })();
     this.notify();
@@ -3372,6 +3617,13 @@ export class KonfabService {
         `Only ${names} may edit files or repos in this room. Do not edit them yourself; describe the changes you suggest instead.`,
       );
     }
+    parts.push(
+      "Before writing to a shared checkout or pushing, acquire its advisory write lock and release it when done. Locks cannot enforce filesystem or network access.",
+    );
+    if (room.project_path)
+      parts.push(
+        `Suggested lock key for this project’s main branch: repo:${room.project_path}#main. Use the same key as collaborators and the actual branch for other branches.`,
+      );
     parts.push(RULES);
     return parts.join("\n\n");
   }
@@ -3577,6 +3829,7 @@ export class KonfabService {
         "UPDATE sessions SET state = 'ended', end_reason = ?, ended_at = ? WHERE id = ? AND state = 'active'",
       )
       .run(reason, this.now(), sessionId);
+    if (updated.changes) this.releaseSessionLocks(sessionId, reason);
     if (updated.changes && reason === "run_window_ended" && session)
       this.logEvent("run_window_ended", session.room_id, session.agent_id, {});
   }

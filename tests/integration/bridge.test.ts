@@ -556,9 +556,38 @@ describe("server and bridge", () => {
     });
   });
 
+  it("acquires and releases advisory locks through the bridge", async () => {
+    service.setMemberRole(ROOM, "claude", {
+      role: "",
+      can_edit: true,
+      base_role_revision: 0,
+    });
+    const joined = (await callTool("join_room", { room: ROOM })).value;
+    const acquired = await callTool("acquire_lock", {
+      session_id: joined.session_id,
+      resource: "shared:repo",
+      purpose: "edit",
+    });
+    expect(acquired.value.granted).toBe(true);
+    expect(service.roomState(ROOM).locks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resource: "shared:repo",
+          agent_id: "claude",
+        }),
+      ]),
+    );
+    const released = await callTool("release_lock", {
+      session_id: joined.session_id,
+      resource: "shared:repo",
+    });
+    expect(released.value.released).toBe(true);
+  });
+
   it("lists the Phase 0 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "acquire_lock",
       "hand_off",
       "join_room",
       "pass_turn",
@@ -569,6 +598,7 @@ describe("server and bridge", () => {
       "read_role",
       "read_role_file",
       "read_skill_file",
+      "release_lock",
       "report_status",
       "request_permission",
       "wait_for_turn",

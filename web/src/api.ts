@@ -201,6 +201,13 @@ export interface RoomState {
   };
   agents: RoomAgent[];
   queued: string[];
+  locks: Array<{
+    resource: string;
+    agent_id: string;
+    purpose: string;
+    acquired_at: number;
+    expires_at: number;
+  }>;
   messages: Message[];
   passes?: Pass[];
   activity: ActivityEvent[];
