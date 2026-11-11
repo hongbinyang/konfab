@@ -6,6 +6,7 @@ import { openDatabase } from "../../src/server/db/index.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 import { buildApp } from "../../src/server/api/app.js";
 import { RoleLibrary } from "../../src/server/domain/roles.js";
+import { SkillLibrary } from "../../src/server/domain/skills.js";
 
 describe("role reassignment", () => {
   it("atomically rotates roles, rejects stale changes, and preserves an active role across reopen", async () => {
@@ -164,6 +165,206 @@ describe("role reassignment", () => {
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("team role reassignment invariants", () => {
+  it("mixes swaps, removal and reviewed library assignment in one transaction", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const service = new KonfabService(db, {
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60000,
+        maxMessageChars: 1000,
+      });
+      for (const id of ["a", "b", "c", "d", "e", "f"])
+        service.ensureAgent(id, id.toUpperCase());
+      const room = service.createRoom("mixed", "", [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+      ]);
+      const roles = new RoleLibrary(db);
+      roles.seedBuiltins("src/server/roles/builtin");
+      const pack = roles.list()[0] as { id: string; revision_id: string };
+      roles.assign(room.id, "a", pack.id, pack.revision_id, "Moves with pack");
+      for (const id of ["b", "d", "e"])
+        service.setMemberRole(room.id, id, {
+          role: `Role ${id}`,
+          can_edit: id === "b",
+          base_role_revision: 0,
+        });
+      service.reassignRoles(room.id, [
+        { agent_id: "a", from_agent_id: "b", base_revision: 1 },
+        { agent_id: "b", from_agent_id: "a", base_revision: 1 },
+        { agent_id: "c", from_agent_id: "d", base_revision: 0 },
+        { agent_id: "d", from_agent_id: "c", base_revision: 1 },
+        { agent_id: "e", none: true, base_revision: 1 },
+        {
+          agent_id: "f",
+          role_id: pack.id,
+          role_revision_id: pack.revision_id,
+          notes: "New notes",
+          base_revision: 0,
+        },
+      ]);
+      const members = service.roomState(room.id).agents;
+      expect(members.find((m) => m.id === "a")?.role).toBe("Role b");
+      expect(members.find((m) => m.id === "b")?.can_edit).toBe(true);
+      expect(members.find((m) => m.id === "a")?.can_edit).toBe(false);
+      expect(members.find((m) => m.id === "c")?.role).toBe("Role d");
+      expect(members.find((m) => m.id === "d")?.role).toBe("");
+      expect(members.find((m) => m.id === "e")?.role).toBe("");
+      expect(roles.assignment(room.id, "b")).toEqual(
+        expect.objectContaining({ role_id: pack.id, notes: "Moves with pack" }),
+      );
+      expect(roles.assignment(room.id, "f")).toEqual(
+        expect.objectContaining({ role_id: pack.id, notes: "New notes" }),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back duplicate members, missing members, unreviewed roles and archived rooms", () => {
+    const root = mkdtempSync(join(tmpdir(), "konfab-unreviewed-"));
+    const db = openDatabase(":memory:");
+    try {
+      const service = new KonfabService(db, {
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60000,
+        maxMessageChars: 1000,
+      });
+      for (const id of ["a", "b", "c"]) service.ensureAgent(id, id);
+      const room = service.createRoom("reject", "", ["a", "b"]);
+      const skills = new SkillLibrary(db);
+      const library = skills.registerLibrary("personal", root);
+      const skill = skills.create(library, "example", "Example skill");
+      const revision = skills.detail(skill).current_revision_id;
+      db.prepare(
+        "INSERT INTO role_libraries(id,kind,root_path) VALUES ('personal','personal',?)",
+      ).run(join(root, "roles"));
+      const roles = new RoleLibrary(db);
+      const role = roles.createPersonal(
+        "personal",
+        "test-role",
+        [
+          {
+            path: "ROLE.md",
+            content: Buffer.from(
+              "---\nname: test-role\ntitle: Test\ndescription: Test role\n---\nBody",
+            ),
+            mode: 0o600,
+          },
+        ],
+        [{ skill_id: skill, revision_id: revision }],
+      );
+      const roleRevision = (
+        roles.detail(role) as unknown as { revision_id: string }
+      ).revision_id;
+      const before = () =>
+        JSON.stringify({
+          members: db
+            .prepare("SELECT * FROM room_members ORDER BY agent_id")
+            .all(),
+          assignments: db.prepare("SELECT * FROM room_member_roles").all(),
+          messages: db.prepare("SELECT * FROM messages").all(),
+          events: db.prepare("SELECT * FROM events").all(),
+        });
+      const baseline = before();
+      expect(() =>
+        service.reassignRoles(room.id, [
+          { agent_id: "a", none: true, base_revision: 0 },
+          { agent_id: "a", none: true, base_revision: 0 },
+        ]),
+      ).toThrow();
+      expect(before()).toBe(baseline);
+      expect(() =>
+        service.reassignRoles(room.id, [
+          { agent_id: "a", none: true, base_revision: 0 },
+          { agent_id: "c", none: true, base_revision: 0 },
+        ]),
+      ).toThrow();
+      expect(before()).toBe(baseline);
+      expect(() =>
+        service.reassignRoles(room.id, [
+          { agent_id: "a", none: true, base_revision: 0 },
+          {
+            agent_id: "b",
+            role_id: role,
+            role_revision_id: roleRevision,
+            base_revision: 0,
+          },
+        ]),
+      ).toThrow("reviewed skill");
+      expect(before()).toBe(baseline);
+      service.archiveRoom(room.id);
+      const archived = before();
+      expect(() =>
+        service.reassignRoles(room.id, [
+          { agent_id: "a", none: true, base_revision: 0 },
+        ]),
+      ).toThrow("archived");
+      expect(before()).toBe(archived);
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat the system handover as a lead reply and delivers it to agents", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const service = new KonfabService(db, {
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60000,
+        maxMessageChars: 1000,
+      });
+      service.ensureAgent("a", "A");
+      service.ensureAgent("b", "B");
+      const room = service.createRoom("system", "", ["a", "b"]);
+      const session = service.join("a", "system").session_id;
+      service.postUserMessage(room.id, "@a start");
+      const turn = service.poll("a", session, true);
+      if (turn.status !== "turn") throw new Error("missing turn");
+      service.postAgentMessage(
+        "a",
+        session,
+        turn.turn_id,
+        "Waiting for continuation",
+      );
+      expect(service.roomState(room.id).routing.no_continuation).toBe(true);
+      const count = (
+        db.prepare("SELECT count(*) AS n FROM turns").get() as { n: number }
+      ).n;
+      service.reassignRoles(room.id, [
+        { agent_id: "a", from_agent_id: "b", base_revision: 0 },
+        { agent_id: "b", from_agent_id: "a", base_revision: 0 },
+      ]);
+      expect(service.roomState(room.id).routing.no_continuation).toBe(true);
+      expect(
+        (db.prepare("SELECT count(*) AS n FROM turns").get() as { n: number })
+          .n,
+      ).toBe(count);
+      service.postUserMessage(room.id, "@a next");
+      const next = service.poll("a", session, true);
+      if (next.status !== "turn") throw new Error("missing turn");
+      expect(next.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sender_type: "system",
+            sender_id: "system",
+            mentions: [],
+          }),
+        ]),
+      );
+      expect(service.exportRoom(room.id).markdown).toContain("## System (");
+    } finally {
+      db.close();
     }
   });
 });
