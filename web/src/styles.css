@@ -923,3 +923,31 @@ dd {
     grid-template-columns: 1fr;
   }
 }
+
+.team-roles {
+  width: min(54rem, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+  border: 1px solid #aab2bd;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+.team-roles::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+.team-roles .role-team-row {
+  border: 1px solid #d3d8df;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.team-roles .role-team-row button[draggable] {
+  max-width: 100%;
+  white-space: normal;
+}
+.team-roles pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16rem;
+  overflow: auto;
+}

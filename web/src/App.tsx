@@ -15,6 +15,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import { Library } from "./Library";
 import { ConvertRoles } from "./ConvertRoles";
 import { RolePicker } from "./RolePicker";
+import { TeamRoles } from "./TeamRoles";
 import {
   request,
   uploadAttachment,
@@ -390,6 +391,7 @@ function Room({
   pageConnected: boolean;
 }) {
   const { room, agents } = state;
+  const [teamRolesOpen, setTeamRolesOpen] = useState(false);
   const [olderMessages, setOlderMessages] = useState<RoomState["messages"]>([]);
   const [olderReadInfo, setOlderReadInfo] = useState<LeadReadInfo | null>(null);
   const messages = useMemo(
@@ -714,6 +716,14 @@ function Room({
 
   return (
     <>
+      {teamRolesOpen && (
+        <TeamRoles
+          roomId={room.id}
+          agents={agents}
+          onClose={() => setTeamRolesOpen(false)}
+          onApplied={() => void act(async () => {})}
+        />
+      )}
       <header className="room-header">
         {editing ? (
           <form className="stack" onSubmit={save}>
@@ -788,6 +798,13 @@ function Room({
             </div>
             {!room.archived && (
               <div className="row">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setTeamRolesOpen(true)}
+                >
+                  Roles
+                </button>
                 <button
                   type="button"
                   className="secondary"
@@ -888,9 +905,11 @@ function Room({
             {results.map((message) => (
               <li key={message.id}>
                 <span className="sender">
-                  {message.sender_type === "user"
-                    ? "You (Lead)"
-                    : displayName(message.sender_id)}
+                  {message.sender_type === "system"
+                    ? "System"
+                    : message.sender_type === "user"
+                      ? "You (Lead)"
+                      : displayName(message.sender_id)}
                 </span>
                 <span className="time">{formatTime(message.created_at)}</span>
                 <div className="body">
@@ -986,9 +1005,11 @@ function Room({
                 }`}
               >
                 <span className="sender">
-                  {item.sender_type === "user"
-                    ? "You (Lead)"
-                    : displayName(item.sender_id)}
+                  {item.sender_type === "system"
+                    ? "System"
+                    : item.sender_type === "user"
+                      ? "You (Lead)"
+                      : displayName(item.sender_id)}
                 </span>
                 <span className="time">{formatTime(item.created_at)}</span>
                 <div className="body">
@@ -2296,6 +2317,7 @@ function Agents({
             {member ? (
               <AgentDetails
                 agent={member}
+                peers={room.agents}
                 roomId={room.room.id}
                 archived={room.room.archived}
                 rolePickerEnabled={overview.ui?.role_picker ?? false}
@@ -2313,12 +2335,14 @@ function Agents({
 
 function AgentDetails({
   agent,
+  peers,
   roomId,
   archived,
   rolePickerEnabled,
   act,
 }: {
   agent: RoomAgent;
+  peers: RoomAgent[];
   roomId: number;
   archived: boolean;
   rolePickerEnabled: boolean;
@@ -2341,6 +2365,7 @@ function AgentDetails({
   const { stats } = agent;
   const [editingRole, setEditingRole] = useState(false);
   const [choosingRole, setChoosingRole] = useState(false);
+  const [swappingRole, setSwappingRole] = useState(false);
   const [availableUpdates, setAvailableUpdates] = useState<
     Array<{ name: string; status: string }>
   >([]);
@@ -2437,6 +2462,23 @@ function AgentDetails({
             .join(" · ")}
           . Current assignments stay pinned.
         </p>
+      )}
+      {!archived && (
+        <details>
+          <summary>Role actions</summary>
+          <button type="button" onClick={() => setSwappingRole(true)}>
+            Swap role…
+          </button>
+        </details>
+      )}
+      {swappingRole && (
+        <TeamRoles
+          roomId={roomId}
+          agents={peers}
+          selected={agent.id}
+          onClose={() => setSwappingRole(false)}
+          onApplied={() => void act(async () => {})}
+        />
       )}
       {choosingRole && (
         <RolePicker

@@ -1506,6 +1506,29 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     };
   });
 
+  app.post("/api/rooms/:id/roles/reassign", async (request) => {
+    const body = z
+      .object({
+        changes: z
+          .array(
+            z.object({
+              agent_id: z.string().min(1),
+              from_agent_id: z.string().min(1).optional(),
+              role_id: z.string().min(1).optional(),
+              role_revision_id: z.string().min(1).optional(),
+              notes: z.string().max(4000).optional(),
+              none: z.literal(true).optional(),
+              base_revision: z.number().int().nonnegative(),
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .parse(request.body);
+    service.reassignRoles(idParams.parse(request.params).id, body.changes);
+    return { ok: true };
+  });
+
   app.get("/api/overview", async () => ({
     ...service.overview(),
     ui: { role_picker: options.rolePicker ?? true },

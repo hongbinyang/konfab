@@ -447,6 +447,10 @@ const MIGRATIONS: readonly string[] = [
     state TEXT NOT NULL CHECK(state IN ('pending','complete')), created_at INTEGER NOT NULL
   );
   `,
+  `
+  ALTER TABLE turns ADD COLUMN swap_role_snapshot_json TEXT;
+  ALTER TABLE turns ADD COLUMN swap_role_text_snapshot TEXT;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

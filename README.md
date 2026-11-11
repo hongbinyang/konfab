@@ -34,7 +34,7 @@ Setup configures both desktop clients at user scope and backs up changed config 
 npm start
 ```
 
-Open the sign-in link it prints. To connect your apps and learn how to use Konfab, read the [user guide](docs/user-guide.md). Use **Change role** on a member card to find, review and assign a role or skill.
+Open the sign-in link it prints. To connect your apps and learn how to use Konfab, read the [user guide](docs/user-guide.md). Use **Change role** on a member card to find, review and assign a role or skill, or **Roles** in a room to rearrange the team.
 
 ## Stop
 
