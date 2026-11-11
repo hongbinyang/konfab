@@ -14,7 +14,12 @@ import type { Db } from "../db/index.js";
 import { SkillError } from "./skill-error.js";
 import { fileChunk } from "./file-chunk.js";
 import { roleMetadata } from "./role-files.js";
-import { packageHash, readSkillFiles, type SkillFile } from "./skill-files.js";
+import {
+  packageHash,
+  readSkillFiles,
+  validSkillName,
+  type SkillFile,
+} from "./skill-files.js";
 
 export class RoleLibrary {
   constructor(
@@ -210,11 +215,245 @@ export class RoleLibrary {
       )
       .get(roomId, agentId) as { role_assignment_revision: number } | undefined;
     if (!member) throw new SkillError("unavailable", 404, "Member unavailable");
+    const canRevert = this.db
+      .prepare(
+        "SELECT 1 FROM converted_role_history WHERE room_id=? AND agent_id=? AND reverted_at IS NULL AND assignment_revision=? AND role_id=?",
+      )
+      .get(
+        roomId,
+        agentId,
+        member.role_assignment_revision,
+        assignment?.role_id ?? "",
+      );
     return {
       ...(assignment ?? {}),
       revision: member.role_assignment_revision,
       assigned: !!assignment,
+      can_revert: !!canRevert,
     };
+  }
+
+  customAssignments() {
+    return this.db
+      .prepare(
+        `SELECT m.room_id, r.name AS room, m.agent_id, a.display_name,
+      m.role AS text, m.role_assignment_revision AS revision
+      FROM room_members m JOIN rooms r ON r.id = m.room_id JOIN agents a ON a.id = m.agent_id
+      LEFT JOIN room_member_roles p ON p.room_id = m.room_id AND p.agent_id = m.agent_id
+      WHERE r.archived_at IS NULL AND p.role_id IS NULL AND length(trim(m.role)) > 0
+      ORDER BY r.name, m.position`,
+      )
+      .all();
+  }
+
+  convertCustom(
+    groups: Array<{
+      name: string;
+      title: string;
+      description: string;
+      text: string;
+      assign: boolean;
+      members: Array<{ room_id: number; agent_id: string; revision: number }>;
+    }>,
+  ) {
+    if (!groups.length || groups.length > 100)
+      throw new SkillError("invalid_role", 400, "Choose roles to convert");
+    const library = this.db
+      .prepare("SELECT root_path FROM role_libraries WHERE id = 'personal'")
+      .get() as { root_path: string } | undefined;
+    if (!library)
+      throw new SkillError("unavailable", 404, "Personal role library missing");
+    const seenText = new Set<string>(),
+      seenMembers = new Set<string>(),
+      seenNames = new Set<string>();
+    const result = this.db.transaction(() => {
+      const converted: Array<{ id: string; revision_id: string }> = [];
+      for (const group of groups) {
+        if (
+          !group.text.trim() ||
+          seenText.has(group.text) ||
+          !group.members.length ||
+          group.members.length > 100
+        )
+          throw new SkillError(
+            "invalid_role",
+            400,
+            "Invalid or duplicate conversion group",
+          );
+        seenText.add(group.text);
+        if (!validSkillName(group.name))
+          throw new SkillError("invalid_role", 400, "Enter a valid role name");
+        if (
+          seenNames.has(group.name) ||
+          existsSync(join(library.root_path, group.name)) ||
+          this.db
+            .prepare(
+              "SELECT 1 FROM roles WHERE library_id = 'personal' AND folder_name = ?",
+            )
+            .get(group.name)
+        )
+          throw new SkillError(
+            "name_conflict",
+            409,
+            `Role name already exists: ${group.name}`,
+          );
+        seenNames.add(group.name);
+        const content = Buffer.from(
+          `---\nname: ${JSON.stringify(group.name)}\ntitle: ${JSON.stringify(group.title)}\ndescription: ${JSON.stringify(group.description)}\nskills: []\n---\n\n${group.text}`,
+        );
+        const files: SkillFile[] = [{ path: "ROLE.md", content, mode: 0o600 }];
+        const metadata = roleMetadata(files);
+        for (const member of group.members) {
+          const key = `${member.room_id}:${member.agent_id}`;
+          if (seenMembers.has(key))
+            throw new SkillError(
+              "invalid_role",
+              400,
+              "Member selected more than once",
+            );
+          seenMembers.add(key);
+          const current = this.db
+            .prepare(
+              `SELECT m.role, m.role_assignment_revision, r.archived_at,
+            (SELECT 1 FROM room_member_roles p WHERE p.room_id=m.room_id AND p.agent_id=m.agent_id) AS assigned
+            FROM room_members m JOIN rooms r ON r.id=m.room_id WHERE m.room_id=? AND m.agent_id=?`,
+            )
+            .get(member.room_id, member.agent_id) as
+            | {
+                role: string;
+                role_assignment_revision: number;
+                archived_at: number | null;
+                assigned: number | null;
+              }
+            | undefined;
+          if (
+            !current ||
+            current.archived_at !== null ||
+            current.assigned ||
+            current.role !== group.text ||
+            current.role_assignment_revision !== member.revision
+          )
+            throw new SkillError(
+              "role_conflict",
+              409,
+              "A selected assignment changed; refresh the preview",
+            );
+        }
+        const id = randomUUID(),
+          revision = randomUUID();
+        this.db
+          .prepare(
+            "INSERT INTO roles(id,library_id,folder_name,created_at) VALUES (?,'personal',?,?)",
+          )
+          .run(id, group.name, this.now());
+        this.insertRevision(
+          id,
+          revision,
+          1,
+          files,
+          [],
+          metadata,
+          this.roleHash(files, []),
+        );
+        this.db
+          .prepare("UPDATE roles SET current_revision_id=? WHERE id=?")
+          .run(revision, id);
+        this.db
+          .prepare(
+            "INSERT INTO role_workspace_operations(role_id,revision_id,state,created_at) VALUES (?,?,'pending',?)",
+          )
+          .run(id, revision, this.now());
+        if (group.assign)
+          for (const member of group.members) {
+            this.assign(
+              member.room_id,
+              member.agent_id,
+              id,
+              revision,
+              "",
+              member.revision,
+            );
+            this.db
+              .prepare(
+                "INSERT INTO converted_role_history(id,room_id,agent_id,original_text,role_id,assignment_revision,created_at) VALUES (?,?,?,?,?,?,?)",
+              )
+              .run(
+                randomUUID(),
+                member.room_id,
+                member.agent_id,
+                group.text,
+                id,
+                member.revision + 1,
+                this.now(),
+              );
+          }
+        converted.push({ id, revision_id: revision });
+      }
+      return converted;
+    })();
+    this.recoverWorkspaces();
+    return {
+      roles: result,
+      pending: result
+        .filter(
+          (role) =>
+            (
+              this.db
+                .prepare(
+                  "SELECT state FROM role_workspace_operations WHERE role_id=?",
+                )
+                .get(role.id) as { state: string }
+            ).state !== "complete",
+        )
+        .map((role) => role.id),
+    };
+  }
+
+  revertConversion(roomId: number, agentId: string, baseRevision: number) {
+    this.db.transaction(() => {
+      const history = this.db
+        .prepare(
+          `SELECT * FROM converted_role_history WHERE room_id=? AND agent_id=? AND reverted_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+        )
+        .get(roomId, agentId) as
+        | {
+            id: string;
+            original_text: string;
+            role_id: string;
+            assignment_revision: number;
+          }
+        | undefined;
+      const current = this.db
+        .prepare(
+          `SELECT m.role_assignment_revision, p.role_id FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
+        )
+        .get(roomId, agentId) as
+        | { role_assignment_revision: number; role_id: string | null }
+        | undefined;
+      if (
+        !history ||
+        !current ||
+        current.role_id !== history.role_id ||
+        current.role_assignment_revision !== baseRevision ||
+        history.assignment_revision !== baseRevision
+      )
+        throw new SkillError(
+          "role_conflict",
+          409,
+          "Assignment changed; cannot revert this conversion",
+        );
+      this.db
+        .prepare("DELETE FROM room_member_roles WHERE room_id=? AND agent_id=?")
+        .run(roomId, agentId);
+      this.db
+        .prepare(
+          "UPDATE room_members SET role=?, role_assignment_revision=role_assignment_revision+1 WHERE room_id=? AND agent_id=?",
+        )
+        .run(history.original_text, roomId, agentId);
+      this.db
+        .prepare("UPDATE converted_role_history SET reverted_at=? WHERE id=?")
+        .run(this.now(), history.id);
+    })();
   }
 
   revisions(id: string) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Markdown from "react-markdown";
 import { request } from "./api";
+import { ConvertRoles } from "./ConvertRoles";
 
 type Skill = {
   id: string;
@@ -748,6 +749,7 @@ function RolesView({
   >([]);
   const [skillChoice, setSkillChoice] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+  const [converting, setConverting] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [history, setHistory] = useState<
@@ -816,6 +818,17 @@ function RolesView({
   return (
     <section>
       <h2>Roles</h2>
+      <button onClick={() => setConverting(true)}>
+        Convert all custom roles
+      </button>
+      {converting && (
+        <ConvertRoles
+          onClose={() => {
+            setConverting(false);
+            void load();
+          }}
+        />
+      )}
       <button
         onClick={() => {
           setShowTrash(!showTrash);

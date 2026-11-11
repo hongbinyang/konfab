@@ -108,6 +108,56 @@ describe("page API", () => {
     ).toBe(409);
   });
 
+  it("converts and restores a custom member role through authenticated routes", async () => {
+    const room = service.createRoom("convert-test", "", ["codex"]);
+    service.setMemberRole(room.id, "codex", {
+      role: "Review the work",
+      can_edit: true,
+    });
+    const preview = await call("GET", "/api/roles/custom-assignments");
+    expect(preview.json().assignments).toEqual([
+      expect.objectContaining({
+        room_id: room.id,
+        agent_id: "codex",
+        text: "Review the work",
+        revision: 1,
+      }),
+    ]);
+    const converted = await call("POST", "/api/roles/convert-custom", {
+      groups: [
+        {
+          name: "review-work",
+          title: "Review work",
+          description: "Review the work",
+          text: "Review the work",
+          assign: true,
+          members: [{ room_id: room.id, agent_id: "codex", revision: 1 }],
+        },
+      ],
+    });
+    expect(converted.statusCode).toBe(200);
+    expect(converted.json().pending).toEqual([]);
+    expect(
+      (
+        await call(
+          "POST",
+          `/api/rooms/${room.id}/members/codex/revert-conversion`,
+          { base_revision: 1 },
+        )
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await call(
+          "POST",
+          `/api/rooms/${room.id}/members/codex/revert-conversion`,
+          { base_revision: 2 },
+        )
+      ).statusCode,
+    ).toBe(200);
+    expect(service.roomState(room.id).agents[0]?.role).toBe("Review the work");
+  });
+
   afterEach(async () => {
     await sources.close();
     await app.close();

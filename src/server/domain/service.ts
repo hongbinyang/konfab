@@ -899,7 +899,9 @@ export class KonfabService {
     const agents = this.db
       .prepare(
         `SELECT a.id, a.display_name, a.bridge_protocol, m.role, m.can_edit,
-         rr.title AS role_title, rr.number AS role_number FROM room_members m
+         rr.title AS role_title, rr.number AS role_number,
+         EXISTS(SELECT 1 FROM converted_role_history h WHERE h.room_id=m.room_id AND h.agent_id=m.agent_id AND h.role_id=mr.role_id AND h.assignment_revision=m.role_assignment_revision AND h.reverted_at IS NULL) AS role_can_revert
+         FROM room_members m
          JOIN agents a ON a.id = m.agent_id
          LEFT JOIN room_member_roles mr ON mr.room_id = m.room_id AND mr.agent_id = m.agent_id
          LEFT JOIN role_revisions rr ON rr.id = mr.role_revision_id
@@ -913,6 +915,7 @@ export class KonfabService {
       bridge_protocol: number | null;
       role_title: string | null;
       role_number: number | null;
+      role_can_revert: number;
     }[];
     const queued = this.db
       .prepare(
@@ -945,6 +948,7 @@ export class KonfabService {
           role_pack_label: agent.role_title
             ? `${agent.role_title} rev ${agent.role_number}`
             : null,
+          role_can_revert: agent.role_can_revert === 1,
           can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
           bridge_outdated:

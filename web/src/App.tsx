@@ -13,6 +13,7 @@ import {
 import Markdown from "react-markdown";
 import { EmojiPicker } from "./EmojiPicker";
 import { Library } from "./Library";
+import { ConvertRoles } from "./ConvertRoles";
 import {
   request,
   uploadAttachment,
@@ -2335,6 +2336,7 @@ function AgentDetails({
   const [copied, setCopied] = useState(false);
   const { stats } = agent;
   const [editingRole, setEditingRole] = useState(false);
+  const [convertingRole, setConvertingRole] = useState(false);
   const [role, setRole] = useState(agent.role);
   const [canEdit, setCanEdit] = useState(agent.can_edit);
   const [rolePacks, setRolePacks] = useState<
@@ -2397,6 +2399,13 @@ function AgentDetails({
         </p>
       )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}
+      {convertingRole && (
+        <ConvertRoles
+          roomId={roomId}
+          agentId={agent.id}
+          onClose={() => setConvertingRole(false)}
+        />
+      )}
       <CollapsibleSection
         title="Details"
         accessibleLabel={`${agent.display_name} details`}
@@ -2683,6 +2692,43 @@ function AgentDetails({
         </details>
       </CollapsibleSection>
       <div className="agent-actions">
+        {!archived && !agent.role_pack_label && !!agent.role.trim() && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setConvertingRole(true)}
+          >
+            Save as role pack
+          </button>
+        )}
+        {!archived && agent.role_can_revert && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              void act(async () => {
+                const current = await request<{
+                  assignment: { revision: number; can_revert: boolean };
+                }>(`/api/rooms/${roomId}/members/${agent.id}/role-preview`);
+                if (!current.assignment.can_revert)
+                  throw new Error(
+                    "No unchanged converted assignment is available to revert",
+                  );
+                if (!window.confirm("Restore the original custom role text?"))
+                  return;
+                await request(
+                  `/api/rooms/${roomId}/members/${agent.id}/revert-conversion`,
+                  {
+                    method: "POST",
+                    body: { base_revision: current.assignment.revision },
+                  },
+                );
+              })
+            }
+          >
+            Revert to custom text
+          </button>
+        )}
         {!archived && (
           <button
             type="button"

@@ -956,6 +956,55 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       .parse(request.query);
     return { roles: roleService().list(trash === "true") };
   });
+  app.get("/api/roles/custom-assignments", async () => ({
+    assignments: roleService().customAssignments(),
+  }));
+  app.post("/api/roles/convert-custom", async (request) => {
+    const body = z
+      .object({
+        groups: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(128),
+              title: z.string().min(1).max(100),
+              description: z.string().min(1).max(1024),
+              text: z.string().min(1).max(20000),
+              assign: z.boolean(),
+              members: z
+                .array(
+                  z.object({
+                    room_id: z.number().int().positive(),
+                    agent_id: z.string().min(1),
+                    revision: z.number().int().nonnegative(),
+                  }),
+                )
+                .min(1)
+                .max(100),
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .parse(request.body);
+    const result = roleService().convertCustom(body.groups);
+    for (const group of body.groups)
+      if (group.assign)
+        for (const member of group.members)
+          service.rolesChanged(member.room_id, member.agent_id);
+    return result;
+  });
+  app.post(
+    "/api/rooms/:id/members/:agentId/revert-conversion",
+    async (request) => {
+      const params = memberParams.parse(request.params);
+      const { base_revision } = z
+        .object({ base_revision: z.number().int().nonnegative() })
+        .parse(request.body);
+      roleService().revertConversion(params.id, params.agentId, base_revision);
+      service.rolesChanged(params.id, params.agentId);
+      return { ok: true };
+    },
+  );
   app.post("/api/roles", async (request) => {
     const body = z
       .object({

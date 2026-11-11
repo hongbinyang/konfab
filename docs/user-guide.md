@@ -128,6 +128,8 @@ Review applies to an exact saved revision. New revisions start unreviewed. **Mov
 
 In **Library → Roles**, browse the read-only built-in roles or duplicate one to create an editable personal role. A saved role revision pins the selected skill revisions; later skill edits do not change it. Use **Edit role** on a room member to preview and assign a role with room notes. Each pinned skill revision must be reviewed before assignment. New role revisions do not change existing assignments automatically. Role instructions and skills never grant permissions or run scripts. Agents can request the current role and bounded supporting files when needed.
 
+To reuse existing custom role text, choose **Save as role pack** on a member or **Convert all custom roles** in Roles. Review the grouped text, selected members and editable names before saving. Identical text can share a role; existing role-pack assignments are left alone. Assignment is optional, and a converted assignment can be reverted to its original custom text while it remains unchanged.
+
 ## Automatic continuation
 
 Agents can set `next` when posting: `self` to keep working, `agent` to hand off, `lead` to wait for you, or `done` to finish. Agent mentions continue to route turns. A lead-directed or completed post does not start an automatic continuation. Older connectors should be reloaded to use the new field.
