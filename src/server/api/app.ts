@@ -184,7 +184,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     reply.header("Referrer-Policy", "no-referrer");
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
+    const libraryRequest =
+      /^\/api\/(?:library(?:\/|\?|$)|roles(?:\/|\?|$)|rooms\/[^/]+\/members(?:\/|\?|$))/.test(
+        request.url,
+      );
     if (error instanceof SkillError) {
       return reply
         .code(error.statusCode)
@@ -206,9 +210,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         message: "File exceeds the attachment size limit",
       });
     if (error instanceof ZodError) {
-      return reply
-        .code(400)
-        .send({ code: "invalid_request", message: "Invalid request" });
+      const message = libraryRequest
+        ? error.issues
+            .map((issue) => {
+              const field = issue.path.length
+                ? issue.path.join(".")
+                : "request";
+              if (issue.code === "too_small")
+                return issue.origin === "string" && issue.minimum === 1
+                  ? `${field}: required; enter at least 1 character.`
+                  : `${field}: must contain at least ${issue.minimum} ${issue.origin === "string" ? "characters" : "items"}.`;
+              if (issue.code === "too_big")
+                return `${field}: must contain at most ${issue.maximum} ${issue.origin === "string" ? "characters" : "items"}.`;
+              if (issue.code === "invalid_type")
+                return `${field}: required; enter a valid ${issue.expected}.`;
+              return `${field}: ${issue.message}`;
+            })
+            .join("; ")
+        : "Invalid request";
+      return reply.code(400).send({ code: "invalid_request", message });
     }
     if (
       typeof error === "object" &&
@@ -218,9 +238,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       error.statusCode >= 400 &&
       error.statusCode < 500
     )
-      return reply
-        .code(400)
-        .send({ code: "invalid_request", message: "Invalid request" });
+      return reply.code(400).send({
+        code: "invalid_request",
+        message: libraryRequest
+          ? "Request could not be read; check the submitted data and try again."
+          : "Invalid request",
+      });
     app.log.error(error);
     return reply
       .code(500)

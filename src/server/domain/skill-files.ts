@@ -125,6 +125,10 @@ export function packageHash(files: SkillFile[]): string {
   return hash.digest("hex");
 }
 
+export function invalidNameMessage(name: string): string {
+  return `Invalid name ${JSON.stringify(name)}: use 1–64 lowercase letters or numbers separated by single hyphens; no spaces or leading, trailing, or consecutive hyphens.`;
+}
+
 export function validSkillName(name: string): boolean {
   return (
     [...name].length <= 64 &&
@@ -161,12 +165,20 @@ export function skillMetadata(files: SkillFile[]): {
     throw new SkillError("invalid_skill", 400, "Frontmatter must be a mapping");
   const { name, description } = value as Record<string, unknown>;
   if (typeof name !== "string" || !validSkillName(name))
-    throw new SkillError("invalid_skill", 400, "Invalid skill name");
+    throw new SkillError(
+      "invalid_skill",
+      400,
+      invalidNameMessage(typeof name === "string" ? name : ""),
+    );
   if (
     typeof description !== "string" ||
     !description.trim() ||
     [...description].length > 1024
   )
-    throw new SkillError("invalid_skill", 400, "Invalid skill description");
+    throw new SkillError(
+      "invalid_skill",
+      400,
+      "Description: enter 1–1,024 characters.",
+    );
   return { name, description };
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { request } from "./api";
+import { NameField } from "./NameField";
+import { suggestName, validName } from "./name-validation";
 
 type Assignment = {
   room_id: number;
@@ -12,6 +14,7 @@ type Assignment = {
 type Group = {
   name: string;
   title: string;
+  nameEdited: boolean;
   description: string;
   text: string;
   assign: boolean;
@@ -50,15 +53,13 @@ export function ConvertRoles({
                 .split(/\r?\n/)
                 .find((line) => line.trim())
                 ?.trim() ?? "Converted custom role";
-            const slug =
-              first
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-+|-+$/g, "")
-                .slice(0, 60)
-                .replace(/-+$/g, "") || "custom-role";
+            const slug = [...(suggestName(first) || "custom-role")]
+              .slice(0, 60)
+              .join("")
+              .replace(/-+$/g, "");
             return {
               name: `${slug}-${index + 1}`,
+              nameEdited: false,
               title: [...first].slice(0, 100).join(""),
               description: [...first].slice(0, 1024).join(""),
               text,
@@ -151,18 +152,23 @@ export function ConvertRoles({
               {member.display_name} in #{member.room}
             </label>
           ))}
-          <label>
-            Name
-            <input
-              value={group.name}
-              onChange={(e) => update(index, { name: e.target.value })}
-            />
-          </label>
+          <NameField
+            label="Name"
+            value={group.name}
+            onChange={(name) => update(index, { name, nameEdited: true })}
+          />
           <label>
             Title
             <input
               value={group.title}
-              onChange={(e) => update(index, { title: e.target.value })}
+              onChange={(e) =>
+                update(index, {
+                  title: e.target.value,
+                  ...(!group.nameEdited
+                    ? { name: suggestName(e.target.value) }
+                    : {}),
+                })
+              }
             />
           </label>
           <label>
@@ -197,7 +203,8 @@ export function ConvertRoles({
             groups.some(
               (group) =>
                 group.selected &&
-                !group.members.some((member) => member.selected),
+                (!validName(group.name) ||
+                  !group.members.some((member) => member.selected)),
             )
           }
           onClick={() => void convert()}

@@ -126,13 +126,19 @@ export class SkillSources {
   add(owner: string, repository: string, ref = "HEAD"): string {
     owner = owner.toLowerCase();
     repository = repository.toLowerCase();
+    if (!PART.test(owner))
+      throw new SkillError(
+        "invalid_source",
+        400,
+        "Owner: use 1–100 letters, numbers, underscores, periods or hyphens, starting with a letter, number or underscore; no spaces.",
+      );
+    if (!PART.test(repository))
+      throw new SkillError(
+        "invalid_source",
+        400,
+        "Repository: use 1–100 letters, numbers, underscores, periods or hyphens, starting with a letter, number or underscore; no spaces.",
+      );
     if (
-      !PART.test(owner) ||
-      !PART.test(repository) ||
-      owner === "." ||
-      owner === ".." ||
-      repository === "." ||
-      repository === ".." ||
       !/^[A-Za-z0-9_./-]{1,200}$/.test(ref) ||
       ref.includes("..") ||
       ref.startsWith("/") ||
@@ -141,7 +147,7 @@ export class SkillSources {
       throw new SkillError(
         "invalid_source",
         400,
-        "Enter a valid GitHub owner, repository and ref",
+        "Ref: use 1–200 letters, numbers, underscores, periods, slashes or hyphens; no spaces, consecutive periods, or leading or trailing slash.",
       );
     const id = randomUUID();
     try {

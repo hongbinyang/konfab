@@ -1,6 +1,11 @@
 import { parseDocument } from "yaml";
 import { SkillError } from "./skill-error.js";
-import { packageHash, validSkillName, type SkillFile } from "./skill-files.js";
+import {
+  invalidNameMessage,
+  packageHash,
+  validSkillName,
+  type SkillFile,
+} from "./skill-files.js";
 
 export type RoleMetadata = {
   name: string;
@@ -70,14 +75,16 @@ export function roleMetadata(files: SkillFile[]): RoleMetadata {
   const title = typeof metadata.title === "string" ? metadata.title.trim() : "";
   const description =
     typeof metadata.description === "string" ? metadata.description.trim() : "";
-  if (
-    !validSkillName(name) ||
-    !title ||
-    [...title].length > 100 ||
-    !description ||
-    [...description].length > 1024
-  )
-    throw new SkillError("invalid_role", 400, "Invalid role metadata");
+  if (!validSkillName(name))
+    throw new SkillError("invalid_role", 400, invalidNameMessage(name));
+  if (!title || [...title].length > 100)
+    throw new SkillError("invalid_role", 400, "Title: enter 1–100 characters.");
+  if (!description || [...description].length > 1024)
+    throw new SkillError(
+      "invalid_role",
+      400,
+      "Description: enter 1–1,024 characters.",
+    );
   return { name, title, description };
 }
 

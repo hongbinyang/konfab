@@ -23,6 +23,7 @@ import {
   readSkillFiles,
   skillMetadata,
   validSkillName,
+  invalidNameMessage,
   type SkillFile,
 } from "./skill-files.js";
 
@@ -979,7 +980,7 @@ export class SkillLibrary {
     baseDraftHash: string,
   ): string {
     if (!validSkillName(name))
-      throw new SkillError("invalid_skill", 400, "Invalid skill name");
+      throw new SkillError("invalid_skill", 400, invalidNameMessage(name));
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -1131,7 +1132,7 @@ export class SkillLibrary {
     name: string,
   ): string {
     if (!validSkillName(name))
-      throw new SkillError("invalid_skill", 400, "Invalid skill name");
+      throw new SkillError("invalid_skill", 400, invalidNameMessage(name));
     const source = this.db
       .prepare("SELECT id FROM skill_revisions WHERE id = ? AND skill_id = ?")
       .get(revisionId, sourceId);
@@ -1187,15 +1188,13 @@ export class SkillLibrary {
   }
 
   create(libraryId: string, name: string, description: string): string {
-    if (
-      !validSkillName(name) ||
-      !description.trim() ||
-      [...description].length > 1024
-    )
+    if (!validSkillName(name))
+      throw new SkillError("invalid_skill", 400, invalidNameMessage(name));
+    if (!description.trim() || [...description].length > 1024)
       throw new SkillError(
         "invalid_skill",
         400,
-        "Invalid skill name or description",
+        "Description: enter 1–1,024 characters.",
       );
     const lib = this.db
       .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
@@ -1220,7 +1219,7 @@ export class SkillLibrary {
     licence: string | null,
   ): string {
     if (!validSkillName(folder))
-      throw new SkillError("invalid_skill", 400, "Invalid destination name");
+      throw new SkillError("invalid_skill", 400, invalidNameMessage(folder));
     const library = this.db
       .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
       .get(libraryId) as { root_path: string } | undefined;
@@ -1314,7 +1313,7 @@ export class SkillLibrary {
     diagnostic: string,
   ): string {
     if (!validSkillName(folder))
-      throw new SkillError("invalid_skill", 400, "Invalid destination name");
+      throw new SkillError("invalid_skill", 400, invalidNameMessage(folder));
     if (
       !this.db
         .prepare("SELECT 1 FROM skill_libraries WHERE id = ?")
@@ -1374,7 +1373,9 @@ export class SkillLibrary {
     manifest: string,
     baseRevision: number,
   ): number {
-    if (!validSkillName(folder) || Buffer.byteLength(manifest) > 512 * 1024)
+    if (!validSkillName(folder))
+      throw new SkillError("invalid_skill", 400, invalidNameMessage(folder));
+    if (Buffer.byteLength(manifest) > 512 * 1024)
       throw new SkillError("invalid_skill", 400, "Invalid draft");
     return this.db.transaction(() => {
       const changed = this.db

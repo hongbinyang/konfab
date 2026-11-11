@@ -18,6 +18,7 @@ import {
   packageHash,
   readSkillFiles,
   validSkillName,
+  invalidNameMessage,
   type SkillFile,
 } from "./skill-files.js";
 
@@ -282,7 +283,11 @@ export class RoleLibrary {
           );
         seenText.add(group.text);
         if (!validSkillName(group.name))
-          throw new SkillError("invalid_role", 400, "Enter a valid role name");
+          throw new SkillError(
+            "invalid_role",
+            400,
+            invalidNameMessage(group.name),
+          );
         if (
           seenNames.has(group.name) ||
           existsSync(join(library.root_path, group.name)) ||
