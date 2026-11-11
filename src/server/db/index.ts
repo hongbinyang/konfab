@@ -474,6 +474,21 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX write_locks_session ON write_locks(session_id);
   `,
+  `
+  CREATE TABLE format_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, room_id INTEGER NOT NULL REFERENCES rooms(id),
+    kind TEXT NOT NULL CHECK(kind IN ('review','debate')), topic TEXT NOT NULL, rounds INTEGER NOT NULL,
+    steps_json TEXT NOT NULL, current_step INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL CHECK(state IN ('active','paused','completed','ended')),
+    created_at INTEGER NOT NULL, ended_at INTEGER
+  );
+  CREATE UNIQUE INDEX one_open_format ON format_runs(room_id) WHERE state IN ('active','paused');
+  ALTER TABLE turns ADD COLUMN format_run_id INTEGER REFERENCES format_runs(id);
+  ALTER TABLE turns ADD COLUMN format_step_index INTEGER;
+  DROP INDEX one_queued_turn;
+  CREATE UNIQUE INDEX one_queued_turn ON turns(room_id, agent_id) WHERE state='queued' AND format_run_id IS NULL;
+  CREATE UNIQUE INDEX one_format_step_turn ON turns(format_run_id, format_step_index) WHERE state IN ('queued','active') AND format_run_id IS NOT NULL;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

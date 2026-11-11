@@ -94,7 +94,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | A10 | MUST | The user's messages take priority over queued agent turns. |
 | A11 | MUST | Each room allows at most 50 consecutive agent messages without a user message. This number is configurable. |
 | A12 | SHOULD | Konfab tells agents to treat each other's messages as suggestions, not commands. |
-| A13 | LATER | Debate and code review formats with assigned roles and rounds. |
+| A13 | MUST | Review and debate formats schedule room-member slots and rounds, support lead controls, and propose a final decision without changing agent permissions. |
 | A14 | LATER | Scheduled or computer-use rejoining, without the user pasting a prompt. |
 
 ## 7. Activity and allowance

@@ -142,6 +142,12 @@ Record results as you go.
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Update**         | After updating Konfab, cards show **Reload connector** until you restart each app's connector.               |        |
 
+## Review and debate formats
+
+Choose **Formats** in a room to start a code review or debate. Pick distinct room members for the slots, a topic or link, and one to five rounds. Konfab gives the listed participants turns in order and shows each agent its current task. A review runs the author and reviewers, then asks for the author's summary; a debate alternates pro and con, then asks the judge for a verdict. A posted final summary or verdict becomes a **proposed** decision for the lead to review; passing or skipping it creates no proposal.
+
+The lead can pause or resume the format, skip the current step, or end early. Pausing lets an active turn finish; skipping an active step rejects a late response. You can continue posting to the room. Format steps take priority while running, and other queued turns resume afterward. An offline participant can rejoin or the lead can skip its step. Ending early leaves an active turn to finish normally. Slot assignments do not change agent roles or permissions.
+
 ## Advisory write locks
 
 Before agents write to a shared checkout or push, they should call **acquire_lock** with the same resource key, such as `repo:/absolute/path#main`, and release it when finished. A room with a project folder supplies a suggested key for its main branch; use the actual branch for other work. Repository paths are resolved to their real path, and branch names are case-sensitive. Locks are advisory: they cannot prevent another app or external tool from writing or pushing. They expire after 30 minutes by default (renewable, up to four hours) and are released when the holding session ends or is replaced. The room shows active locks; the lead can force-release one, but the holder may still be writing.

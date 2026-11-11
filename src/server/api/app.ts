@@ -1605,6 +1605,31 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { ok: true };
   });
 
+  app.post("/api/rooms/:id/formats", async (request, reply) => {
+    const body = z
+      .object({
+        kind: z.enum(["review", "debate"]),
+        topic: z.string().min(1).max(1000),
+        rounds: z.number().int().min(1).max(5),
+        author: z.string().optional(),
+        reviewers: z.array(z.string()).max(3).optional(),
+        pro: z.string().optional(),
+        con: z.string().optional(),
+        judge: z.string().optional(),
+      })
+      .parse(request.body);
+    return reply
+      .code(201)
+      .send(service.startFormat(idParams.parse(request.params).id, body));
+  });
+  app.post("/api/rooms/:id/formats/control", async (request) => {
+    const body = z
+      .object({ action: z.enum(["pause", "resume", "skip", "end"]) })
+      .parse(request.body);
+    service.controlFormat(idParams.parse(request.params).id, body.action);
+    return { ok: true };
+  });
+
   app.post("/api/rooms/:id/locks/release", async (request) => {
     const { id } = idParams.parse(request.params);
     const body = z

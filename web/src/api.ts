@@ -201,6 +201,16 @@ export interface RoomState {
   };
   agents: RoomAgent[];
   queued: string[];
+  format: null | {
+    id: number;
+    kind: "review" | "debate";
+    topic: string;
+    rounds: number;
+    state: "active" | "paused";
+    current_step: number;
+    step_count: number;
+    step: null | { agent_id: string; slot: string; round: number };
+  };
   locks: Array<{
     resource: string;
     agent_id: string;

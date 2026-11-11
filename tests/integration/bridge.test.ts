@@ -556,6 +556,28 @@ describe("server and bridge", () => {
     });
   });
 
+  it("delivers a format banner through the bridge", async () => {
+    service.ensureAgent("reviewer", "Reviewer");
+    service.setMembers(ROOM, ["claude", "reviewer"]);
+    const joined = (await callTool("join_room", { room: ROOM })).value;
+    service.startFormat(ROOM, {
+      kind: "review",
+      topic: "Example change",
+      rounds: 1,
+      author: "claude",
+      reviewers: ["reviewer"],
+    });
+    const received = (
+      await callTool("wait_for_turn", { session_id: joined.session_id })
+    ).value;
+    expect(received.format).toMatchObject({
+      kind: "review",
+      topic: "Example change",
+      slot: "author introduction",
+      round: 1,
+    });
+  });
+
   it("acquires and releases advisory locks through the bridge", async () => {
     service.setMemberRole(ROOM, "claude", {
       role: "",
