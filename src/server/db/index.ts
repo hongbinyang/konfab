@@ -458,6 +458,14 @@ const MIGRATIONS: readonly string[] = [
     delivered_role_identity = (SELECT json_object('role', room_members.role, 'role_id', p.role_id, 'revision', p.role_revision_id, 'notes', p.notes) FROM (SELECT 1) x LEFT JOIN room_member_roles p ON p.room_id = room_members.room_id AND p.agent_id = room_members.agent_id),
     delivered_role_label = COALESCE((SELECT r.title FROM room_member_roles p JOIN role_revisions r ON r.id = p.role_revision_id WHERE p.room_id = room_members.room_id AND p.agent_id = room_members.agent_id), CASE WHEN length(trim(role)) > 0 THEN 'custom role' ELSE 'no role' END);
   `,
+  `
+  CREATE TABLE apps (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, token_hash TEXT UNIQUE, default_agent_id TEXT NOT NULL);
+  ALTER TABLE agents ADD COLUMN app_id TEXT REFERENCES apps(id);
+  ALTER TABLE agents ADD COLUMN archived_at INTEGER;
+  INSERT INTO apps(id,display_name,token_hash,default_agent_id) SELECT id,display_name,token_hash,id FROM agents;
+  UPDATE agents SET app_id=id;
+  CREATE INDEX agents_by_app ON agents(app_id,archived_at);
+  `,
 ];
 
 export function openDatabase(path: string): Db {

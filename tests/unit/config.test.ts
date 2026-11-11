@@ -77,3 +77,11 @@ pre_approvals:
     ).toThrow();
   });
 });
+
+it("sets the configurable per-app coordination limit", () => {
+  expect(parseConfig("{}").multi_agent.max_per_app).toBe(4);
+  expect(
+    parseConfig("multi_agent:\n  max_per_app: 7\n").multi_agent.max_per_app,
+  ).toBe(7);
+  expect(() => parseConfig("multi_agent:\n  max_per_app: 0\n")).toThrow();
+});

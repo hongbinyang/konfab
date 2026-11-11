@@ -71,6 +71,112 @@ describe("server and bridge", () => {
     db.close();
   });
 
+  it("keeps two agents on one app credential bound to their own sessions", async () => {
+    service.ensureAgent("codex", "Codex");
+    const otherToken = generateToken();
+    service.setAgentToken("codex", otherToken);
+    service.addAppAgent(
+      "claude",
+      "claude-dev",
+      "Developer",
+      service.roomState(ROOM).room.id,
+    );
+    service.setMembers(ROOM, ["claude", "claude-dev", "codex"]);
+    const first = (await callTool("join_room", { room: ROOM })).value;
+    const second = (
+      await callTool("join_room", { room: ROOM, as: "claude-dev" })
+    ).value;
+    expect(first.session_id).not.toBe(second.session_id);
+    expect(
+      (
+        await client.callTool({
+          name: "join_room",
+          arguments: { room: ROOM, as: "codex" },
+        })
+      ).isError,
+    ).toBe(true);
+    const forbidden = await app.inject({
+      method: "POST",
+      url: "/agent/wait",
+      headers: {
+        host: `127.0.0.1:${PORT}`,
+        authorization: `Bearer ${otherToken}`,
+      },
+      payload: { session_id: second.session_id, timeout_seconds: 0 },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    const before = service.roomState(ROOM).messages.length;
+    const missing = await app.inject({
+      method: "POST",
+      url: "/agent/post",
+      headers: { host: `127.0.0.1:${PORT}`, authorization: `Bearer ${token}` },
+      payload: { turn_id: 1, body: "Must not post" },
+    });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().message).toBe("session_id required");
+    expect(service.roomState(ROOM).messages).toHaveLength(before);
+    service.postUserMessage(ROOM, "@claude @claude-dev take turns");
+    const turn1 = (
+      await callTool("wait_for_turn", { session_id: first.session_id })
+    ).value;
+    expect(turn1.status).toBe("turn");
+    expect(
+      (
+        await callTool("post_message", {
+          session_id: first.session_id,
+          turn_id: turn1.turn_id,
+          body: "first",
+        })
+      ).isError,
+    ).not.toBe(true);
+    const turn2 = (
+      await callTool("wait_for_turn", { session_id: second.session_id })
+    ).value;
+    expect(turn2.status).toBe("turn");
+    expect(
+      (
+        await callTool("post_message", {
+          session_id: second.session_id,
+          turn_id: turn2.turn_id,
+          body: "second",
+        })
+      ).isError,
+    ).not.toBe(true);
+    expect(
+      service
+        .roomState(ROOM)
+        .messages.slice(-2)
+        .map((message) => message.sender_id),
+    ).toEqual(["claude", "claude-dev"]);
+    const replacement = (
+      await callTool("join_room", { room: ROOM, as: "claude-dev" })
+    ).value;
+    expect(replacement.session_id).not.toBe(second.session_id);
+    expect(
+      (await callTool("wait_for_turn", { session_id: second.session_id })).value
+        .status,
+    ).toBe("replaced");
+    expect(
+      (await callTool("wait_for_turn", { session_id: first.session_id })).value
+        .status,
+    ).toBe("idle");
+    service.setAgentToken("claude", "rotated-app-token");
+    expect(service.authenticateAgent(token)).toBeNull();
+    expect(service.authenticateAgent("rotated-app-token")).toBe("claude");
+    expect(service.appAgent("claude", "claude-dev")).toBe("claude-dev");
+    const resumed = await app.inject({
+      method: "POST",
+      url: "/agent/wait",
+      headers: {
+        host: `127.0.0.1:${PORT}`,
+        authorization: "Bearer rotated-app-token",
+      },
+      payload: { session_id: replacement.session_id, timeout_seconds: 0 },
+    });
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.json().status).toBe("idle");
+  });
+
   it("recovers a post after a transient startup outage", async () => {
     const { value: joined } = await callTool("join_room", { room: ROOM });
     service.postUserMessage(ROOM, "Please respond");

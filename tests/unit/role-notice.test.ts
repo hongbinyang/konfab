@@ -150,19 +150,22 @@ describe("role transition notice", () => {
     const db = new Database(":memory:");
     try {
       migrate(db, 24);
+      db.prepare(
+        "INSERT INTO agents(id,display_name,created_at) VALUES ('a','A',1)",
+      ).run();
+      db.prepare(
+        "INSERT INTO rooms(id,name,topic,created_at) VALUES (1,'upgrade','',1)",
+      ).run();
+      db.prepare(
+        "INSERT INTO room_members(room_id,agent_id,position,role) VALUES (1,'a',0,'Existing instructions')",
+      ).run();
+      migrate(db);
       const service = new KonfabService(db, {
         waitTimeoutSeconds: 1,
         turnTimeoutMs: 60000,
         maxMessageChars: 1000,
       });
-      service.ensureAgent("a", "A");
-      const room = service.createRoom("upgrade", "", ["a"]);
-      service.setMemberRole(room.id, "a", {
-        role: "Existing instructions",
-        can_edit: false,
-        base_role_revision: 0,
-      });
-      migrate(db);
+      const room = { id: 1 };
       const session = service.join("a", "upgrade").session_id;
       service.postUserMessage(room.id, "@a next");
       const turn = asTurn(service.poll("a", session, true));

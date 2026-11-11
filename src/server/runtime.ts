@@ -38,8 +38,17 @@ export function createRuntime(
     maxAttachmentBytes: config.defaults.max_attachment_mb * 1024 * 1024,
     attachmentDir: join(dirname(databaseFile), "files"),
     runWarningsMinutes: config.defaults.run_warnings_minutes,
-    runHoursFor: (agentId) =>
-      config.agents[agentId]?.run_hours ?? config.defaults.run_hours,
+    runHoursFor: (agentId) => {
+      const owner = db
+        .prepare("SELECT app_id FROM agents WHERE id=?")
+        .get(agentId) as { app_id: string | null } | undefined;
+      return (
+        config.agents[agentId]?.run_hours ??
+        config.agents[owner?.app_id ?? ""]?.run_hours ??
+        config.defaults.run_hours
+      );
+    },
+    maxAgentsPerApp: config.multi_agent.max_per_app,
     preApprovals: config.pre_approvals,
   });
   for (const [id, agent] of Object.entries(config.agents)) {

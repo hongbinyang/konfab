@@ -51,9 +51,9 @@ describe("built app over real processes", () => {
   let cookie: string;
   let roomId: number;
 
-  const runCli = (script: string): Promise<string> =>
+  const runCli = (script: string, args: string[] = []): Promise<string> =>
     new Promise((done, fail) => {
-      const child = spawn(process.execPath, [script], {
+      const child = spawn(process.execPath, [script, ...args], {
         cwd: ROOT,
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -362,6 +362,43 @@ describe("built app over real processes", () => {
     const turn = await tool(claude, "wait_for_turn", { session_id: second });
     expect(turn.status).toBe("turn");
     expect(turn.messages.at(-1).body).toBe("While you were away");
+  });
+
+  it("rotates an app credential for its default and named agents", async () => {
+    const added = await page("/api/apps/claude/agents", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "claude-dev",
+        display_name: "Dev",
+        room_id: roomId,
+      }),
+    });
+    expect(added.status).toBe(201);
+    const oldToken = tokens[0]!;
+    await runCli("dist/cli/setup.js", ["--rotate"]);
+    const setup = readFileSync(join(home, "app-setup.md"), "utf8");
+    const freshTokens = [...setup.matchAll(/kfb_[\w-]+/g)].map(
+      (match) => match[0],
+    );
+    expect(freshTokens[0]).not.toBe(oldToken);
+    const stale = await fetch(`${url}/agent/join`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        authorization: `Bearer ${oldToken}`,
+      },
+      body: JSON.stringify({ room: ROOM }),
+    });
+    expect(stale.status).toBe(401);
+    const named = await fetch(`${url}/agent/join`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        authorization: `Bearer ${freshTokens[0]}`,
+      },
+      body: JSON.stringify({ room: ROOM, as: "claude-dev" }),
+    });
+    expect(named.status).toBe(200);
   });
 
   it("protects the app and serves the built page", async () => {

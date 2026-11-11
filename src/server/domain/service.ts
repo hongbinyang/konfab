@@ -45,6 +45,7 @@ export interface ServiceOptions {
   runWarningsMinutes?: readonly number[];
   runHoursFor?: (agentId: string) => number;
   preApprovals?: readonly PreApproval[];
+  maxAgentsPerApp?: number;
 }
 
 export interface AttachmentView {
@@ -456,32 +457,184 @@ export class KonfabService {
   // Agents and authentication
 
   ensureAgent(id: string, displayName: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO agents (id, display_name, created_at) VALUES (?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name`,
-      )
-      .run(id, displayName, this.now());
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "INSERT INTO apps(id,display_name,default_agent_id) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name",
+        )
+        .run(id, displayName, id);
+      this.db
+        .prepare(
+          `INSERT INTO agents (id, display_name, created_at, app_id) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name`,
+        )
+        .run(id, displayName, this.now(), id);
+    })();
   }
 
   setAgentToken(id: string, token: string): void {
-    this.db
-      .prepare("UPDATE agents SET token_hash = ? WHERE id = ?")
-      .run(hashToken(token), id);
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE apps SET token_hash=? WHERE id=?")
+        .run(hashToken(token), id);
+      this.db
+        .prepare("UPDATE agents SET token_hash=? WHERE id=?")
+        .run(hashToken(token), id);
+    })();
   }
 
   agentHasToken(id: string): boolean {
     const row = this.db
-      .prepare("SELECT token_hash FROM agents WHERE id = ?")
+      .prepare("SELECT token_hash FROM apps WHERE id=?")
       .get(id) as { token_hash: string | null } | undefined;
     return row?.token_hash != null;
   }
 
   authenticateAgent(token: string): string | null {
     const row = this.db
-      .prepare("SELECT id FROM agents WHERE token_hash = ?")
+      .prepare("SELECT id FROM apps WHERE token_hash=?")
       .get(hashToken(token)) as { id: string } | undefined;
     return row?.id ?? null;
+  }
+
+  appAgent(appId: string, requested?: string): string {
+    const app = this.db
+      .prepare("SELECT default_agent_id FROM apps WHERE id=?")
+      .get(appId) as { default_agent_id: string } | undefined;
+    const id = requested ?? app?.default_agent_id;
+    if (
+      !id ||
+      !this.db
+        .prepare(
+          "SELECT 1 FROM agents WHERE id=? AND app_id=? AND archived_at IS NULL",
+        )
+        .get(id, appId)
+    )
+      throw new KonfabError(
+        "agent_unavailable",
+        403,
+        "Agent is unavailable for this app.",
+      );
+    return id;
+  }
+
+  sessionAgent(appId: string, sessionId: string): string {
+    const row = this.db
+      .prepare(
+        "SELECT s.agent_id FROM sessions s JOIN agents a ON a.id=s.agent_id WHERE s.id=? AND a.app_id=?",
+      )
+      .get(sessionId, appId) as { agent_id: string } | undefined;
+    if (!row)
+      throw new KonfabError(
+        "invalid_session",
+        403,
+        "Session is unavailable for this app.",
+      );
+    return row.agent_id;
+  }
+
+  addAppAgent(
+    appId: string,
+    id: string,
+    displayName: string,
+    roomId?: number,
+  ): void {
+    if (
+      !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(id) ||
+      id.length > 64 ||
+      !displayName.trim() ||
+      displayName.length > 100
+    )
+      throw new KonfabError(
+        "invalid_agent",
+        400,
+        "Use a lowercase agent ID with single hyphens and a display name.",
+      );
+    this.db.transaction(() => {
+      if (!this.db.prepare("SELECT 1 FROM apps WHERE id=?").get(appId))
+        throw new KonfabError("agent_unavailable", 404, "App unavailable.");
+      const count = this.db
+        .prepare(
+          "SELECT count(*) AS n FROM agents WHERE app_id=? AND archived_at IS NULL",
+        )
+        .get(appId) as { n: number };
+      if (count.n >= (this.options.maxAgentsPerApp ?? 4))
+        throw new KonfabError(
+          "agent_limit",
+          409,
+          "This app has reached its coordination limit.",
+        );
+      if (this.db.prepare("SELECT 1 FROM agents WHERE id=?").get(id))
+        throw new KonfabError(
+          "agent_exists",
+          409,
+          "That agent ID is already in use.",
+        );
+      this.db
+        .prepare(
+          "INSERT INTO agents(id,display_name,created_at,app_id) VALUES (?,?,?,?)",
+        )
+        .run(id, displayName.trim(), this.now(), appId);
+      if (roomId !== undefined) {
+        const room = this.room(roomId);
+        if (room.archived_at !== null)
+          throw new KonfabError("room_archived", 409, "This room is archived.");
+        this.replaceMembers(roomId, [...this.memberIds(roomId), id]);
+      }
+    })();
+    this.notify();
+  }
+
+  renameAppAgent(id: string, displayName: string): void {
+    if (!displayName.trim() || displayName.length > 100)
+      throw new KonfabError("invalid_agent", 400, "Provide a display name.");
+    const result = this.db
+      .prepare(
+        "UPDATE agents SET display_name=? WHERE id=? AND archived_at IS NULL",
+      )
+      .run(displayName.trim(), id);
+    if (!result.changes)
+      throw new KonfabError("agent_not_found", 404, "Agent unavailable.");
+    this.notify();
+  }
+
+  archiveAppAgent(id: string): void {
+    this.db.transaction(() => {
+      const agent = this.db
+        .prepare(
+          "SELECT a.app_id,p.default_agent_id FROM agents a JOIN apps p ON p.id=a.app_id WHERE a.id=? AND a.archived_at IS NULL",
+        )
+        .get(id) as { app_id: string; default_agent_id: string } | undefined;
+      if (!agent)
+        throw new KonfabError("agent_not_found", 404, "Agent unavailable.");
+      if (agent.default_agent_id === id)
+        throw new KonfabError(
+          "default_agent",
+          409,
+          "The default agent cannot be removed.",
+        );
+      if (
+        this.db
+          .prepare("SELECT 1 FROM sessions WHERE agent_id=? AND state='active'")
+          .get(id)
+      )
+        throw new KonfabError(
+          "agent_active",
+          409,
+          "End this agent's active sessions before removing it.",
+        );
+      const rooms = this.db
+        .prepare("SELECT room_id FROM room_members WHERE agent_id=?")
+        .all(id) as { room_id: number }[];
+      for (const { room_id } of rooms)
+        this.replaceMembers(
+          room_id,
+          this.memberIds(room_id).filter((member) => member !== id),
+        );
+      this.db
+        .prepare("UPDATE agents SET archived_at=? WHERE id=?")
+        .run(this.now(), id);
+    })();
+    this.notify();
   }
 
   createLoginCode(): string {
@@ -950,8 +1103,16 @@ export class KonfabService {
       archived_at: number | null;
     })[];
     const agents = this.db
-      .prepare("SELECT id, display_name FROM agents ORDER BY id")
-      .all() as { id: string; display_name: string }[];
+      .prepare(
+        "SELECT a.id,a.display_name,a.app_id,p.display_name AS app_name, (a.id=p.default_agent_id) AS is_default FROM agents a JOIN apps p ON p.id=a.app_id WHERE a.archived_at IS NULL ORDER BY p.id,a.id",
+      )
+      .all() as {
+      id: string;
+      display_name: string;
+      app_id: string;
+      app_name: string;
+      is_default: number;
+    }[];
     return {
       paused_all: this.isAllPaused(),
       rooms: rooms.map((room) => ({
@@ -964,6 +1125,12 @@ export class KonfabService {
         ...this.leadReadInfo(room.id),
       })),
       agents,
+      apps: this.db
+        .prepare(
+          "SELECT id,display_name,default_agent_id FROM apps ORDER BY id",
+        )
+        .all(),
+      max_agents_per_app: this.options.maxAgentsPerApp ?? 4,
       permissions: this.listPermissions("pending"),
       reports: this.listReports(),
       run_warnings: this.runWarnings(),
@@ -1222,7 +1389,7 @@ export class KonfabService {
                 }
               : null,
           stats: this.agentStats(room.id, agent.id),
-          join_prompt: this.joinPrompt(room.name),
+          join_prompt: this.joinPrompt(room.name, agent.id),
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
@@ -1239,9 +1406,21 @@ export class KonfabService {
     };
   }
 
-  joinPrompt(roomName: string): string {
+  joinPrompt(roomName: string, agentId?: string): string {
+    const owner = agentId
+      ? (this.db
+          .prepare(
+            "SELECT a.app_id,p.default_agent_id FROM agents a JOIN apps p ON p.id=a.app_id WHERE a.id=?",
+          )
+          .get(agentId) as
+          { app_id: string; default_agent_id: string } | undefined)
+      : undefined;
+    const target =
+      agentId && owner?.default_agent_id !== agentId
+        ? ` as ${agentId} (pass as="${agentId}" to join_room)`
+        : "";
     return [
-      `Join Konfab room "${roomName}" using the Konfab tools. Repeat this loop:`,
+      `Join Konfab room "${roomName}"${target} using the Konfab tools. Repeat this loop:`,
       "call wait_for_turn, and when you get a turn, do the work and either",
       "post_message or pass_turn. Set next on each post: self, agent, lead, or done.",
       "If the status is idle, call wait_for_turn again",
@@ -3247,7 +3426,11 @@ export class KonfabService {
   private replaceMembers(roomId: number, agentIds: readonly string[]): void {
     const unique = [...new Set(agentIds)];
     for (const agentId of unique) {
-      if (!this.db.prepare("SELECT 1 FROM agents WHERE id = ?").get(agentId)) {
+      if (
+        !this.db
+          .prepare("SELECT 1 FROM agents WHERE id = ? AND archived_at IS NULL")
+          .get(agentId)
+      ) {
         throw new KonfabError(
           "agent_not_found",
           404,
