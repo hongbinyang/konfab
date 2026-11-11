@@ -80,6 +80,14 @@ export type WaitResult = (
       room: string;
       topic: string;
       rules: string;
+      format?: {
+        kind: "review" | "debate";
+        topic: string;
+        round: number;
+        rounds: number;
+        slot: string;
+        instruction: string;
+      };
       role?:
         | ReturnType<RoleLibrary["envelope"]>
         | { changed: true; notice: string; removed?: true };
@@ -236,7 +244,28 @@ interface TurnRow {
   continuation_source_message_id: number | null;
   timeout_retry_count: number;
   started_at: number | null;
+  format_run_id: number | null;
+  format_step_index: number | null;
 }
+
+type FormatStep = {
+  agent_id: string;
+  slot: string;
+  round: number;
+  final?: boolean;
+};
+type FormatRun = {
+  id: number;
+  room_id: number;
+  kind: "review" | "debate";
+  topic: string;
+  rounds: number;
+  steps_json: string;
+  current_step: number;
+  state: "active" | "paused" | "completed" | "ended";
+  created_at: number;
+  ended_at: number | null;
+};
 
 interface MemberRow {
   agent_id: string;
@@ -1241,6 +1270,278 @@ export class KonfabService {
     this.notify();
   }
 
+  startFormat(
+    ref: RoomRef,
+    input: {
+      kind: "review" | "debate";
+      topic: string;
+      rounds: number;
+      author?: string;
+      reviewers?: string[];
+      pro?: string;
+      con?: string;
+      judge?: string;
+    },
+  ) {
+    const room = this.room(ref);
+    if (room.archived_at !== null)
+      throw new KonfabError("room_archived", 409, "Room is archived.");
+    const topic = input.topic.trim();
+    if (
+      !topic ||
+      topic.length > 1000 ||
+      !Number.isInteger(input.rounds) ||
+      input.rounds < 1 ||
+      input.rounds > 5
+    )
+      throw new KonfabError(
+        "invalid_format",
+        400,
+        "Provide a topic and 1 to 5 rounds.",
+      );
+    const slots =
+      input.kind === "review"
+        ? [input.author, ...(input.reviewers ?? [])]
+        : [input.pro, input.con, input.judge];
+    if (
+      (input.kind === "review" &&
+        (!input.author ||
+          !input.reviewers ||
+          input.reviewers.length < 1 ||
+          input.reviewers.length > 3)) ||
+      slots.some((id) => !id || !this.memberIds(room.id).includes(id)) ||
+      new Set(slots).size !== slots.length
+    )
+      throw new KonfabError(
+        "invalid_format",
+        400,
+        "Choose distinct room members for all slots.",
+      );
+    const steps: FormatStep[] = [];
+    if (input.kind === "review") {
+      for (let round = 1; round <= input.rounds; round++) {
+        steps.push({
+          agent_id: input.author!,
+          slot: round === 1 ? "author introduction" : "author",
+          round,
+        });
+        for (const reviewer of input.reviewers!)
+          steps.push({ agent_id: reviewer, slot: "reviewer", round });
+        steps.push({ agent_id: input.author!, slot: "author response", round });
+      }
+      steps.push({
+        agent_id: input.author!,
+        slot: "author summary",
+        round: input.rounds,
+        final: true,
+      });
+    } else {
+      for (let round = 1; round <= input.rounds; round++) {
+        steps.push({ agent_id: input.pro!, slot: "pro", round });
+        steps.push({ agent_id: input.con!, slot: "con", round });
+      }
+      steps.push({
+        agent_id: input.judge!,
+        slot: "judge verdict",
+        round: input.rounds,
+        final: true,
+      });
+    }
+    const runId = this.db.transaction(() => {
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM format_runs WHERE room_id=? AND state IN ('active','paused')",
+          )
+          .get(room.id)
+      )
+        throw new KonfabError(
+          "format_active",
+          409,
+          "A format is already running.",
+        );
+      const row = this.db
+        .prepare(
+          "INSERT INTO format_runs(room_id,kind,topic,rounds,steps_json,state,created_at) VALUES (?,?,?,?,?,'active',?)",
+        )
+        .run(
+          room.id,
+          input.kind,
+          topic,
+          input.rounds,
+          JSON.stringify(steps),
+          this.now(),
+        );
+      const id = Number(row.lastInsertRowid);
+      this.scheduleFormatStep(id);
+      this.logEvent("format_started", room.id, null, {
+        run_id: id,
+        kind: input.kind,
+      });
+      return id;
+    })();
+    this.notify();
+    return { id: runId };
+  }
+
+  private openFormat(roomId: number) {
+    const run = this.db
+      .prepare(
+        "SELECT * FROM format_runs WHERE room_id=? AND state IN ('active','paused')",
+      )
+      .get(roomId) as FormatRun | undefined;
+    if (!run) return null;
+    const steps = JSON.parse(run.steps_json) as FormatStep[];
+    return {
+      id: run.id,
+      kind: run.kind,
+      topic: run.topic,
+      rounds: run.rounds,
+      state: run.state,
+      current_step: run.current_step,
+      step_count: steps.length,
+      step: steps[run.current_step] ?? null,
+    };
+  }
+
+  private formatRun(id: number): FormatRun | undefined {
+    return this.db.prepare("SELECT * FROM format_runs WHERE id=?").get(id) as
+      FormatRun | undefined;
+  }
+
+  private scheduleFormatStep(id: number): void {
+    const run = this.formatRun(id);
+    if (!run || !["active", "paused"].includes(run.state)) return;
+    const step = (JSON.parse(run.steps_json) as FormatStep[])[run.current_step];
+    if (!step) return;
+    this.db
+      .prepare(
+        "INSERT INTO turns(room_id,agent_id,reason,state,created_at,format_run_id,format_step_index) VALUES (?,?,'user','queued',?,?,?)",
+      )
+      .run(run.room_id, step.agent_id, this.now(), run.id, run.current_step);
+    this.insertMessage(
+      run.room_id,
+      "user",
+      "system",
+      `Format ${run.kind}: round ${step.round} of ${run.rounds} · ${step.slot} ${step.agent_id}. Topic: ${run.topic}`,
+      [],
+    );
+  }
+
+  private advanceFormat(
+    turn: TurnRow,
+    body: string | null,
+    messageId: number | null,
+  ): boolean {
+    if (turn.format_run_id === null || turn.format_step_index === null)
+      return false;
+    const run = this.formatRun(turn.format_run_id);
+    if (
+      !run ||
+      !["active", "paused"].includes(run.state) ||
+      run.current_step !== turn.format_step_index
+    )
+      return false;
+    const steps = JSON.parse(run.steps_json) as FormatStep[],
+      step = steps[run.current_step];
+    if (!step) return false;
+    if (step.final && body && messageId !== null) {
+      const text =
+        body.length > 1950
+          ? `${body.slice(0, 1950)}\n\n[Full summary in source message.]`
+          : body;
+      this.createDecision(run.room_id, text, turn.agent_id, messageId);
+    }
+    const next = run.current_step + 1;
+    if (next >= steps.length) {
+      this.db
+        .prepare(
+          "UPDATE format_runs SET state='completed',current_step=?,ended_at=? WHERE id=?",
+        )
+        .run(next, this.now(), run.id);
+      this.insertMessage(
+        run.room_id,
+        "user",
+        "system",
+        body && step.final
+          ? "Format completed; the final message was filed as a decision proposal."
+          : "Format completed without a final decision proposal.",
+        [],
+      );
+      this.logEvent("format_completed", run.room_id, turn.agent_id, {
+        run_id: run.id,
+      });
+    } else {
+      this.db
+        .prepare("UPDATE format_runs SET current_step=? WHERE id=?")
+        .run(next, run.id);
+      this.scheduleFormatStep(run.id);
+    }
+    return true;
+  }
+
+  controlFormat(
+    ref: RoomRef,
+    action: "pause" | "resume" | "skip" | "end",
+  ): void {
+    const room = this.room(ref);
+    this.db.transaction(() => {
+      const run = this.db
+        .prepare(
+          "SELECT * FROM format_runs WHERE room_id=? AND state IN ('active','paused')",
+        )
+        .get(room.id) as FormatRun | undefined;
+      if (!run)
+        throw new KonfabError("format_not_found", 404, "No format is running.");
+      if (action === "pause" || action === "resume") {
+        this.db
+          .prepare("UPDATE format_runs SET state=? WHERE id=?")
+          .run(action === "pause" ? "paused" : "active", run.id);
+      } else if (action === "end") {
+        this.db
+          .prepare("UPDATE format_runs SET state='ended',ended_at=? WHERE id=?")
+          .run(this.now(), run.id);
+        this.db
+          .prepare(
+            "UPDATE turns SET state='dropped',ended_at=? WHERE format_run_id=? AND state='queued'",
+          )
+          .run(this.now(), run.id);
+        this.insertMessage(
+          room.id,
+          "user",
+          "system",
+          "Lead ended the format early; an active turn may finish normally.",
+          [],
+        );
+      } else {
+        const turn = this.db
+          .prepare(
+            "SELECT * FROM turns WHERE format_run_id=? AND format_step_index=? AND state IN ('queued','active')",
+          )
+          .get(run.id, run.current_step) as TurnRow | undefined;
+        if (!turn)
+          throw new KonfabError(
+            "format_unavailable",
+            409,
+            "Current step unavailable.",
+          );
+        this.db
+          .prepare("UPDATE turns SET state='skipped',ended_at=? WHERE id=?")
+          .run(this.now(), turn.id);
+        this.insertMessage(
+          room.id,
+          "user",
+          "system",
+          `Lead skipped ${turn.agent_id}'s format step.`,
+          [],
+        );
+        this.advanceFormat(turn, null, null);
+      }
+      this.logEvent("format_" + action, room.id, null, { run_id: run.id });
+    })();
+    this.notify();
+  }
+
   setMembers(ref: RoomRef, agentIds: readonly string[]): void {
     const room = this.room(ref);
     this.db.transaction(() => this.replaceMembers(room.id, agentIds))();
@@ -1270,6 +1571,11 @@ export class KonfabService {
         .all(room.id) as Array<{ session_id: string }>;
       for (const session of sessions)
         this.releaseSessionLocks(session.session_id, "room_archived");
+      this.db
+        .prepare(
+          "UPDATE format_runs SET state='ended',ended_at=? WHERE room_id=? AND state IN ('active','paused')",
+        )
+        .run(this.now(), room.id);
       this.logEvent("room_archived", room.id, null, {});
     })();
     this.notify();
@@ -1418,7 +1724,7 @@ export class KonfabService {
       .get(room.id) as { agent_id: string; turn_id: number } | undefined;
     const queued = this.db
       .prepare(
-        "SELECT agent_id, id AS turn_id, repair_source_message_id FROM turns WHERE room_id = ? AND state = 'queued' ORDER BY id",
+        "SELECT agent_id, id AS turn_id, repair_source_message_id FROM turns WHERE room_id = ? AND state = 'queued' AND (format_run_id IS NULL OR EXISTS (SELECT 1 FROM format_runs f WHERE f.id=turns.format_run_id AND f.state='active')) ORDER BY CASE WHEN format_run_id IS NULL THEN 1 ELSE 0 END, id",
       )
       .all(room.id) as {
       agent_id: string;
@@ -1565,7 +1871,7 @@ export class KonfabService {
     }[];
     const queued = this.db
       .prepare(
-        "SELECT agent_id FROM turns WHERE room_id = ? AND state = 'queued' ORDER BY id",
+        "SELECT agent_id FROM turns WHERE room_id = ? AND state = 'queued' AND (format_run_id IS NULL OR EXISTS (SELECT 1 FROM format_runs f WHERE f.id=turns.format_run_id AND f.state='active')) ORDER BY CASE WHEN format_run_id IS NULL THEN 1 ELSE 0 END, id",
       )
       .all(room.id) as { agent_id: string }[];
     const messages = this.recentMessages(room.id, 500);
@@ -1631,6 +1937,7 @@ export class KonfabService {
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
+      format: this.openFormat(room.id),
       locks: this.db
         .prepare(
           "SELECT resource,agent_id,purpose,acquired_at,expires_at FROM write_locks WHERE room_id=? AND expires_at>? ORDER BY resource",
@@ -1884,152 +2191,173 @@ export class KonfabService {
     next?: NextAction,
   ) {
     this.validateBody(body);
-    const result = this.db.transaction(() => {
-      const turn = this.requireTurn(turnId, agentId);
-      if (turn.result_message_id !== null) {
-        return turn.post_result_json
-          ? (JSON.parse(turn.post_result_json) as {
-              message_id: number;
-              routing_warning?: string;
-              hand_off?: { source_message_id: number; to: string };
-            })
-          : { message_id: turn.result_message_id };
-      }
-      const session = this.requireLiveSession(agentId, sessionId);
-      this.requireActive(turn, session.id);
-
-      const mentions = this.resolveMentions(turn.room_id, parseMentions(body));
-      const members = this.memberIds(turn.room_id);
-      if (
-        next?.kind === "agent" &&
-        (!members.includes(next.agent_id) || next.agent_id === agentId)
-      )
-        throw new KonfabError(
-          "invalid_next",
-          400,
-          "Choose another room member as the next agent",
-        );
-      if (
-        (next?.kind === "lead" || next?.kind === "done") &&
-        mentions.some((id) => id !== "lead" && id !== agentId)
-      )
-        throw new KonfabError(
-          "invalid_next",
-          400,
-          "Lead or done cannot be combined with agent mentions",
-        );
-      const messageId = this.insertMessage(
-        turn.room_id,
-        "agent",
-        agentId,
-        body,
-        mentions,
-      );
-      if (next)
-        this.db
-          .prepare("UPDATE messages SET continuation_json = ? WHERE id = ?")
-          .run(JSON.stringify(next), messageId);
-      this.finishTurn(turn, messageId);
-      this.db
-        .prepare(
-          "UPDATE rooms SET agent_streak = agent_streak + 1 WHERE id = ?",
-        )
-        .run(turn.room_id);
-      for (const target of mentions) {
-        if (target !== agentId && target !== "lead") {
-          this.enqueue(turn.room_id, target, "agent_mention");
+    const result = this.db.transaction(
+      (): {
+        message_id: number;
+        routing_warning?: string;
+        hand_off?: { source_message_id: number; to: string };
+      } => {
+        const turn = this.requireTurn(turnId, agentId);
+        if (turn.result_message_id !== null) {
+          return turn.post_result_json
+            ? (JSON.parse(turn.post_result_json) as {
+                message_id: number;
+                routing_warning?: string;
+                hand_off?: { source_message_id: number; to: string };
+              })
+            : { message_id: turn.result_message_id };
         }
-      }
-      const explicitTarget =
-        next?.kind === "self"
-          ? agentId
-          : next?.kind === "agent"
-            ? next.agent_id
-            : null;
-      if (explicitTarget)
-        this.enqueue(turn.room_id, explicitTarget, "agent_mention");
-      const routed = new Set([
-        ...mentions.filter((id) => id !== "lead" && id !== agentId),
-        ...(explicitTarget ? [explicitTarget] : []),
-      ]);
-      for (const target of routed) {
-        const queuedTurn = this.db
-          .prepare(
-            "SELECT id, reason FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued'",
-          )
-          .get(turn.room_id, target) as
-          { id: number; reason: string } | undefined;
-        if (!queuedTurn) continue;
+        const session = this.requireLiveSession(agentId, sessionId);
+        this.requireActive(turn, session.id);
+
+        const mentions = this.resolveMentions(
+          turn.room_id,
+          parseMentions(body),
+        );
+        const members = this.memberIds(turn.room_id);
+        if (
+          next?.kind === "agent" &&
+          (!members.includes(next.agent_id) || next.agent_id === agentId)
+        )
+          throw new KonfabError(
+            "invalid_next",
+            400,
+            "Choose another room member as the next agent",
+          );
+        if (
+          (next?.kind === "lead" || next?.kind === "done") &&
+          mentions.some((id) => id !== "lead" && id !== agentId)
+        )
+          throw new KonfabError(
+            "invalid_next",
+            400,
+            "Lead or done cannot be combined with agent mentions",
+          );
+        const messageId = this.insertMessage(
+          turn.room_id,
+          "agent",
+          agentId,
+          body,
+          mentions,
+        );
+        if (next)
+          this.db
+            .prepare("UPDATE messages SET continuation_json = ? WHERE id = ?")
+            .run(JSON.stringify(next), messageId);
+        this.finishTurn(turn, messageId);
+        if (this.advanceFormat(turn, body, messageId)) {
+          const response = { message_id: messageId };
+          this.db
+            .prepare("UPDATE turns SET post_result_json=? WHERE id=?")
+            .run(JSON.stringify(response), turn.id);
+          return response;
+        }
         this.db
           .prepare(
-            "INSERT OR IGNORE INTO handoffs(source_message_id, target_agent_id, turn_id) VALUES (?, ?, ?)",
+            "UPDATE rooms SET agent_streak = agent_streak + 1 WHERE id = ?",
           )
-          .run(messageId, target, queuedTurn.id);
-        if (
-          target === agentId &&
-          next?.kind === "self" &&
-          queuedTurn.reason !== "user"
-        )
+          .run(turn.room_id);
+        for (const target of mentions) {
+          if (target !== agentId && target !== "lead") {
+            this.enqueue(turn.room_id, target, "agent_mention");
+          }
+        }
+        const explicitTarget =
+          next?.kind === "self"
+            ? agentId
+            : next?.kind === "agent"
+              ? next.agent_id
+              : null;
+        if (explicitTarget)
+          this.enqueue(turn.room_id, explicitTarget, "agent_mention");
+        const routed = new Set([
+          ...mentions.filter((id) => id !== "lead" && id !== agentId),
+          ...(explicitTarget ? [explicitTarget] : []),
+        ]);
+        for (const target of routed) {
+          const queuedTurn = this.db
+            .prepare(
+              "SELECT id, reason FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL",
+            )
+            .get(turn.room_id, target) as
+            { id: number; reason: string } | undefined;
+          if (!queuedTurn) continue;
           this.db
             .prepare(
-              "UPDATE turns SET continuation_reason = 'self', continuation_source_message_id = ? WHERE id = ?",
+              "INSERT OR IGNORE INTO handoffs(source_message_id, target_agent_id, turn_id) VALUES (?, ?, ?)",
             )
-            .run(messageId, queuedTurn.id);
-      }
-      const targets = this.memberIds(turn.room_id).filter(
-        (id) => id !== agentId && id !== "lead",
-      );
-      const queued = this.db
-        .prepare("SELECT 1 FROM turns WHERE room_id = ? AND state = 'queued'")
-        .get(turn.room_id);
-      const needsRouting =
-        next?.kind !== "lead" &&
-        next?.kind !== "done" &&
-        !mentions.some((id) => targets.includes(id)) &&
-        !queued;
-      this.db
-        .prepare(
-          "UPDATE automatic_continuations SET state = 'cancelled' WHERE room_id = ? AND state IN ('pending','capped')",
-        )
-        .run(turn.room_id);
-      const currentRoom = this.roomById(turn.room_id);
-      const scheduled =
-        !next &&
-        !mentions.includes("lead") &&
-        needsRouting &&
-        currentRoom.auto_continue === 1;
-      if (scheduled) {
+            .run(messageId, target, queuedTurn.id);
+          if (
+            target === agentId &&
+            next?.kind === "self" &&
+            queuedTurn.reason !== "user"
+          )
+            this.db
+              .prepare(
+                "UPDATE turns SET continuation_reason = 'self', continuation_source_message_id = ? WHERE id = ?",
+              )
+              .run(messageId, queuedTurn.id);
+        }
+        const targets = this.memberIds(turn.room_id).filter(
+          (id) => id !== agentId && id !== "lead",
+        );
+        const queued = this.db
+          .prepare("SELECT 1 FROM turns WHERE room_id = ? AND state = 'queued'")
+          .get(turn.room_id);
+        const needsRouting =
+          next?.kind !== "lead" &&
+          next?.kind !== "done" &&
+          !mentions.some((id) => targets.includes(id)) &&
+          !queued;
         this.db
           .prepare(
-            `INSERT INTO automatic_continuations(room_id, target_agent_id, source_message_id, reason, due_at, state, created_at) VALUES (?, ?, ?, 'watchdog', ?, 'pending', ?)`,
+            "UPDATE automatic_continuations SET state = 'cancelled' WHERE room_id = ? AND state IN ('pending','capped')",
           )
-          .run(
-            turn.room_id,
-            agentId,
-            messageId,
-            this.now() + (this.options.autoContinueDelayMs ?? 180_000),
-            this.now(),
-          );
-        this.logEvent("automatic_scheduled", turn.room_id, agentId, {
-          source_message_id: messageId,
-        });
-      }
-      const response = {
-        message_id: messageId,
-        ...(needsRouting
-          ? {
-              routing_warning: `No other agent was @mentioned, so no continuation is queued. Your turn is complete. ${targets[0] ? `If someone should act next, call hand_off with source_message_id: ${messageId} and to: "${targets[0]}" (or another member).` : "No other agent is a member; ask the lead to add or rejoin an agent."} ${scheduled ? "An automatic continuation is scheduled; the lead can cancel it on the page. On future posts, set next: done or lead when appropriate." : "If work is complete, keep waiting."} Older connectors can use the page's Ask to continue controls.`,
-              ...(targets[0]
-                ? { hand_off: { source_message_id: messageId, to: targets[0] } }
-                : {}),
-            }
-          : {}),
-      };
-      this.db
-        .prepare("UPDATE turns SET post_result_json = ? WHERE id = ?")
-        .run(JSON.stringify(response), turn.id);
-      return response;
-    })();
+          .run(turn.room_id);
+        const currentRoom = this.roomById(turn.room_id);
+        const scheduled =
+          !next &&
+          !mentions.includes("lead") &&
+          needsRouting &&
+          currentRoom.auto_continue === 1;
+        if (scheduled) {
+          this.db
+            .prepare(
+              `INSERT INTO automatic_continuations(room_id, target_agent_id, source_message_id, reason, due_at, state, created_at) VALUES (?, ?, ?, 'watchdog', ?, 'pending', ?)`,
+            )
+            .run(
+              turn.room_id,
+              agentId,
+              messageId,
+              this.now() + (this.options.autoContinueDelayMs ?? 180_000),
+              this.now(),
+            );
+          this.logEvent("automatic_scheduled", turn.room_id, agentId, {
+            source_message_id: messageId,
+          });
+        }
+        const response = {
+          message_id: messageId,
+          ...(needsRouting
+            ? {
+                routing_warning: `No other agent was @mentioned, so no continuation is queued. Your turn is complete. ${targets[0] ? `If someone should act next, call hand_off with source_message_id: ${messageId} and to: "${targets[0]}" (or another member).` : "No other agent is a member; ask the lead to add or rejoin an agent."} ${scheduled ? "An automatic continuation is scheduled; the lead can cancel it on the page. On future posts, set next: done or lead when appropriate." : "If work is complete, keep waiting."} Older connectors can use the page's Ask to continue controls.`,
+                ...(targets[0]
+                  ? {
+                      hand_off: {
+                        source_message_id: messageId,
+                        to: targets[0],
+                      },
+                    }
+                  : {}),
+              }
+            : {}),
+        };
+        this.db
+          .prepare("UPDATE turns SET post_result_json = ? WHERE id = ?")
+          .run(JSON.stringify(response), turn.id);
+        return response;
+      },
+    )();
     this.notify();
     return result;
   }
@@ -2137,7 +2465,7 @@ export class KonfabService {
       this.enqueue(room.id, to, "agent_mention");
       const turn = this.db
         .prepare(
-          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued'",
+          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL",
         )
         .get(room.id, to) as { id: number };
       this.db
@@ -2173,6 +2501,7 @@ export class KonfabService {
       const session = this.requireLiveSession(agentId, sessionId);
       this.requireActive(turn, session.id);
       this.finishTurn(turn, null);
+      this.advanceFormat(turn, null, null);
       this.logEvent("pass", turn.room_id, agentId, {
         turn_id: turn.id,
         reason: reason?.slice(0, MAX_PASS_REASON_CHARS) ?? null,
@@ -2564,12 +2893,18 @@ export class KonfabService {
       this.db
         .prepare("UPDATE rooms SET agent_streak = 0 WHERE id = ?")
         .run(room.id);
-      this.db
-        .prepare(
-          `UPDATE turns SET state = 'dropped', ended_at = ?
-           WHERE room_id = ? AND state = 'queued' AND reason = 'agent_mention'`,
-        )
-        .run(this.now(), room.id);
+      if (
+        !this.db
+          .prepare(
+            "SELECT 1 FROM format_runs WHERE room_id=? AND state IN ('active','paused')",
+          )
+          .get(room.id)
+      )
+        this.db
+          .prepare(
+            `UPDATE turns SET state = 'dropped', ended_at = ? WHERE room_id = ? AND state = 'queued' AND reason = 'agent_mention' AND format_run_id IS NULL`,
+          )
+          .run(this.now(), room.id);
       for (const target of targets) this.enqueue(room.id, target, "user");
       this.markLeadRead(room.id, [], true);
       return id;
@@ -3367,6 +3702,10 @@ export class KonfabService {
         )
         .all(cutoff) as TurnRow[];
       for (const turn of expired) {
+        if (turn.format_run_id !== null) {
+          this.abandonAndRequeue(turn);
+          continue;
+        }
         this.db
           .prepare(
             "UPDATE turns SET state = 'skipped', ended_at = ? WHERE id = ?",
@@ -3543,7 +3882,7 @@ export class KonfabService {
       this.enqueue(item.room_id, item.target_agent_id, "agent_mention");
       const queued = this.db
         .prepare(
-          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued'",
+          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL",
         )
         .get(item.room_id, item.target_agent_id) as { id: number };
       this.db
@@ -3693,6 +4032,37 @@ export class KonfabService {
     const removed = this.memberIds(roomId).filter(
       (agentId) => !unique.includes(agentId),
     );
+    const open = this.db
+      .prepare(
+        "SELECT * FROM format_runs WHERE room_id=? AND state IN ('active','paused')",
+      )
+      .get(roomId) as FormatRun | undefined;
+    if (
+      open &&
+      (JSON.parse(open.steps_json) as FormatStep[])
+        .slice(open.current_step)
+        .some((step) => removed.includes(step.agent_id))
+    ) {
+      this.db
+        .prepare("UPDATE format_runs SET state='ended',ended_at=? WHERE id=?")
+        .run(this.now(), open.id);
+      this.db
+        .prepare(
+          "UPDATE turns SET state='dropped',ended_at=? WHERE format_run_id=? AND state='queued'",
+        )
+        .run(this.now(), open.id);
+      this.insertMessage(
+        roomId,
+        "user",
+        "system",
+        "Format ended because a participant was removed from the room.",
+        [],
+      );
+      this.logEvent("format_ended", roomId, null, {
+        run_id: open.id,
+        reason: "member_removed",
+      });
+    }
     for (const agentId of removed) {
       this.db
         .prepare(
@@ -4021,9 +4391,23 @@ export class KonfabService {
     if (room.agent_streak >= (this.options.maxConsecutiveAgentMessages ?? 50))
       return null;
 
+    const run = this.db
+      .prepare(
+        "SELECT * FROM format_runs WHERE room_id=? AND state IN ('active','paused')",
+      )
+      .get(room.id) as FormatRun | undefined;
+    if (run?.state === "active") {
+      const formatTurn = this.db
+        .prepare(
+          "SELECT * FROM turns WHERE format_run_id=? AND format_step_index=? AND state='queued'",
+        )
+        .get(run.id, run.current_step) as TurnRow | undefined;
+      if (!formatTurn || formatTurn.agent_id !== agentId) return null;
+      return this.startTurn(room.id, formatTurn.id, sessionId);
+    }
     const queued = this.db
       .prepare(
-        "SELECT * FROM turns WHERE room_id = ? AND state = 'queued' ORDER BY id",
+        "SELECT * FROM turns WHERE room_id = ? AND state = 'queued' AND format_run_id IS NULL ORDER BY id",
       )
       .all(room.id) as TurnRow[];
     for (const turn of queued) {
@@ -4245,6 +4629,33 @@ export class KonfabService {
       turn_id: turn.id,
       room: room.name,
       topic: room.topic,
+      ...(turn.format_run_id !== null && turn.format_step_index !== null
+        ? (() => {
+            const run = this.formatRun(turn.format_run_id!);
+            const step =
+              run &&
+              (JSON.parse(run.steps_json) as FormatStep[])[
+                turn.format_step_index!
+              ];
+            return run && step
+              ? {
+                  format: {
+                    kind: run.kind,
+                    topic: run.topic,
+                    round: step.round,
+                    rounds: run.rounds,
+                    slot: step.slot,
+                    instruction:
+                      step.slot === "reviewer"
+                        ? "Review without editing. Point to specific lines or commits; end your turn with a clear verdict: approve / request changes."
+                        : step.final
+                          ? "Provide the final summary or verdict for a decision proposal."
+                          : "Complete your assigned step, then post or pass.",
+                  },
+                }
+              : {};
+          })()
+        : {}),
       rules: this.instructionsFor(
         room.id,
         turn.agent_id,
@@ -4304,6 +4715,52 @@ export class KonfabService {
         "UPDATE turns SET state = 'abandoned', ended_at = ? WHERE id = ?",
       )
       .run(this.now(), turn.id);
+    if (turn.format_run_id !== null && turn.format_step_index !== null) {
+      const run = this.formatRun(turn.format_run_id);
+      if (
+        run &&
+        ["active", "paused"].includes(run.state) &&
+        run.current_step === turn.format_step_index
+      ) {
+        this.db
+          .prepare(
+            "INSERT INTO turns(room_id,agent_id,reason,state,created_at,format_run_id,format_step_index) VALUES (?,?,'user','queued',?,?,?)",
+          )
+          .run(
+            turn.room_id,
+            turn.agent_id,
+            this.now(),
+            turn.format_run_id,
+            turn.format_step_index,
+          );
+        const prior = this.db
+          .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
+          .get(turn.id) as { role_envelope_json: string | null };
+        const identity = this.db
+          .prepare(
+            `SELECT m.delivered_role_identity, json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS current_identity FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
+          )
+          .get(turn.room_id, turn.agent_id) as
+          | { delivered_role_identity: string; current_identity: string }
+          | undefined;
+        if (
+          prior.role_envelope_json &&
+          identity?.delivered_role_identity === identity?.current_identity &&
+          (JSON.parse(prior.role_envelope_json) as { notice?: string } | null)
+            ?.notice
+        )
+          this.db
+            .prepare(
+              "UPDATE turns SET role_envelope_json=? WHERE format_run_id=? AND format_step_index=? AND state='queued'",
+            )
+            .run(
+              prior.role_envelope_json,
+              turn.format_run_id,
+              turn.format_step_index,
+            );
+        return;
+      }
+    }
     this.enqueue(turn.room_id, turn.agent_id, turn.reason);
     const prior = this.db
       .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
@@ -4324,7 +4781,7 @@ export class KonfabService {
       if (role?.notice)
         this.db
           .prepare(
-            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND state='queued' AND role_envelope_json IS NULL",
+            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND state='queued' AND format_run_id IS NULL AND role_envelope_json IS NULL",
           )
           .run(prior.role_envelope_json, turn.room_id, turn.agent_id);
     }
@@ -4332,7 +4789,7 @@ export class KonfabService {
       .prepare(
         `UPDATE turns SET timeout_retry_count = MAX(timeout_retry_count, ?),
       continuation_reason = COALESCE(continuation_reason, ?), continuation_source_message_id = COALESCE(continuation_source_message_id, ?)
-      WHERE room_id = ? AND agent_id = ? AND state = 'queued'`,
+      WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL`,
       )
       .run(
         turn.timeout_retry_count,
@@ -4355,7 +4812,7 @@ export class KonfabService {
       .prepare(
         `INSERT INTO turns (room_id, agent_id, reason, state, created_at)
          VALUES (?, ?, ?, 'queued', ?)
-         ON CONFLICT(room_id, agent_id) WHERE state = 'queued' DO UPDATE SET
+         ON CONFLICT(room_id, agent_id) WHERE state = 'queued' AND format_run_id IS NULL DO UPDATE SET
            reason = CASE WHEN excluded.reason = 'user' THEN 'user' ELSE turns.reason END`,
       )
       .run(roomId, agentId, reason, this.now());

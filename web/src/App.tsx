@@ -393,6 +393,7 @@ function Room({
 }) {
   const { room, agents } = state;
   const [teamRolesOpen, setTeamRolesOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
   const [olderMessages, setOlderMessages] = useState<RoomState["messages"]>([]);
   const [olderReadInfo, setOlderReadInfo] = useState<LeadReadInfo | null>(null);
   const messages = useMemo(
@@ -802,6 +803,14 @@ function Room({
                 <button
                   type="button"
                   className="secondary"
+                  disabled={!!state.format}
+                  onClick={() => setFormatOpen(true)}
+                >
+                  Formats
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
                   onClick={() => setTeamRolesOpen(true)}
                 >
                   Roles
@@ -872,6 +881,14 @@ function Room({
           </>
         )}
       </header>
+      {(formatOpen || state.format) && (
+        <FormatPanel
+          state={state}
+          act={act}
+          open={formatOpen}
+          onClose={() => setFormatOpen(false)}
+        />
+      )}
 
       <form className="search" role="search" onSubmit={search}>
         <label htmlFor="search">Search messages</label>
@@ -1458,6 +1475,205 @@ function AutoContinuation({ state, act }: { state: RoomState; act: Act }) {
         </p>
       )}
     </div>
+  );
+}
+
+function FormatPanel({
+  state,
+  act,
+  open,
+  onClose,
+}: {
+  state: RoomState;
+  act: Act;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [kind, setKind] = useState<"review" | "debate">("review");
+  const [topic, setTopic] = useState("");
+  const [rounds, setRounds] = useState(2);
+  const [author, setAuthor] = useState("");
+  const [reviewers, setReviewers] = useState<string[]>([]);
+  const [pro, setPro] = useState("");
+  const [con, setCon] = useState("");
+  const [judge, setJudge] = useState("");
+  const [error, setError] = useState("");
+  const memberSelect = (
+    label: string,
+    value: string,
+    set: (id: string) => void,
+  ) => (
+    <label>
+      {label}
+      <select
+        value={value}
+        onChange={(event) => set(event.target.value)}
+        required
+      >
+        <option value="">Choose member</option>
+        {state.agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.display_name} (@{agent.id})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const start = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    try {
+      const body = {
+        kind,
+        topic,
+        rounds,
+        ...(kind === "review" ? { author, reviewers } : { pro, con, judge }),
+      };
+      await request(`/api/rooms/${state.room.id}/formats`, {
+        method: "POST",
+        body,
+      });
+      onClose();
+      await act(async () => {});
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+  const control = (action: "pause" | "resume" | "skip" | "end") => {
+    if (
+      (action === "skip" || action === "end") &&
+      !window.confirm(
+        action === "skip"
+          ? "Skip this step? An active agent's late response will be rejected."
+          : "End this format early?",
+      )
+    )
+      return;
+    void act(() =>
+      request(`/api/rooms/${state.room.id}/formats/control`, {
+        method: "POST",
+        body: { action },
+      }),
+    );
+  };
+  const run = state.format;
+  return (
+    <section
+      className="card format-panel"
+      aria-label="Review and debate formats"
+    >
+      {run ? (
+        <>
+          <h3>
+            {run.kind === "review" ? "Code review" : "Debate"} · {run.state}
+          </h3>
+          <p>{run.topic}</p>
+          <p>
+            Step {run.current_step + 1} of {run.step_count}: {run.step?.slot} ·{" "}
+            {run.step?.agent_id} · round {run.step?.round} of {run.rounds}
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              onClick={() =>
+                control(run.state === "active" ? "pause" : "resume")
+              }
+            >
+              {run.state === "active" ? "Pause format" : "Resume format"}
+            </button>
+            <button type="button" onClick={() => control("skip")}>
+              Skip step
+            </button>
+            <button type="button" onClick={() => control("end")}>
+              End early
+            </button>
+          </div>
+        </>
+      ) : (
+        open && (
+          <form className="stack" onSubmit={(event) => void start(event)}>
+            <h3>Start a format</h3>
+            <label>
+              Format
+              <select
+                value={kind}
+                onChange={(event) =>
+                  setKind(event.target.value as "review" | "debate")
+                }
+              >
+                <option value="review">Code review</option>
+                <option value="debate">Debate</option>
+              </select>
+            </label>
+            <label>
+              Topic or link
+              <input
+                value={topic}
+                onChange={(event) => setTopic(event.target.value)}
+                maxLength={1000}
+                required
+              />
+            </label>
+            <label>
+              Rounds
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={rounds}
+                onChange={(event) => setRounds(Number(event.target.value))}
+                required
+              />
+            </label>
+            {kind === "review" ? (
+              <>
+                {memberSelect("Author", author, setAuthor)}
+                <fieldset>
+                  <legend>Reviewers (1–3)</legend>
+                  {state.agents.map((agent) => (
+                    <label key={agent.id}>
+                      <input
+                        type="checkbox"
+                        checked={reviewers.includes(agent.id)}
+                        onChange={(event) =>
+                          setReviewers(
+                            event.target.checked
+                              ? [...reviewers, agent.id]
+                              : reviewers.filter((id) => id !== agent.id),
+                          )
+                        }
+                      />
+                      {agent.display_name}
+                    </label>
+                  ))}
+                </fieldset>
+              </>
+            ) : (
+              <>
+                {memberSelect("Pro", pro, setPro)}
+                {memberSelect("Con", con, setCon)}
+                {memberSelect("Judge", judge, setJudge)}
+              </>
+            )}
+            <p className="muted">
+              Choose a different room member for each slot. Format turns take
+              priority; other queued work resumes afterward.
+            </p>
+            {error && (
+              <p role="alert" className="warning-text">
+                {error}
+              </p>
+            )}
+            <div className="row">
+              <button type="submit">Start format</button>
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        )
+      )}
+    </section>
   );
 }
 
