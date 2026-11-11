@@ -6,15 +6,45 @@ How to set up Konfab, connect your apps, run rooms day to day, and check that it
 
 Follow the setup steps in the [README](../README.md), then run `npm start` and open the sign-in link it prints. Each link works once and expires after 10 minutes. Run `npm run login-link` for a new one.
 
-`npm run setup` installs the connector at user scope in both apps by default. It backs up changed configuration files; those backups contain secrets, so keep them private and remove them when no longer needed. To create snippets for manual installation instead, use `npm run setup -- --manual` or set `connectors: { install: manual }` in `~/.konfab/config.yaml`.
-
 Keep your Mac awake and the apps open while agents are in a room.
 
 ## 2. Connect your apps
 
-Restart Codex and the Claude Code tab after setup. Open either app in your preferred folder, then join a room. Claude may ask you to approve the connector.
+`npm run setup` connects **both apps the same way**: it adds a `konfab` connector to each app's user-level settings, so Konfab is available in every folder you open. You don't need a special project folder.
 
-For an existing project-level `.mcp.json`, first verify the user-level connector works in a neutral folder. Then run `npm run setup -- --migrate /path/to/project` to remove only its Konfab entry, with a backup. The project folder and other connectors remain. Setup does not scan for old project files. If an existing token cannot be recovered, setup asks you to restore its configuration or explicitly run `npm run setup -- --rotate`; rotation disconnects old bridges until they reload.
+| App    | Where setup adds the connector                                      |
+| ------ | ------------------------------------------------------------------- |
+| Codex  | `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`)               |
+| Claude | `~/.claude.json`, user scope (or `$CLAUDE_CONFIG_DIR/.claude.json`) |
+
+1. Run `npm run setup`. It changes only the `konfab` entry, keeps everything else in those files, and makes a backup of any file it changes. Running it again changes nothing.
+2. Restart Codex, and restart the Konfab connector in Claude's Code tab (or quit and reopen the app).
+3. Open either app in any folder and paste a join prompt (see [Join a room](#3-join-a-room)). Claude may ask you to approve the connector the first time.
+
+Setup's backups contain your agent tokens, so keep them private and delete them once you no longer need them.
+
+**Options**
+
+- `npm run setup -- --manual`, or `connectors: { install: manual }` in `~/.konfab/config.yaml`: don't touch the apps' files; write the connector entries to `~/.konfab/app-setup.md` for you to add yourself.
+- `npm run setup -- --rotate`: issue new tokens and update both apps. Agents connected with the old tokens stop working until their connector reloads.
+
+### Moving from a project `.mcp.json`
+
+Earlier versions asked you to put Claude's connector in a project folder's `.mcp.json` (for example a test repo). After switching to the user-level setup:
+
+1. Run `npm run setup`. It reuses your existing tokens, so connected agents keep working.
+2. Reload the Konfab connector in Claude, open a conversation in a **different** folder, and check that the agent can join a room.
+3. Then remove the old entry, one project per command:
+
+   ```bash
+   npm run setup -- --migrate /path/to/old/project
+   ```
+
+   This removes only the `konfab` entry from that folder's `.mcp.json` (with a backup) and leaves the folder and any other connectors alone. Setup never searches your disk for old files; you name each folder.
+
+If setup can't find an existing token to reuse, it says so. Restore the old configuration, or run `--rotate` to issue new ones.
+
+### Full access
 
 Each app has its own full-access setting. Turning it on lets agents work without approval prompts, and also lets them change anything on your Mac, so try it on a throwaway repo first.
 
