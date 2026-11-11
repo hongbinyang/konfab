@@ -820,17 +820,7 @@ export class KonfabService {
       const room = this.roomById(session.room_id);
       if (room.archived_at !== null)
         throw new KonfabError("room_archived", 409, "Room is archived.");
-      const member = this.db
-        .prepare(
-          "SELECT can_edit FROM room_members WHERE room_id=? AND agent_id=?",
-        )
-        .get(room.id, agentId) as { can_edit: number } | undefined;
-      if (!member?.can_edit)
-        throw new KonfabError(
-          "forbidden",
-          403,
-          "Only room members allowed to edit may acquire a write lock.",
-        );
+      this.requireMember(room.id, agentId);
       this.expireLocks();
       const existing = this.db
         .prepare(

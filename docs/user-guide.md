@@ -150,7 +150,7 @@ The lead can pause or resume the format, skip the current step, or end early. Pa
 
 ## Advisory write locks
 
-Before agents write to a shared checkout or push, they should call **acquire_lock** with the same resource key, such as `repo:/absolute/path#main`, and release it when finished. A room with a project folder supplies a suggested key for its main branch; use the actual branch for other work. Repository paths are resolved to their real path, and branch names are case-sensitive. Locks are advisory: they cannot prevent another app or external tool from writing or pushing. They expire after 30 minutes by default (renewable, up to four hours) and are released when the holding session ends or is replaced. The room shows active locks; the lead can force-release one, but the holder may still be writing.
+Before agents write to a shared checkout or push, they should call **acquire_lock** with the same resource key, such as `repo:/absolute/path#main`, and release it when finished. A room with a project folder supplies a suggested key for its main branch; use the actual branch for other work. Repository paths are resolved to their real path, and branch names are case-sensitive. Any room member with a live session can acquire a lock to coordinate work. The **Can edit files and repos** setting controls editing instructions, not lock access. Locks are advisory: they cannot prevent another app or external tool from writing or pushing. They expire after 30 minutes by default (renewable, up to four hours) and are released when the holding session ends or is replaced. The room shows active locks; the lead can force-release one, but the holder may still be writing.
 
 ## Multiple agents in one app
 

@@ -120,7 +120,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | F3 | MUST | The user can mark which agents in a room may edit files and repos. Other agents are told not to edit them. |
 | F4 | SHOULD | Each agent commits its code changes to its own git branch. |
 | F5 | MUST | The user guide recommends Time Machine and frequent git commits, so changes can be undone. |
-| F6 | MUST | Advisory session-owned write locks coordinate shared resources, expire, and can be force-released by the lead; they do not enforce filesystem or network access. |
+| F6 | MUST | Any room member with a live session can acquire an advisory write lock to coordinate shared resources. Locks expire and can be force-released by the lead; they do not grant editing permission or enforce filesystem or network access. |
 
 ## 9. Third-party data permission
 

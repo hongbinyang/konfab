@@ -40,8 +40,11 @@ describe("advisory write locks", () => {
         c = service.join("c", "one").session_id;
       const key = `repo:${root}#main`,
         alias = `repo:${root}/alias/#main`;
-      expect(() => service.acquireLock("c", c, key, "edit")).toThrow(
-        "allowed to edit",
+      expect(service.acquireLock("c", c, key, "coordinate").granted).toBe(true);
+      expect(service.releaseLock("c", c, key).released).toBe(true);
+      service.join("c", "one");
+      expect(() => service.acquireLock("c", c, key, "stale session")).toThrow(
+        "newer conversation",
       );
       expect(service.acquireLock("a", a, alias, "merge").granted).toBe(true);
       const denied = service.acquireLock("b", b, key, "push");
