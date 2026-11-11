@@ -327,7 +327,8 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 
 - Personal and explicitly configured project libraries manage standard skill folders. Untracked folders can be adopted.
 - Create, duplicate, edit, rename, save and move unused skills to Trash. A saved revision contains the complete package; history can be viewed and restored as a new revision. External edits are drafts and conflicting edits are rejected.
-- Review is recorded per revision. New revisions begin unreviewed. Scripts are stored as files and are never run by Konfab. Remote sources and role assignment are separate phases.
+- Review is recorded per revision. New revisions begin unreviewed. Scripts are stored as files and are never run by Konfab.
+- Existing custom role text can be previewed and converted into personal role packs, grouped by exact text, with optional assignment and conflict-checked restoration of the original text.
 
 ## Automatic continuation
 

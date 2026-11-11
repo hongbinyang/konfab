@@ -433,6 +433,14 @@ const MIGRATIONS: readonly string[] = [
     state TEXT NOT NULL CHECK(state IN ('pending','complete')), created_at INTEGER NOT NULL
   );
   `,
+  `
+  CREATE TABLE converted_role_history (
+    id TEXT PRIMARY KEY, room_id INTEGER NOT NULL, agent_id TEXT NOT NULL,
+    original_text TEXT NOT NULL, role_id TEXT NOT NULL REFERENCES roles(id),
+    assignment_revision INTEGER NOT NULL, created_at INTEGER NOT NULL,
+    reverted_at INTEGER
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Db {

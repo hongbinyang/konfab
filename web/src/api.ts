@@ -113,6 +113,7 @@ export interface RoomAgent {
   join_prompt: string;
   role: string;
   role_pack_label?: string | null;
+  role_can_revert?: boolean;
   can_edit: boolean;
   stats: {
     session_started_at: number | null;
