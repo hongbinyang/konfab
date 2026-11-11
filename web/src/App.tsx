@@ -16,6 +16,7 @@ import { Library } from "./Library";
 import { ConvertRoles } from "./ConvertRoles";
 import { RolePicker } from "./RolePicker";
 import { TeamRoles } from "./TeamRoles";
+import { DecisionReferences } from "./DecisionReferences";
 import {
   request,
   uploadAttachment,
@@ -2040,6 +2041,7 @@ function Decisions({ room, act }: { room: RoomState; act: Act }) {
         <DecisionCard
           key={decision.id}
           decision={decision}
+          decisionIds={room.decisions.map((item) => item.id)}
           roomId={room.room.id}
           archived={room.room.archived}
           act={act}
@@ -2051,11 +2053,13 @@ function Decisions({ room, act }: { room: RoomState; act: Act }) {
 
 function DecisionCard({
   decision,
+  decisionIds,
   roomId,
   archived,
   act,
 }: {
   decision: Decision;
+  decisionIds: number[];
   roomId: number;
   archived: boolean;
   act: Act;
@@ -2080,9 +2084,14 @@ function DecisionCard({
       setVersions(null);
     });
   return (
-    <div className="card decision-card">
+    <div
+      id={`decision-${decision.id}`}
+      className="card decision-card"
+      tabIndex={-1}
+    >
       <p>
         <strong>
+          #{decision.id} ·{" "}
           {decision.status === "confirmed"
             ? "Confirmed"
             : decision.status === "proposed"
@@ -2101,7 +2110,7 @@ function DecisionCard({
             : "decision-body clipped"
         }
       >
-        {decision.body}
+        <DecisionReferences body={decision.body} decisionIds={decisionIds} />
       </p>
       {(decision.body.length > 100 || decision.body.includes("\n")) && (
         <button
