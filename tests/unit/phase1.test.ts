@@ -416,7 +416,7 @@ describe("Phase 1 behavior", () => {
     });
 
     it("applies changes on the next turn, without rejoining", () => {
-      turnFor("claude");
+      const active = turnFor("claude");
       service.setMemberRole(ROOM, "claude", {
         role: "New role",
         can_edit: false,
@@ -426,6 +426,10 @@ describe("Phase 1 behavior", () => {
         role: "New role",
         can_edit: false,
       });
+      expect(
+        expectTurn(service.poll("claude", claude, true)).rules,
+      ).not.toContain("New role");
+      service.passTurn("claude", claude, active.turn_id);
       service.postUserMessage(ROOM, "@claude next");
       const next = expectTurn(service.poll("claude", claude, true));
       expect(next.rules).toContain("New role");
@@ -963,7 +967,7 @@ describe("database migration", () => {
         .run();
       old.close();
       const upgraded = openDatabase(file);
-      expect(upgraded.pragma("user_version", { simple: true })).toBe(24);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(25);
       expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
         name: "existing",
         brief: "kept",
@@ -1006,7 +1010,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(24);
+      expect(db.pragma("user_version", { simple: true })).toBe(25);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });

@@ -482,6 +482,7 @@ export class RoleLibrary {
           409,
           "Assignment changed; cannot revert this conversion",
         );
+      this.snapshotActiveTurn(roomId, agentId);
       this.db
         .prepare("DELETE FROM room_member_roles WHERE room_id=? AND agent_id=?")
         .run(roomId, agentId);
@@ -1148,6 +1149,7 @@ export class RoleLibrary {
         );
       if (member.role_assignment_revision !== (baseRevision ?? 0))
         throw new SkillError("role_conflict", 409, "Role assignment changed");
+      this.snapshotActiveTurn(roomId, agentId);
       this.db
         .prepare(
           `INSERT INTO room_member_roles(room_id, agent_id, role_id, role_revision_id, notes, revision, generation, assigned_at)
@@ -1163,6 +1165,28 @@ export class RoleLibrary {
         .run(canEdit === undefined ? null : canEdit ? 1 : 0, roomId, agentId);
       this.envelope(roomId, agentId, false, true);
     })();
+  }
+
+  /** Freeze an active turn before any assignment mutation. */
+  snapshotActiveTurn(roomId: number, agentId: string): void {
+    const active = this.db
+      .prepare(
+        "SELECT id, swap_role_snapshot_json FROM turns WHERE room_id=? AND agent_id=? AND state='active'",
+      )
+      .get(roomId, agentId) as
+      { id: number; swap_role_snapshot_json: string | null } | undefined;
+    if (!active || active.swap_role_snapshot_json !== null) return;
+    const member = this.db
+      .prepare("SELECT role FROM room_members WHERE room_id=? AND agent_id=?")
+      .get(roomId, agentId) as { role: string };
+    const snapshot = JSON.stringify(
+      this.envelope(roomId, agentId, false, true),
+    );
+    this.db
+      .prepare(
+        "UPDATE turns SET swap_role_snapshot_json=?, swap_role_text_snapshot=?, role_envelope_json=COALESCE(role_envelope_json, ?) WHERE id=?",
+      )
+      .run(snapshot, member.role, snapshot, active.id);
   }
 
   envelope(

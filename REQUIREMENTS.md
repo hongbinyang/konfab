@@ -340,4 +340,4 @@ The member role picker searches local and enabled public skills, previews pinned
 
 ### Team role reassignment
 
-A room lead can preview and stage swaps, rotations, saved-role assignments and removals for any number of members, then apply them atomically. A stale role prevents the entire change. Notes travel with the role; edit permissions stay with the member. Active turns retain their previous role until the next turn. A system-labelled handover message records the changes.
+A room lead can preview and stage swaps, rotations, saved-role assignments and removals for any number of members, then apply them atomically. A stale role prevents the entire change. Notes travel with the role; edit permissions stay with the member. Active turns retain their previous role until the next turn. A system-labelled handover message records the changes. On the next turn, a replayable notice identifies a role change or removal, while note-only edits do not ask for a handover.

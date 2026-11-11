@@ -451,6 +451,13 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE turns ADD COLUMN swap_role_snapshot_json TEXT;
   ALTER TABLE turns ADD COLUMN swap_role_text_snapshot TEXT;
   `,
+  `
+  ALTER TABLE room_members ADD COLUMN delivered_role_identity TEXT NOT NULL DEFAULT '{"role":"","role_id":null,"revision":null,"notes":null}';
+  ALTER TABLE room_members ADD COLUMN delivered_role_label TEXT NOT NULL DEFAULT 'no role';
+  UPDATE room_members SET
+    delivered_role_identity = (SELECT json_object('role', room_members.role, 'role_id', p.role_id, 'revision', p.role_revision_id, 'notes', p.notes) FROM (SELECT 1) x LEFT JOIN room_member_roles p ON p.room_id = room_members.room_id AND p.agent_id = room_members.agent_id),
+    delivered_role_label = COALESCE((SELECT r.title FROM room_member_roles p JOIN role_revisions r ON r.id = p.role_revision_id WHERE p.room_id = room_members.room_id AND p.agent_id = room_members.agent_id), CASE WHEN length(trim(role)) > 0 THEN 'custom role' ELSE 'no role' END);
+  `,
 ];
 
 export function openDatabase(path: string): Db {
