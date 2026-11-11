@@ -876,3 +876,50 @@ dd {
   cursor: pointer;
   margin-top: 1rem;
 }
+
+.role-picker {
+  width: min(1100px, 92vw);
+  max-height: 88vh;
+  border: 0;
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+.role-picker::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.role-picker header,
+.role-picker footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.role-picker-columns {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(300px, 2fr);
+  gap: 1rem;
+  max-height: 65vh;
+  overflow: auto;
+}
+.role-picker-columns section {
+  min-width: 0;
+}
+.role-picker-columns pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow: auto;
+}
+.role-picker-columns ul {
+  list-style: none;
+  padding: 0;
+}
+.role-picker-columns li button {
+  width: 100%;
+  text-align: left;
+}
+@media (max-width: 650px) {
+  .role-picker-columns {
+    grid-template-columns: 1fr;
+  }
+}

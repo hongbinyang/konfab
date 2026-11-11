@@ -257,6 +257,71 @@ describe("page API", () => {
     expect(response.json().code).toBe("invalid_request");
   });
 
+  it("assigns a reviewed local skill atomically and rejects stale or unreviewed choices", async () => {
+    const room = service.createRoom("picker", "", ["codex"]);
+    const created = await call("POST", "/api/library/skills", {
+      scope: "personal",
+      name: "review-change",
+      description: "Review changes",
+    });
+    const skillId = created.json().id as string;
+    const detail = (await call("GET", `/api/library/skills/${skillId}`)).json();
+    const revision = detail.current_revision_id as string;
+    const url = `/api/rooms/${room.id}/members/codex/role-from-skill`;
+    const payload = {
+      scope: "personal",
+      skill_id: skillId,
+      skill_revision: revision,
+      name: "review-role",
+      title: "Review role",
+      description: "Review changes",
+      instructions: "Review carefully.",
+      base_revision: 0,
+    };
+    expect((await call("POST", url, payload)).statusCode).toBe(409);
+    expect(
+      (await call("GET", "/api/roles"))
+        .json()
+        .roles.some((role: { title: string }) => role.title === "Review role"),
+    ).toBe(false);
+    const stale = await call("POST", url, {
+      ...payload,
+      review: true,
+      base_revision: 99,
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(
+      (await call("GET", `/api/library/skills/${skillId}`)).json().reviewed_at,
+    ).toBeNull();
+    expect(
+      (await call("GET", "/api/roles"))
+        .json()
+        .roles.some((role: { title: string }) => role.title === "Review role"),
+    ).toBe(false);
+    const preflight = `/api/rooms/${room.id}/members/codex/picker-preflight`;
+    expect(
+      (
+        await call("POST", preflight, {
+          scope: "personal",
+          role_name: "review-role",
+          skill_name: "review-change",
+        })
+      ).statusCode,
+    ).toBe(409);
+    const assigned = await call("POST", url, { ...payload, review: true });
+    expect(assigned.statusCode).toBe(200);
+    expect(assigned.json().pending).toBe(false);
+    const preview = (
+      await call("GET", `/api/rooms/${room.id}/members/codex/role-preview`)
+    ).json();
+    expect(preview.role.title).toBe("Review role");
+    expect(preview.role.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ skill_revision_id: revision }),
+      ]),
+    );
+  });
+
   it("creates and lists a local skill through authenticated page routes", async () => {
     const created = await call("POST", "/api/library/skills", {
       scope: "personal",

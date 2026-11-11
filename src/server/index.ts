@@ -18,6 +18,7 @@ const app = await buildApp({
   sources,
   roles,
   skillsHome: home,
+  rolePicker: config.ui.role_picker,
   port: config.server.port,
   webDir: resolve(import.meta.dirname, "../web"),
   logger: true,

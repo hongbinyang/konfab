@@ -6,6 +6,7 @@ import { SkillLibrary } from "../../src/server/domain/skills.js";
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -119,6 +120,66 @@ describe("role assignment", () => {
           8,
         ),
       ).toThrow("not assigned");
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it("retains a skill-created role and pinned assignment after reopening the database", () => {
+    const root = mkdtempSync(join(tmpdir(), "konfab-picker-reopen-"));
+    const database = join(root, "state.db");
+    let db = openDatabase(database);
+    try {
+      const roles = new RoleLibrary(db);
+      db.prepare(
+        "INSERT INTO role_libraries(id,kind,root_path) VALUES ('personal','personal', ?)",
+      ).run(join(root, "roles"));
+      const skillRoot = join(root, "skills");
+      mkdirSync(skillRoot);
+      const skills = new SkillLibrary(db);
+      const libraryId = skills.registerLibrary("personal", skillRoot);
+      const skillId = skills.create(
+        libraryId,
+        "sample-skill",
+        "A sample skill",
+      );
+      const detail = skills.detail(skillId);
+      const revision = String(detail.current_revision_id);
+      skills.markReviewed(skillId, revision);
+      const service = new KonfabService(db, {
+        waitTimeoutSeconds: 1,
+        turnTimeoutMs: 60000,
+        maxMessageChars: 1000,
+      });
+      service.ensureAgent("worker", "Worker");
+      const room = service.createRoom("picker", "", ["worker"]);
+      const created = roles.createAndAssignSkill({
+        roomId: room.id,
+        agentId: "worker",
+        libraryId,
+        skillId,
+        skillRevision: revision,
+        name: "sample-role",
+        title: "Sample role",
+        description: "A sample role",
+        instructions: "Use the skill.",
+        notes: "",
+      });
+      expect(created.pending).toBe(false);
+      db.close();
+      db = openDatabase(database);
+      const reopened = new RoleLibrary(db);
+      expect(reopened.envelope(room.id, "worker", false, true)).toEqual(
+        expect.objectContaining({
+          id: created.id,
+          skills: expect.arrayContaining([
+            expect.objectContaining({ skill_revision_id: revision }),
+          ]),
+        }),
+      );
+      expect(existsSync(join(root, "roles", "sample-role", "ROLE.md"))).toBe(
+        true,
+      );
     } finally {
       db.close();
       rmSync(root, { recursive: true, force: true });
