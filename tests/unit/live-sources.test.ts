@@ -4,6 +4,115 @@ import { GitHubClient } from "../../src/server/domain/github-client.js";
 import { LiveSources } from "../../src/server/domain/live-sources.js";
 
 describe("ephemeral public discovery", () => {
+  it("reports listing, descriptions and completion without guessing from zero counts", async () => {
+    let releaseCommit!: () => void;
+    let releaseDescription!: () => void;
+    const commitWait = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const descriptionWait = new Promise<void>((resolve) => {
+      releaseDescription = resolve;
+    });
+    const sha = "a".repeat(40);
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/commits/")) {
+        await commitWait;
+        return new Response(JSON.stringify({ sha }));
+      }
+      if (url.includes("/git/trees/"))
+        return new Response(
+          JSON.stringify({
+            truncated: false,
+            tree: [
+              {
+                path: "report/SKILL.md",
+                type: "blob",
+                mode: "100644",
+                sha: "b".repeat(40),
+                size: 100,
+              },
+            ],
+          }),
+        );
+      await descriptionWait;
+      return new Response("---\nname: report\ndescription: Example\n---\nBody");
+    };
+    const source = {
+      id: "source",
+      owner: "example",
+      repository: "skills",
+      ref: "HEAD",
+      badge: "community",
+      enabled: 1,
+    };
+    const live = new LiveSources(
+      new GitHubClient(fetcher),
+      () => [source],
+      () => undefined,
+    );
+    try {
+      expect(live.search("").sources[0]).toMatchObject({
+        stage: "listing",
+        done: 0,
+        total: 0,
+      });
+      releaseCommit();
+      await vi.waitFor(() =>
+        expect(live.search("").sources[0]).toMatchObject({
+          stage: "descriptions",
+          done: 0,
+          total: 1,
+        }),
+      );
+      expect(live.search("").items).toHaveLength(1);
+      releaseDescription();
+      await vi.waitFor(() =>
+        expect(live.search("").sources[0]).toMatchObject({
+          stage: "done",
+          done: 1,
+          total: 1,
+        }),
+      );
+    } finally {
+      releaseCommit();
+      releaseDescription();
+      live.close();
+    }
+  });
+
+  it("reports a listing failure rather than a successful empty source", async () => {
+    const source = {
+      id: "bad",
+      owner: "example",
+      repository: "missing",
+      ref: "HEAD",
+      badge: "community",
+      enabled: 1,
+    };
+    const client = new GitHubClient(
+      async () => new Response("error", { status: 500 }),
+    );
+    const live = new LiveSources(
+      client,
+      () => [source],
+      () => undefined,
+    );
+    try {
+      live.search("");
+      await vi.waitFor(() =>
+        expect(live.search("").sources[0]).toMatchObject({
+          stage: "error",
+          total: 0,
+          complete: true,
+        }),
+      );
+      expect(live.search("").sources[0]?.error).toBeTruthy();
+    } finally {
+      live.close();
+    }
+  });
+
   it("shows path matches first then description matches from the pinned commit", async () => {
     const calls: string[] = [];
     const sha = "a".repeat(40);

@@ -36,6 +36,7 @@ type State = {
   tree: TreeItem[];
   items: Item[];
   done: number;
+  listed: boolean;
   complete: boolean;
   error: string | null;
   expires: number;
@@ -109,6 +110,7 @@ export class LiveSources {
         tree: [],
         items: [],
         done: 0,
+        listed: false,
         complete: false,
         error: null,
         expires: now + 15 * 60_000,
@@ -184,6 +186,7 @@ export class LiveSources {
           licence: null,
           diagnostic: null,
         }));
+      state.listed = true;
       await this.loadDescriptions(state);
     } catch (error) {
       if (!controller.signal.aborted)
@@ -305,6 +308,13 @@ export class LiveSources {
         done: state.done,
         total: state.items.length,
         complete: state.complete,
+        stage: state.complete
+          ? state.error
+            ? "error"
+            : "done"
+          : state.listed
+            ? "descriptions"
+            : "listing",
         error: state.error,
       })),
     };

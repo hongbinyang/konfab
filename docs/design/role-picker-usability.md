@@ -1,0 +1,7 @@
+# Role picker usability
+
+The picker should communicate its current filters and selection, use the same light/dark theme as the rest of Konfab, and show honest progress for enabled public sources. Keep assignment, preview and existing privacy behavior intact.
+
+Filters are independent toggle buttons: selecting All clears individual choices, and deselecting the last choice returns to All. Multiple selected categories are combined as a union. Results are grouped by category and their current selection has a distinct visual and `aria-pressed` state. Keyboard arrow navigation moves between visible result buttons across groups; Enter keeps the existing preview/assign behavior. Do not change role and skill assignment semantics.
+
+The dialog, backdrop, controls and selected rows use existing theme tokens, with a clearly visible focus indicator and contrast in light and dark themes. Status distinguishes listing, loading descriptions, completion and errors using explicit server state; do not infer listing from zero items or present partial results as complete. Retain already discovered results during loading and display any errors; report a reset time only where the server actually knows it. Cover filter union/toggle behavior and listing-to-description transitions with synthetic tests, and check the picker in both themes on an isolated instance before release. No real GitHub credential or real user data is needed for tests.

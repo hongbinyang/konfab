@@ -3,6 +3,13 @@ import { request } from "./api";
 import { parseDocument } from "yaml";
 import { NameField } from "./NameField";
 import { suggestName, validName } from "./name-validation";
+import {
+  matchesPickerFilter,
+  nextPickerIndex,
+  pickerFilters,
+  togglePickerFilter,
+  type PickerFilter,
+} from "./picker-filters";
 
 type Role = {
   id: string;
@@ -42,6 +49,7 @@ type SourceProgress = {
   done: number;
   total: number;
   complete: boolean;
+  stage: "listing" | "descriptions" | "done" | "error";
   error: string | null;
 };
 type Result =
@@ -69,9 +77,8 @@ export function RolePicker({
   const focusAssignOnPreview = useRef(false);
   const [results, setResults] = useState<Result[]>([]);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<
-    "all" | "roles" | "personal" | "project" | "public"
-  >("all");
+  const [filters, setFilters] = useState<PickerFilter[]>([]);
+  const [publicLoading, setPublicLoading] = useState(true);
   const [publicItems, setPublicItems] = useState<PublicItem[]>([]);
   const [progress, setProgress] = useState<SourceProgress[]>([]);
   const [publicHash, setPublicHash] = useState("");
@@ -154,6 +161,7 @@ export function RolePicker({
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    setPublicLoading(true);
     const poll = async () => {
       try {
         const response = await request<{
@@ -161,15 +169,18 @@ export function RolePicker({
           sources: SourceProgress[];
         }>(`/api/library/live?q=${encodeURIComponent(query)}`);
         if (!active) return;
+        setPublicLoading(false);
         setPublicItems(response.items);
         setProgress(response.sources);
         if (response.sources.some((source) => !source.complete))
           timer = setTimeout(() => void poll(), 1000);
       } catch (e) {
-        if (active)
+        if (active) {
+          setPublicLoading(false);
           setError(
             e instanceof Error ? e.message : "Public search unavailable",
           );
+        }
       }
     };
     void poll();
@@ -320,13 +331,13 @@ export function RolePicker({
     ...results,
     ...publicItems.map((item): Result => ({ kind: "public", public: item })),
   ].filter((item) => {
-    const matchesFilter =
-      filter === "all" ||
-      (filter === "roles"
-        ? item.kind === "role"
-        : filter === "public"
-          ? item.kind === "public"
-          : item.kind === "skill" && item.scope === filter);
+    const category: PickerFilter =
+      item.kind === "role"
+        ? "roles"
+        : item.kind === "public"
+          ? "public"
+          : item.scope;
+    const matchesFilter = matchesPickerFilter(filters, category);
     const text =
       item.kind === "role"
         ? `${item.role.title} ${item.role.description}`
@@ -479,103 +490,163 @@ export function RolePicker({
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          <div aria-label="Filter results">
-            {(
-              [
-                ["all", "All"],
-                ["roles", "My roles"],
-                ["personal", "My skills"],
-                ["project", "Project"],
-                ["public", "Public"],
-              ] as const
-            ).map(([value, label]) => (
+          <div className="role-picker-filters" aria-label="Filter results">
+            <button
+              type="button"
+              aria-pressed={filters.length === 0}
+              onClick={() => setFilters([])}
+            >
+              All
+            </button>
+            {pickerFilters.map(({ value, label }) => (
               <button
                 type="button"
                 key={value}
-                aria-pressed={filter === value}
-                onClick={() => setFilter(value)}
+                aria-pressed={filters.includes(value)}
+                onClick={() =>
+                  setFilters((current) => togglePickerFilter(current, value))
+                }
               >
                 {label}
               </button>
             ))}
           </div>
-          {progress.map((source) => (
-            <p key={source.source} role="status">
-              {source.error
-                ? `${source.source}: ${source.error}`
-                : !source.complete
-                  ? `Searching ${source.source} descriptions… ${source.done}/${source.total}`
-                  : ""}
+          <div className="role-picker-progress" aria-live="polite">
+            {publicLoading && progress.length === 0 && (
+              <p>Preparing public sources…</p>
+            )}
+            {!publicLoading && progress.length === 0 && !error && (
+              <p>No public sources enabled. Enable them in Manage library.</p>
+            )}
+            {progress.length > 0 && (
+              <p>
+                {progress.some((source) => source.stage === "listing")
+                  ? "Listing public sources…"
+                  : `${progress.some((source) => source.stage === "error") ? "Some sources incomplete" : "Names ready"} · descriptions checked ${progress.reduce((sum, source) => sum + source.done, 0)}/${progress.reduce((sum, source) => sum + source.total, 0)}`}
+              </p>
+            )}
+            {progress.map((source) => (
+              <div key={source.source} className="source-progress">
+                <span>
+                  {source.source} ·{" "}
+                  {source.stage === "listing"
+                    ? "Listing…"
+                    : source.stage === "descriptions"
+                      ? `Descriptions checked ${source.done}/${source.total}`
+                      : source.stage === "done"
+                        ? `✓ ${source.total} skills`
+                        : `Incomplete · ${source.done}/${source.total}`}
+                </span>
+                {source.stage === "descriptions" && source.total > 0 && (
+                  <progress
+                    aria-label={`${source.source} descriptions`}
+                    value={source.done}
+                    max={source.total}
+                  />
+                )}
+                {source.error && (
+                  <p className="source-warning">{source.error}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          {items.length === 0 && (
+            <p>
+              {publicLoading || progress.some((source) => !source.complete)
+                ? "Searching sources…"
+                : "No matching roles or skills."}
             </p>
-          ))}
-          {items.length === 0 && <p>No matching roles or skills.</p>}
-          <ul>
-            {items.map((item) => {
-              const id =
-                item.kind === "role"
-                  ? item.role.id
+          )}
+          {pickerFilters.map(({ value, label }) => {
+            const group = items.filter(
+              (item) =>
+                (item.kind === "role"
+                  ? "roles"
                   : item.kind === "public"
-                    ? `${item.public.source_id}:${item.public.path}`
-                    : `${item.scope}:${item.skill.id}`;
-              const label =
-                item.kind === "role"
-                  ? item.role.title
-                  : item.kind === "public"
-                    ? item.public.name
-                    : item.skill.name;
-              return (
-                <li key={id}>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void choose(item)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        if (
-                          selected &&
-                          resultKey(selected) === resultKey(item) &&
-                          preview
-                        )
-                          assign.current?.focus();
-                        else {
-                          focusAssignOnPreview.current = true;
-                          void choose(item);
-                        }
-                      } else if (
-                        event.key === "ArrowDown" ||
-                        event.key === "ArrowUp"
-                      ) {
-                        event.preventDefault();
-                        const sibling =
-                          event.key === "ArrowDown"
-                            ? event.currentTarget.parentElement
-                                ?.nextElementSibling
-                            : event.currentTarget.parentElement
-                                ?.previousElementSibling;
-                        sibling
-                          ?.querySelector<HTMLButtonElement>("button")
-                          ?.focus();
-                      }
-                    }}
-                    aria-pressed={
-                      selected !== null &&
-                      resultKey(selected) === resultKey(item)
-                    }
-                  >
-                    {label} ·{" "}
-                    {item.kind === "role"
-                      ? "Role"
-                      : item.kind === "public"
-                        ? `Public · ${item.public.source}`
-                        : item.scope === "project"
-                          ? "Project skill"
-                          : "My skill"}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    ? "public"
+                    : item.scope) === value,
+            );
+            if (!group.length) return null;
+            return (
+              <section className="role-picker-group" key={value}>
+                <h3>{label}</h3>
+                <ul className="role-picker-results">
+                  {group.map((item) => {
+                    const id =
+                      item.kind === "role"
+                        ? item.role.id
+                        : item.kind === "public"
+                          ? `${item.public.source_id}:${item.public.path}`
+                          : `${item.scope}:${item.skill.id}`;
+                    const label =
+                      item.kind === "role"
+                        ? item.role.title
+                        : item.kind === "public"
+                          ? item.public.name
+                          : item.skill.name;
+                    return (
+                      <li key={id}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void choose(item)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              if (
+                                selected &&
+                                resultKey(selected) === resultKey(item) &&
+                                preview
+                              )
+                                assign.current?.focus();
+                              else {
+                                focusAssignOnPreview.current = true;
+                                void choose(item);
+                              }
+                            } else if (
+                              event.key === "ArrowDown" ||
+                              event.key === "ArrowUp"
+                            ) {
+                              event.preventDefault();
+                              const buttons = [
+                                ...(dialog.current?.querySelectorAll<HTMLButtonElement>(
+                                  ".role-picker-results button:not(:disabled)",
+                                ) ?? []),
+                              ];
+                              const index = buttons.indexOf(
+                                event.currentTarget,
+                              );
+                              const next = nextPickerIndex(
+                                index,
+                                event.key,
+                                buttons.length,
+                              );
+                              if (next !== null) buttons[next]?.focus();
+                            }
+                          }}
+                          aria-pressed={
+                            selected !== null &&
+                            resultKey(selected) === resultKey(item)
+                          }
+                        >
+                          <strong>{label}</strong>
+                          <span>
+                            {item.kind === "role"
+                              ? "Role"
+                              : item.kind === "public"
+                                ? `${item.public.source} · ${item.public.badge === "vendor" ? "Vendor-maintained" : "Community"}`
+                                : item.scope === "project"
+                                  ? "Project skill"
+                                  : "My skill"}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
         </section>
         <section>
           <h3>Preview</h3>
