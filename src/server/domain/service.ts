@@ -14,6 +14,13 @@ import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import type { Db } from "../db/index.js";
 import { RoleLibrary } from "./roles.js";
 import { fileChunk } from "./file-chunk.js";
+import {
+  cleanupRoomFiles,
+  compactRoomDatabase,
+  deleteRoomRows,
+  recoverRoomCleanup,
+  roomDeletionCounts,
+} from "./room-deletion.js";
 
 export class KonfabError extends Error {
   constructor(
@@ -953,11 +960,17 @@ export class KonfabService {
       );
     }
     const id = this.db.transaction(() => {
+      const sequence = this.db
+        .prepare(
+          "UPDATE settings SET value=MAX(CAST(value AS INTEGER), (SELECT COALESCE(MAX(id),0) FROM rooms), (SELECT COALESCE(MAX(room_id),0) FROM pending_room_cleanup))+1 WHERE key='room_id_sequence' RETURNING value",
+        )
+        .get() as { value: string };
       const created = this.db
         .prepare(
-          "INSERT INTO rooms (name, topic, created_at, parallel_lead_mentions) VALUES (?, ?, ?, ?)",
+          "INSERT INTO rooms (id, name, topic, created_at, parallel_lead_mentions) VALUES (?, ?, ?, ?, ?)",
         )
         .run(
+          Number(sequence.value),
           name,
           topic,
           this.now(),
@@ -1599,6 +1612,47 @@ export class KonfabService {
       this.logEvent("room_archived", room.id, null, {});
     })();
     this.notify();
+  }
+
+  roomDeletionPreview(ref: RoomRef) {
+    const room = this.room(ref);
+    if (room.archived_at === null)
+      throw new KonfabError(
+        "room_not_archived",
+        409,
+        "Archive the room before deleting it.",
+      );
+    return { name: room.name, counts: roomDeletionCounts(this.db, room.id) };
+  }
+
+  deleteRoom(ref: RoomRef, confirmName: string) {
+    const room = this.room(ref);
+    if (room.archived_at === null)
+      throw new KonfabError(
+        "room_not_archived",
+        409,
+        "Archive the room before deleting it.",
+      );
+    if (confirmName !== room.name)
+      throw new KonfabError(
+        "name_mismatch",
+        400,
+        "The room name does not match.",
+      );
+    const counts = roomDeletionCounts(this.db, room.id);
+    deleteRoomRows(this.db, room.id, room.name, counts, this.now());
+    const filesRemoved = cleanupRoomFiles(
+      this.db,
+      this.options.attachmentDir,
+      room.id,
+    );
+    const compacted = compactRoomDatabase(this.db);
+    this.notify();
+    return { name: room.name, counts, files_removed: filesRemoved, compacted };
+  }
+
+  recoverDeletedRooms(): void {
+    recoverRoomCleanup(this.db, this.options.attachmentDir);
   }
 
   setRoomPaused(ref: RoomRef, paused: boolean): void {

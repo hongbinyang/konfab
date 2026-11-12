@@ -93,6 +93,7 @@ export function App() {
   const [serverRestarted, setServerRestarted] = useState(false);
   const instanceId = useRef<string | undefined>(undefined);
   const [error, setError] = useState("");
+  const [deletionNotice, setDeletionNotice] = useState("");
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -197,6 +198,14 @@ export function App() {
       />
       <main className="chat">
         <RunWarningToasts overview={overview} act={act} />
+        {deletionNotice && (
+          <p className="banner" role="status">
+            {deletionNotice}{" "}
+            <button className="quiet" onClick={() => setDeletionNotice("")}>
+              Dismiss
+            </button>
+          </p>
+        )}
         {serverRestarted && (
           <p className="banner warning" role="status">
             Konfab restarted. Reload this page to use the latest version.{" "}
@@ -247,6 +256,7 @@ export function App() {
             state={room}
             act={act}
             pageConnected={pageConnected}
+            onDeleted={setDeletionNotice}
           />
         ) : (
           <div className="empty">
@@ -401,10 +411,12 @@ function Room({
   state,
   act,
   pageConnected,
+  onDeleted,
 }: {
   state: RoomState;
   act: Act;
   pageConnected: boolean;
+  onDeleted: (message: string) => void;
 }) {
   const { room, agents } = state;
   const [teamRolesOpen, setTeamRolesOpen] = useState(false);
@@ -1120,7 +1132,10 @@ function Room({
         </p>
       )}
       {room.archived ? (
-        <p className="banner">This room is archived and is read-only.</p>
+        <div className="banner">
+          This room is archived and is read-only.{" "}
+          <DeleteRoom roomId={room.id} act={act} onDeleted={onDeleted} />
+        </div>
       ) : (
         <Composer
           roomId={room.id}
@@ -1132,6 +1147,110 @@ function Room({
         />
       )}
       <RoomRouting state={state} act={act} />
+    </>
+  );
+}
+
+function DeleteRoom({
+  roomId,
+  act,
+  onDeleted,
+}: {
+  roomId: number;
+  act: Act;
+  onDeleted: (message: string) => void;
+}) {
+  const [preview, setPreview] = useState<null | {
+    name: string;
+    counts: {
+      messages: number;
+      decisions: number;
+      attachments: number;
+      attachment_bytes: number;
+    };
+  }>(null);
+  const [name, setName] = useState("");
+  const [pending, setPending] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          void act(async () => {
+            setPreview(await request(`/api/rooms/${roomId}/deletion-preview`));
+            setName("");
+          })
+        }
+      >
+        Delete permanently…
+      </button>
+      {preview && (
+        <section
+          className="delete-room-confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-room-title"
+        >
+          <h2 id="delete-room-title">Permanently delete #{preview.name}?</h2>
+          <p>
+            This removes {preview.counts.messages} messages,{" "}
+            {preview.counts.decisions} decisions, {preview.counts.attachments}{" "}
+            attachments ({preview.counts.attachment_bytes.toLocaleString()}{" "}
+            recorded bytes), room activity, and related records. This cannot be
+            undone.
+          </p>
+          <p>
+            Backups, exports, other apps’ conversations, personal skills, roles,
+            and project files are not removed.
+          </p>
+          <p>
+            <a href={`/api/rooms/${roomId}/export`} download>
+              Export to Markdown first
+            </a>
+          </p>
+          <label>
+            Type the room name to confirm
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <div className="row">
+            <button
+              type="button"
+              disabled={pending || name !== preview.name}
+              onClick={() => {
+                setPending(true);
+                void act(async () => {
+                  const result = await request<{
+                    name: string;
+                    counts: { messages: number };
+                    files_removed: boolean;
+                    compacted: boolean;
+                  }>(`/api/rooms/${roomId}/delete`, {
+                    method: "POST",
+                    body: { name },
+                  });
+                  onDeleted(
+                    `Deleted #${result.name} (${result.counts.messages} messages).${result.files_removed ? "" : " Attachment cleanup is pending."}${result.compacted ? "" : " Database compaction is pending."}`,
+                  );
+                }).finally(() => setPending(false));
+              }}
+            >
+              Delete permanently
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={pending}
+              onClick={() => setPreview(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
     </>
   );
 }

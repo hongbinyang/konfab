@@ -121,6 +121,32 @@ describe("page API", () => {
     }
   });
 
+  it("restricts permanent room deletion to signed-in page requests with an exact confirmation", async () => {
+    const room = service.createRoom("dispose", "", ["claude"]);
+    service.postUserMessage(room.id, "example");
+    const url = `/api/rooms/${room.id}/delete`;
+    const unauthenticated = await app.inject({
+      method: "POST",
+      url,
+      headers: { host: HOST },
+      payload: { name: "dispose" },
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect((await call("POST", url, { name: "dispose" })).statusCode).toBe(409);
+    service.archiveRoom(room.id);
+    expect(
+      (await call("GET", `/api/rooms/${room.id}/deletion-preview`)).json()
+        .counts.messages,
+    ).toBe(1);
+    expect((await call("POST", url, { name: "incorrect" })).statusCode).toBe(
+      400,
+    );
+    const deleted = await call("POST", url, { name: "dispose" });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json().counts.messages).toBe(1);
+    expect((await call("GET", `/api/rooms/${room.id}`)).statusCode).toBe(404);
+  });
+
   it("reports actionable field errors for role and skill requests", async () => {
     for (const [url, payload, field] of [
       ["/api/roles", { name: "valid", title: "", description: "ok" }, "title"],

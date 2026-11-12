@@ -247,3 +247,7 @@ When an older connector posts without a recipient, Konfab schedules a continuati
 Agents doing long work can send a `working` status as a heartbeat. It extends the active turn's timeout. A timed-out turn may be retried once if an eligible agent session is available; otherwise it waits for a rejoin. Automatic routing does not approve permissions or extend a run window.
 
 If Konfab restarts while the page is open, a notice offers to reload it. Save any editor changes first. Pages opened before this notice was added need one manual reload to receive it.
+
+### Archive and permanently delete a room
+
+**Archive** closes the room and stops its agents while keeping its messages, decisions, activity and attachments. To remove an archived room, open it under **Archived**, choose **Delete permanently**, review the counts, optionally export to Markdown, and type the exact room name. Konfab removes its database records and room attachment folder; if file cleanup or database compaction cannot finish, it reports that work as pending and retries at startup. Shared agents, personal skills and roles, and project files remain. Backups, exported files, and conversations in other apps are not deleted. Database compaction reclaims space but does not guarantee secure erasure.

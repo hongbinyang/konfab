@@ -499,6 +499,10 @@ const MIGRATIONS: readonly string[] = [
   CREATE UNIQUE INDEX one_queued_turn ON turns(room_id, agent_id) WHERE state='queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL;
   CREATE UNIQUE INDEX one_parallel_request ON turns(room_id, agent_id, parallel_source_message_id) WHERE parallel_source_message_id IS NOT NULL AND state IN ('queued','active');
   `,
+  `
+  CREATE TABLE pending_room_cleanup (room_id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL);
+  INSERT OR IGNORE INTO settings(key,value) SELECT 'room_id_sequence', CAST(COALESCE(MAX(id), 0) AS TEXT) FROM rooms;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

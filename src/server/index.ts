@@ -16,6 +16,7 @@ const { db, service, skills, sources, roles } = createRuntime(
   })(),
 );
 service.recoverAfterRestart();
+service.recoverDeletedRooms();
 
 const app = await buildApp({
   service,

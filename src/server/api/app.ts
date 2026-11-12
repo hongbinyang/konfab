@@ -1840,6 +1840,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return service.roomState(id);
   });
 
+  app.get("/api/rooms/:id/deletion-preview", async (request) => {
+    const { id } = idParams.parse(request.params);
+    return service.roomDeletionPreview(id);
+  });
+  app.post("/api/rooms/:id/delete", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { name } = z.object({ name: z.string() }).parse(request.body);
+    return service.deleteRoom(id, name);
+  });
+
   app.post("/api/rooms/:id/archive", async (request) => {
     const { id } = idParams.parse(request.params);
     service.archiveRoom(id);
