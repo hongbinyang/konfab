@@ -8,7 +8,7 @@ import Fastify, {
 } from "fastify";
 import type { Writable } from "node:stream";
 import { existsSync, lstatSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z, ZodError } from "zod";
 import { parseDocument } from "yaml";
 import { SkillError } from "../domain/skill-error.js";
@@ -1113,6 +1113,21 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       throw new KonfabError("unavailable", 503, "Roles unavailable");
     return options.roles;
   };
+  app.get("/api/rooms/:id/picker-locations", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const project = service.roomState(id).room.project_path;
+    const rolesRoot = roleService().personalRoot();
+    return {
+      roles: rolesRoot ? resolve(rolesRoot) : null,
+      skills: options.skillsHome ? resolve(options.skillsHome, "skills") : null,
+      project: project ? join(project, ".konfab", "skills") : null,
+      sources: sourceService()
+        .list()
+        .filter((source) => source.enabled === 1)
+        .map((source) => `${source.owner}/${source.repository}`),
+    };
+  });
+
   app.get("/api/roles", async (request) => {
     const { trash } = z
       .object({ trash: z.enum(["true", "false"]).default("false") })

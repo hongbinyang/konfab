@@ -147,6 +147,38 @@ describe("page API", () => {
     expect((await call("GET", `/api/rooms/${room.id}`)).statusCode).toBe(404);
   });
 
+  it("returns configured picker locations without creating skill directories", async () => {
+    const room = service.createRoom("picker-locations", "", ["claude"]);
+    const customRoles = join(attachmentDir, "custom-role-library");
+    db.prepare("UPDATE role_libraries SET root_path=? WHERE id='personal'").run(
+      customRoles,
+    );
+    const path = `/api/rooms/${room.id}/picker-locations`;
+    const initial = (await call("GET", path)).json();
+    expect(initial.roles).toBe(customRoles);
+    expect(initial.skills).toBe(join(attachmentDir, "skills"));
+    expect(initial.project).toBeNull();
+    expect(initial.sources).toEqual(
+      sources
+        .list()
+        .filter((source) => source.enabled === 1)
+        .map((source) => `${source.owner}/${source.repository}`),
+    );
+    expect(existsSync(join(attachmentDir, "skills"))).toBe(false);
+    service.updateRoom(room.id, { project_path: attachmentDir });
+    const project = service.roomState(room.id).room.project_path!;
+    expect((await call("GET", path)).json().project).toBe(
+      join(project, ".konfab", "skills"),
+    );
+    expect(existsSync(join(project, ".konfab", "skills"))).toBe(false);
+    const denied = await app.inject({
+      method: "GET",
+      url: path,
+      headers: { host: HOST },
+    });
+    expect(denied.statusCode).toBe(401);
+  });
+
   it("reports actionable field errors for role and skill requests", async () => {
     for (const [url, payload, field] of [
       ["/api/roles", { name: "valid", title: "", description: "ok" }, "title"],

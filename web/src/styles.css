@@ -69,6 +69,22 @@ textarea {
   font: inherit;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  flex: none;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 textarea {
   resize: vertical;
 }
@@ -959,6 +975,14 @@ dd {
 }
 .role-picker-filters button:not([aria-pressed="true"]):hover {
   border-color: var(--accent);
+}
+.role-picker-hints {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.role-picker-hints p {
+  margin: 0.2rem 0;
 }
 .role-picker-progress {
   color: var(--muted);

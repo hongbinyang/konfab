@@ -192,6 +192,16 @@ export class RoleLibrary {
     })();
   }
 
+  personalRoot(): string | null {
+    return (
+      (
+        this.db
+          .prepare("SELECT root_path FROM role_libraries WHERE id='personal'")
+          .get() as { root_path: string } | undefined
+      )?.root_path ?? null
+    );
+  }
+
   list(trash = false) {
     return this.db
       .prepare(

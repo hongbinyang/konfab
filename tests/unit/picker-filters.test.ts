@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   matchesPickerFilter,
   nextPickerIndex,
+  pickerHint,
+  pickerEmpty,
   togglePickerFilter,
 } from "../../web/src/picker-filters.js";
 
@@ -21,5 +23,36 @@ describe("role-picker filters", () => {
     expect(nextPickerIndex(2, "ArrowUp", 4)).toBe(1);
     expect(nextPickerIndex(0, "ArrowUp", 4)).toBeNull();
     expect(nextPickerIndex(3, "ArrowDown", 4)).toBeNull();
+  });
+});
+
+describe("role-picker guidance", () => {
+  it("uses supplied library paths and names enabled sources", () => {
+    const locations = {
+      roles: "/custom/roles",
+      skills: "/custom/skills",
+      project: "/work/project/.konfab/skills",
+      sources: ["example/skills", "other/plugins"],
+    };
+    expect(pickerHint("roles", locations)).toContain("/custom/roles");
+    expect(pickerHint("roles", locations)).toContain("Built-in");
+    expect(pickerHint("personal", locations)).toContain("/custom/skills");
+    expect(pickerHint("project", locations)).toContain(
+      "/work/project/.konfab/skills",
+    );
+    expect(pickerHint("public", locations)).toContain(
+      "example/skills, other/plugins",
+    );
+    expect(pickerHint("project", { ...locations, project: null })).toContain(
+      "Set a project folder",
+    );
+  });
+  it("distinguishes empty categories from a search with no matches", () => {
+    expect(pickerEmpty("personal", "", false)).toContain("No personal skills");
+    expect(pickerEmpty("project", "", false)).toContain("Set a project folder");
+    expect(pickerEmpty("project", "", true)).toContain("No project skills");
+    expect(pickerEmpty("public", "report", true)).toBe(
+      "No matches for “report”.",
+    );
   });
 });

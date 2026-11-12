@@ -6,6 +6,9 @@ import { suggestName, validName } from "./name-validation";
 import {
   matchesPickerFilter,
   nextPickerIndex,
+  pickerHint,
+  pickerEmpty,
+  type PickerLocations,
   pickerFilters,
   togglePickerFilter,
   type PickerFilter,
@@ -79,6 +82,10 @@ export function RolePicker({
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<PickerFilter[]>([]);
   const [publicLoading, setPublicLoading] = useState(true);
+  const [locations, setLocations] = useState<PickerLocations | null>(null);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryFailed, setLibraryFailed] = useState(false);
+  const [projectUnavailable, setProjectUnavailable] = useState(false);
   const [publicItems, setPublicItems] = useState<PublicItem[]>([]);
   const [progress, setProgress] = useState<SourceProgress[]>([]);
   const [publicHash, setPublicHash] = useState("");
@@ -113,24 +120,31 @@ export function RolePicker({
     let active = true;
     const load = async () => {
       try {
-        const [roles, personal, assignment] = await Promise.all([
-          request<{ roles: Role[] }>("/api/roles"),
-          request<{ skills: Skill[] }>("/api/library?scope=personal"),
-          request<{ assignment: null | { revision: number; notes: string } }>(
-            `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/role-preview`,
-          ),
-        ]);
+        const [roles, personal, assignment, locationsResult] =
+          await Promise.all([
+            request<{ roles: Role[] }>("/api/roles"),
+            request<{ skills: Skill[] }>("/api/library?scope=personal"),
+            request<{ assignment: null | { revision: number; notes: string } }>(
+              `/api/rooms/${roomId}/members/${encodeURIComponent(agentId)}/role-preview`,
+            ),
+            request<PickerLocations>(
+              `/api/rooms/${roomId}/picker-locations`,
+            ).catch(() => null),
+          ]);
         let project: Skill[] = [];
+        let projectError = false;
         try {
-          project = (
-            await request<{ skills: Skill[] }>(
-              `/api/library?scope=project&room_id=${roomId}`,
-            )
-          ).skills;
+          const projectResult = await request<{
+            skills: Skill[];
+            unavailable?: boolean;
+          }>(`/api/library?scope=project&room_id=${roomId}`);
+          project = projectResult.skills;
+          projectError = !!projectResult.unavailable;
         } catch {
-          /* A project library is optional. */
+          projectError = true;
         }
         if (!active) return;
+        setProjectUnavailable(projectError);
         setResults([
           ...roles.roles.map((role): Result => ({ kind: "role", role })),
           ...personal.skills.map((skill): Result => ({
@@ -144,13 +158,18 @@ export function RolePicker({
             scope: "project",
           })),
         ]);
+        setLocations(locationsResult);
+        setLibraryLoading(false);
         setBaseRevision(assignment.assignment?.revision ?? 0);
         setNotes(assignment.assignment?.notes ?? "");
       } catch (e) {
-        if (active)
+        if (active) {
+          setLibraryLoading(false);
+          setLibraryFailed(true);
           setError(
             e instanceof Error ? e.message : "Unable to load the library",
           );
+        }
       }
     };
     void load();
@@ -493,6 +512,7 @@ export function RolePicker({
           <div className="role-picker-filters" aria-label="Filter results">
             <button
               type="button"
+              title="Show roles and skills from every category"
               aria-pressed={filters.length === 0}
               onClick={() => setFilters([])}
             >
@@ -502,6 +522,7 @@ export function RolePicker({
               <button
                 type="button"
                 key={value}
+                title={pickerHint(value, locations)}
                 aria-pressed={filters.includes(value)}
                 onClick={() =>
                   setFilters((current) => togglePickerFilter(current, value))
@@ -511,52 +532,76 @@ export function RolePicker({
               </button>
             ))}
           </div>
-          <div className="role-picker-progress" aria-live="polite">
-            {publicLoading && progress.length === 0 && (
-              <p>Preparing public sources…</p>
-            )}
-            {!publicLoading && progress.length === 0 && !error && (
-              <p>No public sources enabled. Enable them in Manage library.</p>
-            )}
-            {progress.length > 0 && (
-              <p>
-                {progress.some((source) => source.stage === "listing")
-                  ? "Listing public sources…"
-                  : `${progress.some((source) => source.stage === "error") ? "Some sources incomplete" : "Names ready"} · descriptions checked ${progress.reduce((sum, source) => sum + source.done, 0)}/${progress.reduce((sum, source) => sum + source.total, 0)}`}
-              </p>
-            )}
-            {progress.map((source) => (
-              <div key={source.source} className="source-progress">
-                <span>
-                  {source.source} ·{" "}
-                  {source.stage === "listing"
-                    ? "Listing…"
-                    : source.stage === "descriptions"
-                      ? `Descriptions checked ${source.done}/${source.total}`
-                      : source.stage === "done"
-                        ? `✓ ${source.total} skills`
-                        : `Incomplete · ${source.done}/${source.total}`}
-                </span>
-                {source.stage === "descriptions" && source.total > 0 && (
-                  <progress
-                    aria-label={`${source.source} descriptions`}
-                    value={source.done}
-                    max={source.total}
-                  />
-                )}
-                {source.error && (
-                  <p className="source-warning">{source.error}</p>
-                )}
-              </div>
-            ))}
+          <div className="role-picker-hints">
+            {pickerFilters
+              .filter(({ value }) => matchesPickerFilter(filters, value))
+              .map(({ value, label }) => (
+                <p key={value}>
+                  <strong>{label}:</strong>{" "}
+                  {libraryLoading
+                    ? "Loading library locations…"
+                    : pickerHint(value, locations)}
+                </p>
+              ))}
           </div>
-          {items.length === 0 && (
-            <p>
-              {publicLoading || progress.some((source) => !source.complete)
-                ? "Searching sources…"
-                : "No matching roles or skills."}
-            </p>
+          {matchesPickerFilter(filters, "public") && (
+            <div className="role-picker-progress" aria-live="polite">
+              {publicLoading && progress.length === 0 && (
+                <p>Preparing public sources…</p>
+              )}
+              {!publicLoading && progress.length === 0 && !error && (
+                <p>No public sources enabled. Enable them in Manage library.</p>
+              )}
+              {progress.length > 0 && (
+                <p>
+                  {progress.some((source) => source.stage === "listing")
+                    ? "Listing public sources…"
+                    : `${progress.some((source) => source.stage === "error") ? "Some sources incomplete" : "Names ready"} · descriptions checked ${progress.reduce((sum, source) => sum + source.done, 0)}/${progress.reduce((sum, source) => sum + source.total, 0)}`}
+                </p>
+              )}
+              {progress.map((source) => (
+                <div key={source.source} className="source-progress">
+                  <span>
+                    {source.source} ·{" "}
+                    {source.stage === "listing"
+                      ? "Listing…"
+                      : source.stage === "descriptions"
+                        ? `Descriptions checked ${source.done}/${source.total}`
+                        : source.stage === "done"
+                          ? `✓ ${source.total} skills`
+                          : `Incomplete · ${source.done}/${source.total}`}
+                  </span>
+                  {source.stage === "descriptions" && source.total > 0 && (
+                    <progress
+                      aria-label={`${source.source} descriptions`}
+                      value={source.done}
+                      max={source.total}
+                    />
+                  )}
+                  {source.error && (
+                    <p className="source-warning">{source.error}</p>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
+          {items.length === 0 &&
+            (query.trim() ? (
+              <p>
+                {libraryLoading ||
+                (matchesPickerFilter(filters, "public") &&
+                  (publicLoading ||
+                    progress.some((source) => !source.complete)))
+                  ? "Searching…"
+                  : pickerEmpty("roles", query, !!locations?.project)}
+              </p>
+            ) : filters.length === 0 ? (
+              <p>
+                {publicLoading || progress.some((source) => !source.complete)
+                  ? "Searching sources…"
+                  : "No roles or skills available."}
+              </p>
+            ) : null)}
           {pickerFilters.map(({ value, label }) => {
             const group = items.filter(
               (item) =>
@@ -566,7 +611,36 @@ export function RolePicker({
                     ? "public"
                     : item.scope) === value,
             );
-            if (!group.length) return null;
+            if (!group.length) {
+              if (!query.trim() && filters.includes(value))
+                return (
+                  <section className="role-picker-group" key={value}>
+                    <h3>{label}</h3>
+                    <p className="muted">
+                      {libraryLoading && value !== "public"
+                        ? "Loading library…"
+                        : libraryFailed && value !== "public"
+                          ? "Library unavailable. Try again."
+                          : value === "public" &&
+                              (publicLoading ||
+                                progress.some((source) => !source.complete))
+                            ? "Searching sources…"
+                            : value === "project" && !locations
+                              ? "Project location unavailable."
+                              : value === "project" &&
+                                  !!locations?.project &&
+                                  projectUnavailable
+                                ? "Project library unavailable. Check the project folder."
+                                : pickerEmpty(
+                                    value,
+                                    query,
+                                    !!locations?.project,
+                                  )}
+                    </p>
+                  </section>
+                );
+              return null;
+            }
             return (
               <section className="role-picker-group" key={value}>
                 <h3>{label}</h3>
