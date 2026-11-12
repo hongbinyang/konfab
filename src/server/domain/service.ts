@@ -33,6 +33,8 @@ export interface PreApproval {
 export interface ServiceOptions {
   now?: () => number;
   maxConsecutiveAgentMessages?: number;
+  parallelLeadMentions?: boolean;
+  maxParallelLeadTurns?: number;
   waitTimeoutSeconds: number;
   turnTimeoutMs: number;
   autoContinueDelayMs?: number;
@@ -80,6 +82,7 @@ export type WaitResult = (
       room: string;
       topic: string;
       rules: string;
+      parallel?: { source_message_id: number; notice: string };
       format?: {
         kind: "review" | "debate";
         topic: string;
@@ -222,6 +225,7 @@ interface RoomRow {
   brief: string;
   project_path: string | null;
   auto_continue: number;
+  parallel_lead_mentions: number;
   archived_at: number | null;
   paused: number;
   on_break: number;
@@ -240,6 +244,7 @@ interface TurnRow {
   result_message_id: number | null;
   post_result_json: string | null;
   repair_source_message_id: number | null;
+  parallel_source_message_id: number | null;
   continuation_reason: "self" | "timeout_recovery" | "watchdog" | null;
   continuation_source_message_id: number | null;
   timeout_retry_count: number;
@@ -949,8 +954,15 @@ export class KonfabService {
     }
     const id = this.db.transaction(() => {
       const created = this.db
-        .prepare("INSERT INTO rooms (name, topic, created_at) VALUES (?, ?, ?)")
-        .run(name, topic, this.now());
+        .prepare(
+          "INSERT INTO rooms (name, topic, created_at, parallel_lead_mentions) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          name,
+          topic,
+          this.now(),
+          this.options.parallelLeadMentions ? 1 : 0,
+        );
       const roomId = Number(created.lastInsertRowid);
       this.replaceMembers(roomId, agentIds);
       this.logEvent("room_created", roomId, null, { name });
@@ -967,6 +979,7 @@ export class KonfabService {
       topic?: string;
       brief?: string;
       project_path?: string | null;
+      parallel_lead_mentions?: boolean;
     },
   ) {
     const room = this.room(ref);
@@ -1008,15 +1021,32 @@ export class KonfabService {
         }
       }
     }
+    if (
+      changes.parallel_lead_mentions === false &&
+      room.parallel_lead_mentions &&
+      this.db
+        .prepare(
+          "SELECT 1 FROM turns WHERE room_id=? AND parallel_source_message_id IS NOT NULL AND state IN ('active','queued') LIMIT 1",
+        )
+        .get(room.id)
+    )
+      throw new KonfabError(
+        "parallel_pending",
+        409,
+        "Wait for parallel mentions to finish before turning this off.",
+      );
     this.db
       .prepare(
-        "UPDATE rooms SET name = ?, topic = ?, brief = ?, project_path = ? WHERE id = ?",
+        "UPDATE rooms SET name = ?, topic = ?, brief = ?, project_path = ?, parallel_lead_mentions = ? WHERE id = ?",
       )
       .run(
         changes.name ?? room.name,
         changes.topic ?? room.topic,
         changes.brief ?? room.brief,
         projectPath,
+        changes.parallel_lead_mentions === undefined
+          ? room.parallel_lead_mentions
+          : Number(changes.parallel_lead_mentions),
         room.id,
       );
     this.logEvent("room_updated", room.id, null, changes);
@@ -1873,6 +1903,7 @@ export class KonfabService {
         topic: room.topic,
         brief: room.brief,
         project_path: room.project_path,
+        parallel_lead_mentions: !!room.parallel_lead_mentions,
         paused: room.paused === 1,
         on_break: room.on_break === 1,
         archived: room.archived_at !== null,
@@ -2099,10 +2130,17 @@ export class KonfabService {
       }
       if (isModelCall) this.logEvent("wait_call", room.id, agentId, {});
 
+      const ownActive = this.db
+        .prepare(
+          "SELECT * FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'active'",
+        )
+        .get(room.id, agentId) as TurnRow | undefined;
+      if (ownActive) return this.buildTurn(room, ownActive);
       const active = this.db
-        .prepare("SELECT * FROM turns WHERE room_id = ? AND state = 'active'")
+        .prepare(
+          "SELECT * FROM turns WHERE room_id = ? AND state = 'active' AND parallel_source_message_id IS NULL",
+        )
         .get(room.id) as TurnRow | undefined;
-      if (active?.agent_id === agentId) return this.buildTurn(room, active);
 
       if (room.on_break === 1 || session.run_break_pending === 1) {
         this.endSession(session.id, "on_break");
@@ -2114,6 +2152,8 @@ export class KonfabService {
         notifyAfter.value = true;
         return closed("run_window_ended");
       }
+      const parallel = this.activateParallel(room, agentId, session.id);
+      if (parallel) return this.buildTurn(room, parallel);
       if (active) return { status: "idle", wait_seconds: waitSeconds };
 
       const started = this.activateNext(room, agentId, session.id);
@@ -2267,7 +2307,7 @@ export class KonfabService {
         for (const target of routed) {
           const queuedTurn = this.db
             .prepare(
-              "SELECT id, reason FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL",
+              "SELECT id, reason FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL",
             )
             .get(turn.room_id, target) as
             { id: number; reason: string } | undefined;
@@ -2455,7 +2495,7 @@ export class KonfabService {
       this.enqueue(room.id, to, "agent_mention");
       const turn = this.db
         .prepare(
-          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL",
+          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL",
         )
         .get(room.id, to) as { id: number };
       this.db
@@ -2895,12 +2935,38 @@ export class KonfabService {
             `UPDATE turns SET state = 'dropped', ended_at = ? WHERE room_id = ? AND state = 'queued' AND reason = 'agent_mention' AND format_run_id IS NULL`,
           )
           .run(this.now(), room.id);
-      for (const target of targets) this.enqueue(room.id, target, "user");
+      for (const target of targets) {
+        if (room.parallel_lead_mentions === 1 && mentions.length > 0) {
+          this.db
+            .prepare(
+              "INSERT OR IGNORE INTO turns (room_id, agent_id, reason, state, created_at, parallel_source_message_id) VALUES (?, ?, 'user', 'queued', ?, ?)",
+            )
+            .run(room.id, target, this.now(), id);
+        } else this.enqueue(room.id, target, "user");
+      }
       this.markLeadRead(room.id, [], true);
       return id;
     })();
     this.notify();
     return { message_id: messageId };
+  }
+
+  /** Pending notices repeat until their queued turn is claimed, so lost replies do not lose a mention. */
+  pendingLeadMentions(agentId: string, sessionId: string) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    const room = this.roomById(session.room_id);
+    if (
+      !room.parallel_lead_mentions ||
+      room.paused ||
+      room.on_break ||
+      this.isAllPaused()
+    )
+      return [];
+    return this.db
+      .prepare(
+        `SELECT m.id AS message_id FROM turns t JOIN messages m ON m.id=t.parallel_source_message_id WHERE t.room_id=? AND t.agent_id=? AND t.state='queued' ORDER BY t.id LIMIT 5`,
+      )
+      .all(room.id, agentId) as { message_id: number }[];
   }
 
   // Permissions
@@ -3692,7 +3758,10 @@ export class KonfabService {
         )
         .all(cutoff) as TurnRow[];
       for (const turn of expired) {
-        if (turn.format_run_id !== null) {
+        if (
+          turn.format_run_id !== null ||
+          turn.parallel_source_message_id !== null
+        ) {
           this.abandonAndRequeue(turn);
           continue;
         }
@@ -3872,7 +3941,7 @@ export class KonfabService {
       this.enqueue(item.room_id, item.target_agent_id, "agent_mention");
       const queued = this.db
         .prepare(
-          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL",
+          "SELECT id FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL",
         )
         .get(item.room_id, item.target_agent_id) as { id: number };
       this.db
@@ -4372,6 +4441,32 @@ export class KonfabService {
     };
   }
 
+  private activateParallel(
+    room: RoomRow,
+    agentId: string,
+    sessionId: string,
+  ): TurnRow | null {
+    if (
+      !room.parallel_lead_mentions ||
+      room.paused === 1 ||
+      this.isAllPaused() ||
+      room.on_break === 1
+    )
+      return null;
+    const count = this.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM turns WHERE room_id=? AND state='active' AND parallel_source_message_id IS NOT NULL",
+      )
+      .get(room.id) as { n: number };
+    if (count.n >= (this.options.maxParallelLeadTurns ?? 3)) return null;
+    const queued = this.db
+      .prepare(
+        "SELECT * FROM turns WHERE room_id=? AND agent_id=? AND state='queued' AND parallel_source_message_id IS NOT NULL ORDER BY id LIMIT 1",
+      )
+      .get(room.id, agentId) as TurnRow | undefined;
+    return queued ? this.startTurn(room.id, queued.id, sessionId) : null;
+  }
+
   private activateNext(
     room: RoomRow,
     agentId: string,
@@ -4397,7 +4492,7 @@ export class KonfabService {
     }
     const queued = this.db
       .prepare(
-        "SELECT * FROM turns WHERE room_id = ? AND state = 'queued' AND format_run_id IS NULL ORDER BY id",
+        "SELECT * FROM turns WHERE room_id = ? AND state = 'queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL ORDER BY id",
       )
       .all(room.id) as TurnRow[];
     for (const turn of queued) {
@@ -4619,6 +4714,15 @@ export class KonfabService {
       turn_id: turn.id,
       room: room.name,
       topic: room.topic,
+      ...(turn.parallel_source_message_id !== null
+        ? {
+            parallel: {
+              source_message_id: turn.parallel_source_message_id,
+              notice:
+                "Another agent may be active. Take the advisory write lock before modifying a shared checkout or pushing.",
+            },
+          }
+        : {}),
       ...(turn.format_run_id !== null && turn.format_step_index !== null
         ? (() => {
             const run = this.formatRun(turn.format_run_id!);
@@ -4700,6 +4804,51 @@ export class KonfabService {
   }
 
   private abandonAndRequeue(turn: TurnRow): void {
+    if (turn.parallel_source_message_id !== null) {
+      this.db
+        .prepare("UPDATE turns SET state='abandoned', ended_at=? WHERE id=?")
+        .run(this.now(), turn.id);
+      this.db
+        .prepare(
+          "INSERT INTO turns(room_id, agent_id, reason, state, created_at, parallel_source_message_id) VALUES (?, ?, 'user', 'queued', ?, ?)",
+        )
+        .run(
+          turn.room_id,
+          turn.agent_id,
+          this.now(),
+          turn.parallel_source_message_id,
+        );
+      const prior = this.db
+        .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
+        .get(turn.id) as { role_envelope_json: string | null };
+      const identity = this.db
+        .prepare(
+          `SELECT m.delivered_role_identity, json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS current_identity FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
+        )
+        .get(turn.room_id, turn.agent_id) as
+        | { delivered_role_identity: string; current_identity: string }
+        | undefined;
+      if (
+        prior.role_envelope_json &&
+        identity?.delivered_role_identity === identity?.current_identity &&
+        (JSON.parse(prior.role_envelope_json) as { notice?: string } | null)
+          ?.notice
+      )
+        this.db
+          .prepare(
+            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND parallel_source_message_id=? AND state='queued'",
+          )
+          .run(
+            prior.role_envelope_json,
+            turn.room_id,
+            turn.agent_id,
+            turn.parallel_source_message_id,
+          );
+      this.logEvent("turn_abandoned", turn.room_id, turn.agent_id, {
+        turn_id: turn.id,
+      });
+      return;
+    }
     this.db
       .prepare(
         "UPDATE turns SET state = 'abandoned', ended_at = ? WHERE id = ?",
@@ -4771,7 +4920,7 @@ export class KonfabService {
       if (role?.notice)
         this.db
           .prepare(
-            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND state='queued' AND format_run_id IS NULL AND role_envelope_json IS NULL",
+            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND state='queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL AND role_envelope_json IS NULL",
           )
           .run(prior.role_envelope_json, turn.room_id, turn.agent_id);
     }
@@ -4779,7 +4928,7 @@ export class KonfabService {
       .prepare(
         `UPDATE turns SET timeout_retry_count = MAX(timeout_retry_count, ?),
       continuation_reason = COALESCE(continuation_reason, ?), continuation_source_message_id = COALESCE(continuation_source_message_id, ?)
-      WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL`,
+      WHERE room_id = ? AND agent_id = ? AND state = 'queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL`,
       )
       .run(
         turn.timeout_retry_count,
@@ -4802,7 +4951,7 @@ export class KonfabService {
       .prepare(
         `INSERT INTO turns (room_id, agent_id, reason, state, created_at)
          VALUES (?, ?, ?, 'queued', ?)
-         ON CONFLICT(room_id, agent_id) WHERE state = 'queued' AND format_run_id IS NULL DO UPDATE SET
+         ON CONFLICT(room_id, agent_id) WHERE state = 'queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL DO UPDATE SET
            reason = CASE WHEN excluded.reason = 'user' THEN 'user' ELSE turns.reason END`,
       )
       .run(roomId, agentId, reason, this.now());

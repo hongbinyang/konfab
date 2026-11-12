@@ -71,6 +71,48 @@ describe("server and bridge", () => {
     db.close();
   });
 
+  it("carries a queued lead mention on a busy agent tool response until it is claimed", async () => {
+    const enabled = new KonfabService(db, {
+      waitTimeoutSeconds: 1,
+      turnTimeoutMs: 60_000,
+      maxMessageChars: 1000,
+      parallelLeadMentions: true,
+    });
+    const isolated = await buildApp({ service: enabled, port: PORT });
+    try {
+      enabled.updateRoom(ROOM, { parallel_lead_mentions: true });
+      const session = enabled.join("claude", ROOM).session_id;
+      enabled.postUserMessage(ROOM, "Begin work");
+      const turn = enabled.poll("claude", session, true);
+      expect(turn.status).toBe("turn");
+      const message = enabled.postUserMessage(ROOM, "@claude please check");
+      const request = () =>
+        isolated.inject({
+          method: "POST",
+          url: "/agent/report",
+          headers: {
+            host: `127.0.0.1:${PORT}`,
+            authorization: `Bearer ${token}`,
+          },
+          payload: { session_id: session, kind: "working", detail: "Testing" },
+        });
+      const first = await request();
+      expect(first.statusCode).toBe(200);
+      expect(first.json().lead_mentions).toEqual([
+        { message_id: message.message_id },
+      ]);
+      expect((await request()).json().lead_mentions).toEqual(
+        first.json().lead_mentions,
+      );
+      if (turn.status !== "turn") throw new Error("expected turn");
+      enabled.passTurn("claude", session, turn.turn_id);
+      expect(enabled.poll("claude", session, true).status).toBe("turn");
+      expect((await request()).json().lead_mentions).toBeUndefined();
+    } finally {
+      await isolated.close();
+    }
+  });
+
   it("keeps two agents on one app credential bound to their own sessions", async () => {
     service.ensureAgent("codex", "Codex");
     const otherToken = generateToken();

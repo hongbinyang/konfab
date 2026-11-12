@@ -489,6 +489,16 @@ const MIGRATIONS: readonly string[] = [
   CREATE UNIQUE INDEX one_queued_turn ON turns(room_id, agent_id) WHERE state='queued' AND format_run_id IS NULL;
   CREATE UNIQUE INDEX one_format_step_turn ON turns(format_run_id, format_step_index) WHERE state IN ('queued','active') AND format_run_id IS NOT NULL;
   `,
+  `
+  ALTER TABLE rooms ADD COLUMN parallel_lead_mentions INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE turns ADD COLUMN parallel_source_message_id INTEGER REFERENCES messages(id);
+  DROP INDEX one_active_turn;
+  DROP INDEX one_queued_turn;
+  CREATE UNIQUE INDEX one_active_turn_per_agent ON turns(room_id, agent_id) WHERE state='active';
+  CREATE UNIQUE INDEX one_active_ordinary_turn ON turns(room_id) WHERE state='active' AND parallel_source_message_id IS NULL;
+  CREATE UNIQUE INDEX one_queued_turn ON turns(room_id, agent_id) WHERE state='queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL;
+  CREATE UNIQUE INDEX one_parallel_request ON turns(room_id, agent_id, parallel_source_message_id) WHERE parallel_source_message_id IS NOT NULL AND state IN ('queued','active');
+  `,
 ];
 
 export function openDatabase(path: string): Db {

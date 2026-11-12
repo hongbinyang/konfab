@@ -21,6 +21,36 @@ function turn(result: WaitResult) {
 }
 
 describe("structured formats", () => {
+  it("keeps format step order when a parallel lead mention is answered", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const service = new KonfabService(db, options);
+      for (const id of ["a", "b", "c"]) service.ensureAgent(id, id);
+      const room = service.createRoom("parallel-format", "", ["a", "b", "c"]);
+      service.updateRoom(room.id, { parallel_lead_mentions: true });
+      const a = service.join("a", "parallel-format").session_id;
+      const b = service.join("b", "parallel-format").session_id;
+      const c = service.join("c", "parallel-format").session_id;
+      service.startFormat(room.id, {
+        kind: "review",
+        topic: "Review",
+        rounds: 1,
+        author: "a",
+        reviewers: ["b"],
+      });
+      const first = turn(service.poll("a", a, true));
+      service.postUserMessage(room.id, "@c question");
+      const extra = turn(service.poll("c", c, true));
+      expect(extra.parallel?.source_message_id).toBeDefined();
+      service.passTurn("c", c, extra.turn_id);
+      expect(service.roomState(room.id).format?.current_step).toBe(0);
+      service.passTurn("a", a, first.turn_id);
+      expect(turn(service.poll("b", b, true)).format?.slot).toBe("reviewer");
+    } finally {
+      db.close();
+    }
+  });
+
   it("runs review steps once, preserves queued messages and proposes the final summary", async () => {
     const root = mkdtempSync(join(tmpdir(), "konfab-format-")),
       path = join(root, "db");

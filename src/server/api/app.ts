@@ -90,6 +90,7 @@ const updateRoomBody = z.object({
   topic: z.string().optional(),
   brief: z.string().optional(),
   project_path: z.string().nullable().optional(),
+  parallel_lead_mentions: z.boolean().optional(),
 });
 const memberParams = z.object({
   id: z.coerce.number().int().positive(),
@@ -319,6 +320,48 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       action,
     );
   };
+
+  const noticeRoutes = new Set([
+    "/agent/post",
+    "/agent/pass",
+    "/agent/report",
+    "/agent/lock/acquire",
+    "/agent/lock/release",
+    "/agent/history",
+    "/agent/decisions/read",
+    "/agent/read-role",
+    "/agent/read-role-file",
+    "/agent/read-skill-file",
+  ]);
+  app.addHook("preSerialization", async (request, reply, payload) => {
+    if (
+      !noticeRoutes.has(request.url.split("?")[0]!) ||
+      reply.statusCode >= 400 ||
+      !payload ||
+      typeof payload !== "object" ||
+      Array.isArray(payload)
+    )
+      return payload;
+    const sessionId = (request.body as { session_id?: unknown } | null)
+      ?.session_id;
+    if (typeof sessionId !== "string") return payload;
+    try {
+      const notices = service.pendingLeadMentions(
+        requireAgent(request),
+        sessionId,
+      );
+      return notices.length
+        ? {
+            ...payload,
+            lead_mentions: notices,
+            lead_mentions_note:
+              "A lead mention is queued; notices repeat until its turn begins.",
+          }
+        : payload;
+    } catch {
+      return payload;
+    }
+  });
 
   app.post("/agent/join", async (request) => {
     const appId = requireApp(request);
@@ -1771,14 +1814,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.patch("/api/rooms/:id", async (request) => {
     const { id } = idParams.parse(request.params);
-    const { name, topic, brief, project_path } = updateRoomBody.parse(
-      request.body,
-    );
+    const { name, topic, brief, project_path, parallel_lead_mentions } =
+      updateRoomBody.parse(request.body);
     service.updateRoom(id, {
       ...(name !== undefined ? { name } : {}),
       ...(topic !== undefined ? { topic } : {}),
       ...(brief !== undefined ? { brief } : {}),
       ...(project_path !== undefined ? { project_path } : {}),
+      ...(parallel_lead_mentions !== undefined
+        ? { parallel_lead_mentions }
+        : {}),
     });
     return service.roomState(id);
   });

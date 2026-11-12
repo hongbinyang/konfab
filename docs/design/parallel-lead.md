@@ -1,0 +1,21 @@
+# Parallel lead mentions: prototype design
+
+The lead's explicitly mentioned agents may answer in the same room while another agent has a turn. Unaddressed lead posts and agent handoffs retain serial ordering. This prototype runs only in an isolated test home and port; do not deploy it against a real room or user database. The user authorized a prototype first, with real-client measurements before a production design is approved.
+
+## Invariants and scheduler
+
+A lead message creates one durable, deduplicated request per explicitly mentioned room member, associated with its source message. `@all` counts as explicit. A pending request for a busy agent survives until that agent can respond; no agent may have two active turns. A waiting, live member can claim a pending request when pause/break and run-window rules allow it and fewer than three parallel lead turns are active. A cap applies only to these extra turns, not the normal room turn. Room posts and reply-to references remain in the shared timeline. Record the source id at claim time; do not advance a member's message cursor past messages they have not actually received. Concurrent claims must be transactional.
+
+The current `one_active_turn` database index and several queries assume at most one active turn per room. A prototype migration must replace it with one-active-per-agent and one-active-ordinary-turn indexes, distinguish parallel turns, and audit poll/replay, timeouts, restart/rejoin, pause/break, format runs, handoffs and room UI queries. A queued ordinary turn must not accidentally become a parallel turn; priority and deduplication of multiple requests must be explicit. Active ordinary work and ordered format steps remain serialized. Do not imply that advisory locks enforce exclusivity.
+
+## Busy-agent notice
+
+A busy agent is not interrupted. Its next eligible Konfab tool response may include a bounded notice identifying the lead message; the original content is already in the shared room. Persist notice and delivery state per agent and message. Tool retries and durable bridge receipts require careful treatment: do not mark a notice delivered before the response is durably recoverable, and do not lose it after an ambiguous network failure. Acknowledgement semantics and behavior during pause, break, session replacement and concurrent tool calls need tests. If a client fails to surface added response fields, this is a client limitation, not successful delivery. Do not call the note exactly once without defining acknowledgement and retry behavior.
+
+## Prototype and validation
+
+First prove server scheduling and notification behavior using isolated data, a temporary database and fake agent sessions, including same-agent exclusion, cap, serial ordinary turns, format steps, pause, break, repeated calls, concurrent claims, lost/replayed responses and real database reopen. Never contact GitHub or use real credentials. Then measure in real Codex and Claude app conversations against an isolated server with synthetic messages, without interrupting or replacing live sessions. Measure lead post → wait return, return → agent reply, and next-tool-call → observable notice separately. If the required clients or clean conversations cannot be created without affecting the user's existing sessions, report the limitation rather than claim a measurement. Before wider integration, review API compatibility, migration rollback, race cases, room UI representation of multiple active members, message association, resource access, and the configured cap.
+
+## Prototype status
+
+The prototype uses an off-by-default room setting; the server default applies to newly created rooms. Queued notices contain message IDs and repeat on eligible tool replies until claimed. They are deliberately at-least-once: a lost response cannot permanently suppress a notice, but the recipient may see duplicates. This is not an acknowledgement that an app actually displayed or acted on the notice. The setting cannot be disabled while parallel requests remain queued or active. Active-room routing displays still need a multi-turn audit. Tests use fake sessions; no real-app latency or client behavior has been measured. Review all of these limitations before any merge or live-room trial.

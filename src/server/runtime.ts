@@ -30,6 +30,8 @@ export function createRuntime(
   }
   const service = new KonfabService(db, {
     maxConsecutiveAgentMessages: config.defaults.max_consecutive_agent_messages,
+    parallelLeadMentions: config.defaults.parallel_lead_mentions,
+    maxParallelLeadTurns: config.defaults.max_parallel_lead_turns,
     waitTimeoutSeconds: config.defaults.wait_timeout_seconds,
     turnTimeoutMs: config.defaults.turn_timeout_minutes * 60_000,
     autoContinueDelayMs: config.defaults.auto_continue_delay_seconds * 1000,

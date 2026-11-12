@@ -34,6 +34,8 @@ const defaultsSchema = z.object({
     .max(20)
     .default([30, 10, 5]),
   max_consecutive_agent_messages: z.number().int().min(1).default(50),
+  parallel_lead_mentions: z.boolean().default(false),
+  max_parallel_lead_turns: z.number().int().min(1).max(10).default(3),
   wait_timeout_seconds: z.number().int().min(1).default(50),
   turn_timeout_minutes: z.number().int().min(1).default(30),
   auto_continue_delay_seconds: z.number().int().min(10).max(3600).default(180),

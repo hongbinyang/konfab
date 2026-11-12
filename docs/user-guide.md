@@ -168,6 +168,10 @@ On a room member card, select **Change role**. Search your roles and skills, pro
 
 Public search and preview use temporary memory; a selected skill is saved only when you use or customize it. Without a token, GitHub allows 60 requests an hour; if it limits requests, retry after the displayed reset time, or add a [GitHub token](#github-token-optional) for 5,000 an hour. To reclaim space used by older versions of Konfab, choose **Remove old fetched indexes** in **⚙ Manage library → Public** and confirm the estimated size. Saved skills, roles and assignments remain.
 
+### Parallel lead mentions (experimental)
+
+In **Edit** for a room, **Answer my @mentions in parallel** allows explicitly mentioned waiting agents to take separate turns alongside an existing turn. It is off by default. Unaddressed posts and agent handoffs keep normal ordering, and each agent still has at most one active turn. When an agent is busy, selected tool responses repeat the ID of a queued mention until it starts that turn; actual response timing depends on the desktop app. Pause and break prevent new turns. Shared checkout locks are advisory, so agents must cooperate. Wait for queued and active parallel requests to finish before turning the setting off. This is a prototype: multiple active turns may not all appear in room routing displays, and real-client delivery has not yet been validated.
+
 ## GitHub token (optional)
 
 Public skill search works without a token, but GitHub then allows only 60 requests an hour. With a token you get 5,000. Konfab only reads public repositories, so the token needs no permissions.

@@ -1,7 +1,9 @@
-import { realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
+import { buildApp } from "../../src/server/api/app.js";
 import {
   generateToken,
   KonfabService,
@@ -58,6 +60,127 @@ describe("KonfabService", () => {
   });
 
   afterEach(() => db.close());
+
+  it("allows a flagged lead mention alongside an existing ordinary turn", () => {
+    service = new KonfabService(db, {
+      now: () => now,
+      waitTimeoutSeconds: 50,
+      turnTimeoutMs: TURN_TIMEOUT_MS,
+      maxMessageChars: 100,
+      parallelLeadMentions: true,
+    });
+    service.updateRoom(ROOM, { parallel_lead_mentions: true });
+    service.postUserMessage(ROOM, "Begin work");
+    const first = expectTurn(service.poll("claude", claude, true));
+    service.postUserMessage(ROOM, "@codex respond");
+    const second = expectTurn(service.poll("codex", codex, true));
+    expect(second.messages.some((m) => m.body === "@codex respond")).toBe(true);
+    expect(expectTurn(service.poll("claude", claude, true)).turn_id).toBe(
+      first.turn_id,
+    );
+    expect(expectTurn(service.poll("codex", codex, true)).turn_id).toBe(
+      second.turn_id,
+    );
+  });
+
+  it("caps parallel requests, preserves busy mentions, and repeats notices until claim", () => {
+    service = new KonfabService(db, {
+      now: () => now,
+      waitTimeoutSeconds: 50,
+      turnTimeoutMs: TURN_TIMEOUT_MS,
+      maxMessageChars: 100,
+      parallelLeadMentions: true,
+      maxParallelLeadTurns: 1,
+    });
+    service.updateRoom(ROOM, { parallel_lead_mentions: true });
+    service.postUserMessage(ROOM, "Begin work");
+    const first = expectTurn(service.poll("claude", claude, true));
+    const msg = service.postUserMessage(ROOM, "@claude @codex respond");
+    expect(service.pendingLeadMentions("claude", claude)).toEqual([
+      { message_id: msg.message_id },
+    ]);
+    expect(service.pendingLeadMentions("claude", claude)).toHaveLength(1);
+    const parallel = expectTurn(service.poll("codex", codex, true));
+    expect(service.poll("claude", claude, true)).toMatchObject({
+      turn_id: first.turn_id,
+    });
+    service.passTurn("claude", claude, first.turn_id);
+    expect(service.poll("claude", claude, true).status).toBe("idle");
+    service.passTurn("codex", codex, parallel.turn_id);
+    expectTurn(service.poll("claude", claude, true));
+    expect(service.pendingLeadMentions("claude", claude)).toHaveLength(0);
+  });
+
+  it("requeues a timed-out parallel turn with its source intact", () => {
+    service.updateRoom(ROOM, { parallel_lead_mentions: true });
+    const message = service.postUserMessage(ROOM, "@codex respond");
+    const first = expectTurn(service.poll("codex", codex, true));
+    now += TURN_TIMEOUT_MS + 1;
+    service.tick();
+    const retry = expectTurn(service.poll("codex", codex, true));
+    expect(retry.turn_id).not.toBe(first.turn_id);
+    expect(() => service.passTurn("codex", codex, first.turn_id)).toThrow();
+    expect(retry.parallel?.source_message_id).toBe(message.message_id);
+  });
+
+  it("holds parallel mentions during pause", () => {
+    service.updateRoom(ROOM, { parallel_lead_mentions: true });
+    service.postUserMessage(ROOM, "@codex respond");
+    service.setRoomPaused(ROOM, true);
+    expect(service.poll("codex", codex, true).status).toBe("idle");
+    service.setRoomPaused(ROOM, false);
+    expectTurn(service.poll("codex", codex, true));
+  });
+
+  it("reopens a real database and preserves the active and queued parallel turns", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "konfab-parallel-"));
+    const path = join(dir, "test.db");
+    const options = {
+      waitTimeoutSeconds: 1,
+      turnTimeoutMs: TURN_TIMEOUT_MS,
+      maxMessageChars: 100,
+    };
+    let disk = openDatabase(path);
+    try {
+      let app = new KonfabService(disk, options);
+      app.ensureAgent("a", "A");
+      app.ensureAgent("b", "B");
+      app.createRoom("disk", "", ["a", "b"]);
+      app.updateRoom("disk", { parallel_lead_mentions: true });
+      const a = app.join("a", "disk").session_id;
+      const b = app.join("b", "disk").session_id;
+      app.postUserMessage("disk", "ordinary");
+      const original = expectTurn(app.poll("a", a, true));
+      app.postUserMessage("disk", "@b parallel");
+      const parallel = expectTurn(app.poll("b", b, true));
+      app.postUserMessage("disk", "@b follow-up");
+      const firstApp = await buildApp({ service: app, port: 19797 });
+      await firstApp.ready();
+      await firstApp.close();
+      disk.close();
+      disk = openDatabase(path);
+      app = new KonfabService(disk, options);
+      app.recoverAfterRestart();
+      const nextApp = await buildApp({ service: app, port: 19797 });
+      await nextApp.ready();
+      await nextApp.close();
+      expect(expectTurn(app.poll("a", a, true)).turn_id).toBe(original.turn_id);
+      expect(expectTurn(app.poll("b", b, true)).turn_id).toBe(parallel.turn_id);
+      expect(app.pendingLeadMentions("b", b)).toHaveLength(1);
+      app.passTurn("b", b, parallel.turn_id);
+      expectTurn(app.poll("b", b, true));
+    } finally {
+      disk.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves serial scheduling by default", () => {
+    service.postUserMessage(ROOM, "Begin work");
+    expectTurn(service.poll("claude", claude, true));
+    service.postUserMessage(ROOM, "@codex respond");
+    expect(service.poll("codex", codex, true).status).toBe("idle");
+  });
 
   it("stores an explicit existing project folder and rejects invalid paths", () => {
     service.updateRoom(ROOM, { project_path: tmpdir() });

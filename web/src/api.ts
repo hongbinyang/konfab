@@ -197,6 +197,7 @@ export interface RoomState {
   room: RoomSummary & {
     brief: string;
     project_path: string | null;
+    parallel_lead_mentions: boolean;
     agent_streak: number;
     streak_limit: number;
   };

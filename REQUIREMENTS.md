@@ -76,6 +76,9 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 
 ## 6. Joining and turns
 
+Experimental parallel lead mentions are opt-in per room. They allow distinct agents to respond concurrently, subject to a room cap; ordinary turns remain serial. Busy-agent notices repeat until their turn begins and do not guarantee client delivery.
+
+
 **Joining is manual in v1.** The user adds Konfab to each app once, then pastes a join prompt into a new conversation in that app.
 
 | ID | Priority | Requirement |

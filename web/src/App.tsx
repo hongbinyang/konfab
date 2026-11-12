@@ -452,6 +452,9 @@ function Room({
   const [topic, setTopic] = useState(room.topic);
   const [brief, setBrief] = useState(room.brief);
   const [projectPath, setProjectPath] = useState(room.project_path ?? "");
+  const [parallelMentions, setParallelMentions] = useState(
+    room.parallel_lead_mentions,
+  );
   const listRef = useRef<HTMLOListElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -703,6 +706,7 @@ function Room({
           name: name.trim(),
           topic,
           brief,
+          parallel_lead_mentions: parallelMentions,
           ...(projectPath.trim() !== (room.project_path ?? "")
             ? { project_path: projectPath.trim() || null }
             : {}),
@@ -777,6 +781,14 @@ function Room({
                 placeholder="Absolute path (optional)"
               />
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={parallelMentions}
+                onChange={(event) => setParallelMentions(event.target.checked)}
+              />{" "}
+              Answer my @mentions in parallel (experimental)
+            </label>
             <div className="row">
               <button type="submit">Save</button>
               <button
@@ -838,6 +850,7 @@ function Room({
                     setTopic(room.topic);
                     setBrief(room.brief);
                     setProjectPath(room.project_path ?? "");
+                    setParallelMentions(room.parallel_lead_mentions);
                     setEditing(true);
                   }}
                 >
