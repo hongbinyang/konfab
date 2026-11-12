@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { buildApp } from "./api/app.js";
 import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
 import { createRuntime } from "./runtime.js";
+import { resolveGithubToken } from "./github-token.js";
 
 const home = konfabHome();
 ensureHome(home);
@@ -9,6 +10,10 @@ const config = loadConfig(home);
 const { db, service, skills, sources, roles } = createRuntime(
   databasePath(home),
   config,
+  (() => {
+    const resolved = resolveGithubToken(process.env.KONFAB_GITHUB_TOKEN);
+    return { token: resolved.token, tokenSource: resolved.source };
+  })(),
 );
 service.recoverAfterRestart();
 

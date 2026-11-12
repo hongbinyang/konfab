@@ -1,3 +1,4 @@
+import type { TokenSource } from "../github-token.js";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
@@ -38,6 +39,7 @@ export type SourceOptions = {
   fetch?: typeof fetch;
   now?: () => number;
   token?: string;
+  tokenSource?: TokenSource;
   notify?: () => void;
 };
 
@@ -47,6 +49,7 @@ export class SkillSources {
   private readonly now: () => number;
   private readonly cacheBytes: number;
   private readonly token: string | undefined;
+  private readonly tokenSource: TokenSource;
   private readonly notify: () => void;
   private job: {
     sourceId: string;
@@ -64,6 +67,8 @@ export class SkillSources {
     this.now = options.now ?? Date.now;
     this.cacheBytes = options.cacheBytes ?? 500 * 1024 * 1024;
     this.token = options.token;
+    this.tokenSource =
+      options.tokenSource ?? (options.token ? "environment" : "unavailable");
     this.live = new LiveSources(
       this.github,
       () => this.list(),
@@ -202,6 +207,7 @@ export class SkillSources {
   tokenState() {
     return {
       available: !!this.token,
+      source: this.tokenSource,
       enabled:
         this.db
           .prepare(

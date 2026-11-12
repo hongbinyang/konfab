@@ -1296,7 +1296,11 @@ function PublicSources({ roomId }: { roomId: number | null }) {
   const [owner, setOwner] = useState("");
   const [repository, setRepository] = useState("");
   const [error, setError] = useState("");
-  const [token, setToken] = useState({ available: false, enabled: false });
+  const [token, setToken] = useState<{
+    available: boolean;
+    enabled: boolean;
+    source?: string;
+  }>({ available: false, enabled: false });
   const [github, setGithub] = useState<GitHubStatus | null>(null);
   const [checkingGithub, setCheckingGithub] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -1311,7 +1315,7 @@ function PublicSources({ roomId }: { roomId: number | null }) {
   const load = useCallback(async () => {
     const data = await request<{
       sources: PublicSource[];
-      token: { available: boolean; enabled: boolean };
+      token: { available: boolean; enabled: boolean; source?: string };
       github: GitHubStatus;
     }>("/api/library/sources");
     setSources(data.sources);
@@ -1407,7 +1411,8 @@ function PublicSources({ roomId }: { roomId: number | null }) {
               });
             }}
           />
-          Use the GitHub token from the environment for API requests
+          Use the GitHub token for API requests (
+          {token.source === "keychain" ? "macOS Keychain" : "environment"})
         </label>
       )}
       <section aria-label="GitHub status">
