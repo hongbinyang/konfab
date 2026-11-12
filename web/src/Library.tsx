@@ -1267,6 +1267,15 @@ type PublicSkill = {
   commit_id: string;
 };
 
+type GitHubStatus = {
+  mode: "token" | "public";
+  state: "not_checked" | "accepted" | "rejected" | "unavailable";
+  limit: number | null;
+  remaining: number | null;
+  reset_at: number | null;
+  checked_at: number | null;
+};
+
 function PublicSources({ roomId }: { roomId: number | null }) {
   const [sources, setSources] = useState<PublicSource[]>([]);
   const [skills, setSkills] = useState<PublicSkill[]>([]);
@@ -1288,6 +1297,8 @@ function PublicSources({ roomId }: { roomId: number | null }) {
   const [repository, setRepository] = useState("");
   const [error, setError] = useState("");
   const [token, setToken] = useState({ available: false, enabled: false });
+  const [github, setGithub] = useState<GitHubStatus | null>(null);
+  const [checkingGithub, setCheckingGithub] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [importName, setImportName] = useState("");
   const [draft, setDraft] = useState<null | {
@@ -1301,9 +1312,11 @@ function PublicSources({ roomId }: { roomId: number | null }) {
     const data = await request<{
       sources: PublicSource[];
       token: { available: boolean; enabled: boolean };
+      github: GitHubStatus;
     }>("/api/library/sources");
     setSources(data.sources);
     setToken(data.token);
+    setGithub(data.github);
   }, []);
   useEffect(() => {
     void load().catch((e) =>
@@ -1397,6 +1410,39 @@ function PublicSources({ roomId }: { roomId: number | null }) {
           Use the GitHub token from the environment for API requests
         </label>
       )}
+      <section aria-label="GitHub status">
+        <p role="status">
+          GitHub:{" "}
+          {token.enabled && !token.available
+            ? "token enabled but unavailable in this server; restart with a token"
+            : github?.state === "rejected"
+              ? "Token rejected by GitHub. Check that it hasn't expired."
+              : github?.state === "not_checked" || !github
+                ? `${github?.mode === "token" ? "token enabled" : "no token"} · not checked yet`
+                : github.state === "unavailable"
+                  ? `${github.mode === "token" ? "token enabled" : "no token"} · GitHub response unavailable`
+                  : `${github.mode === "token" ? "using your token" : "no token"}${github.remaining !== null && github.limit !== null ? ` · ${github.remaining.toLocaleString()} of ${github.limit.toLocaleString()} left` : ""}${github.reset_at !== null ? ` · resets ${new Date(github.reset_at).toLocaleTimeString()}` : ""}`}
+        </p>
+        {github?.checked_at && (
+          <p className="muted">
+            Last response: {new Date(github.checked_at).toLocaleString()}
+          </p>
+        )}
+        <button
+          type="button"
+          disabled={checkingGithub}
+          onClick={() => {
+            setCheckingGithub(true);
+            void act(async () => {
+              await request("/api/library/github-status/check", {
+                method: "POST",
+              });
+            }).finally(() => setCheckingGithub(false));
+          }}
+        >
+          {checkingGithub ? "Checking…" : "Check GitHub status"}
+        </button>
+      </section>
       <form
         onSubmit={(e) => {
           e.preventDefault();

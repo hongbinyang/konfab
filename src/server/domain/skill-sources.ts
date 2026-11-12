@@ -67,7 +67,7 @@ export class SkillSources {
     this.live = new LiveSources(
       this.github,
       () => this.list(),
-      () => (this.tokenState().enabled ? this.token : undefined),
+      () => this.enabledToken(),
       this.now,
     );
     this.notify = options.notify ?? (() => {});
@@ -217,6 +217,48 @@ export class SkillSources {
         ).value === "1",
     };
   }
+  private enabledToken(): string | undefined {
+    if (!this.tokenState().enabled) return undefined;
+    if (!this.token)
+      throw new SkillError(
+        "token_missing",
+        400,
+        "The enabled GitHub token is unavailable; restart with it or disable token use.",
+      );
+    return this.token;
+  }
+  githubStatus() {
+    const token = this.tokenState();
+    const authenticated = token.enabled && token.available;
+    return {
+      mode: authenticated ? ("token" as const) : ("public" as const),
+      ...this.github.statusFor(authenticated),
+    };
+  }
+  async checkGithub() {
+    const token = this.enabledToken();
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Konfab",
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const response = await this.github.request(
+        "https://api.github.com/rate_limit",
+        headers,
+        AbortSignal.timeout(15000),
+      );
+      await response.body?.cancel();
+    } catch {
+      throw new SkillError(
+        "github_unavailable",
+        502,
+        "GitHub status check failed; try again later.",
+      );
+    }
+    this.notify();
+    return this.githubStatus();
+  }
   private source(id: string): Source {
     const source = this.db
       .prepare("SELECT * FROM skill_sources WHERE id = ?")
@@ -236,8 +278,8 @@ export class SkillSources {
       Accept: "application/vnd.github+json",
       "User-Agent": "Konfab",
     };
-    if (this.token && this.tokenState().enabled)
-      headers.Authorization = `Bearer ${this.token}`;
+    const token = this.enabledToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
     const response = await this.response(
       `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/commits/${encodeURIComponent(source.ref)}`,
       headers,
@@ -280,8 +322,8 @@ export class SkillSources {
       Accept: "application/vnd.github+json",
       "User-Agent": "Konfab",
     };
-    if (this.token && this.tokenState().enabled)
-      headers.Authorization = `Bearer ${this.token}`;
+    const token = this.enabledToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
     const folder = manifestPath.includes("/")
       ? manifestPath.slice(0, manifestPath.lastIndexOf("/"))
       : "";
@@ -545,6 +587,12 @@ export class SkillSources {
   }
 
   private throwGitHubError(response: Response, sourceId: string): never {
+    if (response.status === 401 && this.enabledToken())
+      throw new SkillError(
+        "token_rejected",
+        401,
+        "Token rejected by GitHub. Check that it hasn't expired.",
+      );
     if (
       response.status === 429 ||
       (response.status === 403 &&
@@ -639,8 +687,8 @@ export class SkillSources {
       Accept: "application/vnd.github+json",
       "User-Agent": "Konfab",
     };
-    if (this.token && this.tokenState().enabled)
-      headers.Authorization = `Bearer ${this.token}`;
+    const token = this.enabledToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
     const treeItems: Array<{
       path: string;
       mode: string;
@@ -881,8 +929,8 @@ export class SkillSources {
         Accept: "application/vnd.github+json",
         "User-Agent": "Konfab",
       };
-      if (this.token && this.tokenState().enabled)
-        headers.Authorization = `Bearer ${this.token}`;
+      const token = this.enabledToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
       if (source.etag && source.current_generation_id)
         headers["If-None-Match"] = source.etag;
       const api = await this.response(

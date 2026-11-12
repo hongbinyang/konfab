@@ -558,7 +558,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.get("/api/library/sources", async () => ({
     sources: sourceService().list(),
     token: sourceService().tokenState(),
+    github: sourceService().githubStatus(),
   }));
+  app.post("/api/library/github-status/check", async () =>
+    sourceService().checkGithub(),
+  );
   app.post("/api/library/sources", async (request) => {
     const body = z
       .object({

@@ -9,6 +9,21 @@ type Entry = {
   size: number;
 };
 
+export type GitHubStatus = {
+  state: "not_checked" | "accepted" | "rejected" | "unavailable";
+  limit: number | null;
+  remaining: number | null;
+  reset_at: number | null;
+  checked_at: number | null;
+};
+const unchecked = (): GitHubStatus => ({
+  state: "not_checked",
+  limit: null,
+  remaining: null,
+  reset_at: null,
+  checked_at: null,
+});
+
 /** Bounded process-local GitHub response cache; credentials are never stored in keys. */
 export class GitHubClient {
   private readonly cache = new Map<string, Entry>();
@@ -20,6 +35,11 @@ export class GitHubClient {
   private rawActive = 0;
   private readonly rawQueue: Array<() => void> = [];
   private budget = new Map<string, { remaining: number; reset: number }>();
+  private readonly status = new Map<string, GitHubStatus>();
+  statusFor(authenticated: boolean): GitHubStatus {
+    return this.status.get(authenticated ? "auth" : "public") ?? unchecked();
+  }
+
   constructor(
     private readonly fetcher: typeof fetch = fetch,
     private readonly now: () => number = Date.now,
@@ -197,16 +217,26 @@ export class GitHubClient {
       );
     }
     if (existing?.etag) normalized.set("If-None-Match", existing.etag);
-    const response = await this.fetcher(url, {
-      headers: normalized,
-      redirect: "manual",
-      signal: AbortSignal.any([
-        signal,
-        AbortSignal.timeout(
-          parsed.hostname === "raw.githubusercontent.com" ? 15_000 : 120_000,
-        ),
-      ]),
-    });
+    let response: Response;
+    try {
+      response = await this.fetcher(url, {
+        headers: normalized,
+        redirect: "manual",
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(
+            parsed.hostname === "raw.githubusercontent.com" ? 15_000 : 120_000,
+          ),
+        ]),
+      });
+    } catch {
+      if (signal.aborted) throw signal.reason;
+      throw new SkillError(
+        "source_unavailable",
+        502,
+        "GitHub request failed; try again later.",
+      );
+    }
     if (
       response.status >= 300 &&
       response.status < 400 &&
@@ -218,17 +248,36 @@ export class GitHubClient {
         "Source redirected to an unexpected location",
       );
     if (parsed.hostname === "api.github.com") {
+      const numberHeader = (name: string): number | null => {
+        const raw = response.headers.get(name);
+        if (raw === null || !/^\d+$/.test(raw)) return null;
+        const value = Number(raw);
+        return Number.isSafeInteger(value) ? value : null;
+      };
+      const reset = numberHeader("x-ratelimit-reset");
+      this.status.set(authenticated ? "auth" : "public", {
+        state:
+          response.status === 401 && authenticated
+            ? "rejected"
+            : response.ok || response.status === 304
+              ? "accepted"
+              : "unavailable",
+        limit: numberHeader("x-ratelimit-limit"),
+        remaining: numberHeader("x-ratelimit-remaining"),
+        reset_at: reset === null ? null : reset * 1000,
+        checked_at: this.now(),
+      });
       const remaining = response.headers.get("x-ratelimit-remaining");
-      const reset = response.headers.get("x-ratelimit-reset");
+      const resetHeader = response.headers.get("x-ratelimit-reset");
       if (
         remaining !== null &&
-        reset !== null &&
+        resetHeader !== null &&
         Number.isFinite(Number(remaining)) &&
-        Number.isFinite(Number(reset))
+        Number.isFinite(Number(resetHeader))
       )
         this.budget.set(authenticated ? "auth" : "public", {
           remaining: Number(remaining),
-          reset: Number(reset) * 1000,
+          reset: Number(resetHeader) * 1000,
         });
     }
     if (response.status === 304 && existing) {

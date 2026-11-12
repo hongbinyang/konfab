@@ -71,6 +71,12 @@ export class LiveSources {
   }
   private async json(url: string, signal: AbortSignal): Promise<unknown> {
     const response = await this.client.request(url, this.headers(), signal);
+    if (response.status === 401 && this.token())
+      throw new SkillError(
+        "token_rejected",
+        401,
+        "Token rejected by GitHub. Check that it hasn't expired.",
+      );
     if (!response.ok)
       throw new SkillError(
         "source_error",

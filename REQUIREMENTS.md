@@ -336,7 +336,7 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 - A bounded, cancellable per-room watchdog recovers unaddressed legacy posts. It respects pause, break, approvals, streak limits and run windows, and stops after three automatic recoveries in an hour.
 - Working heartbeats refresh the owning active turn; a timeout can be recovered once. Routing receipts, pending plans and caps survive restart.
 
-The member role picker searches local and enabled public skills, previews pinned content, and records explicit review before assignment. Search and preview use temporary memory; removing old indexes leaves saved skills and roles intact.
+The member role picker searches local and enabled public skills, previews pinned content, and records explicit review before assignment. Search and preview use temporary memory; removing old indexes leaves saved skills and roles intact. An explicit GitHub status check reports rate-limit headers and token rejection without exposing or logging credentials, and never falls back to anonymous access after a rejected token.
 
 ### Team role reassignment
 
