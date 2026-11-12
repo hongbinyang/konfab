@@ -503,6 +503,9 @@ const MIGRATIONS: readonly string[] = [
   CREATE TABLE pending_room_cleanup (room_id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL);
   INSERT OR IGNORE INTO settings(key,value) SELECT 'room_id_sequence', CAST(COALESCE(MAX(id), 0) AS TEXT) FROM rooms;
   `,
+  `
+  ALTER TABLE rooms ADD COLUMN checkin_minutes INTEGER CHECK(checkin_minutes IS NULL OR checkin_minutes IN (1,2,5,10));
+  `,
 ];
 
 export function openDatabase(path: string): Db {

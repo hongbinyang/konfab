@@ -42,6 +42,7 @@ export interface ServiceOptions {
   maxConsecutiveAgentMessages?: number;
   parallelLeadMentions?: boolean;
   maxParallelLeadTurns?: number;
+  defaultCheckinMinutes?: number;
   waitTimeoutSeconds: number;
   turnTimeoutMs: number;
   autoContinueDelayMs?: number;
@@ -233,6 +234,7 @@ interface RoomRow {
   project_path: string | null;
   auto_continue: number;
   parallel_lead_mentions: number;
+  checkin_minutes: number | null;
   archived_at: number | null;
   paused: number;
   on_break: number;
@@ -311,7 +313,6 @@ const RULES = [
   "Confirmed decisions reflect the lead's earlier choices; follow the lead's current instructions and propose a change rather than silently acting against a decision.",
   "When you change code, commit it to your own git branch.",
   "If you start work outside your turn (coding, testing, reviewing), call report_status with kind working and a short detail first. Posting or passing clears it.",
-  "During long work, call report_status with kind working and a short detail roughly every 3–5 minutes when practical, and check the reply for lead mentions. A status detail can acknowledge a mention without ending your turn; post_message ends your turn.",
   "If you know you are low on or out of allowance, call report_status.",
   "If post_message warns that no continuation is queued and someone should act next, call hand_off with that message ID and the intended agent, if the tool is available. Otherwise ask the lead to use the page continuation controls.",
   "Set next on each post: self to continue, agent to hand off, lead to wait for the lead, or done when finished.",
@@ -994,6 +995,7 @@ export class KonfabService {
       brief?: string;
       project_path?: string | null;
       parallel_lead_mentions?: boolean;
+      checkin_minutes?: number | null;
     },
   ) {
     const room = this.room(ref);
@@ -1009,6 +1011,16 @@ export class KonfabService {
         );
       }
     }
+    if (
+      changes.checkin_minutes !== undefined &&
+      changes.checkin_minutes !== null &&
+      ![1, 2, 5, 10].includes(changes.checkin_minutes)
+    )
+      throw new KonfabError(
+        "invalid_checkin",
+        400,
+        "Choose 1, 2, 5, or 10 minutes.",
+      );
     if (changes.topic !== undefined) this.validateTopic(changes.topic);
     if (changes.brief !== undefined) {
       this.validateLength(changes.brief, MAX_BRIEF_CHARS, "Briefs");
@@ -1051,7 +1063,7 @@ export class KonfabService {
       );
     this.db
       .prepare(
-        "UPDATE rooms SET name = ?, topic = ?, brief = ?, project_path = ?, parallel_lead_mentions = ? WHERE id = ?",
+        "UPDATE rooms SET name = ?, topic = ?, brief = ?, project_path = ?, parallel_lead_mentions = ?, checkin_minutes = ? WHERE id = ?",
       )
       .run(
         changes.name ?? room.name,
@@ -1061,6 +1073,9 @@ export class KonfabService {
         changes.parallel_lead_mentions === undefined
           ? room.parallel_lead_mentions
           : Number(changes.parallel_lead_mentions),
+        changes.checkin_minutes === undefined
+          ? room.checkin_minutes
+          : changes.checkin_minutes,
         room.id,
       );
     this.logEvent("room_updated", room.id, null, changes);
@@ -1959,6 +1974,8 @@ export class KonfabService {
         brief: room.brief,
         project_path: room.project_path,
         parallel_lead_mentions: !!room.parallel_lead_mentions,
+        checkin_minutes: room.checkin_minutes,
+        checkin_default: this.options.defaultCheckinMinutes ?? 2,
         paused: room.paused === 1,
         on_break: room.on_break === 1,
         archived: room.archived_at !== null,
@@ -4085,6 +4102,11 @@ export class KonfabService {
       parts.push(
         `Suggested lock key for this project’s main branch: repo:${room.project_path}#main. Use the same key as collaborators and the actual branch for other branches.`,
       );
+    const interval =
+      room.checkin_minutes ?? this.options.defaultCheckinMinutes ?? 2;
+    parts.push(
+      `During long work, call report_status with kind working and a short detail about every ${interval} ${interval === 1 ? "minute" : "minutes"} when practical, and check the reply for lead mentions. A status detail can acknowledge a mention without ending your turn; post_message ends your turn.`,
+    );
     parts.push(RULES);
     return parts.join("\n\n");
   }

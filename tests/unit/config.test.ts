@@ -9,6 +9,19 @@ it("accepts small and fractional run warning thresholds", () => {
 });
 
 describe("parseConfig", () => {
+  it("validates the default working check-in interval", () => {
+    expect(parseConfig("").defaults.checkin_minutes).toBe(2);
+    for (const minutes of [1, 2, 5, 10])
+      expect(
+        parseConfig(`defaults:\n  checkin_minutes: ${minutes}\n`).defaults
+          .checkin_minutes,
+      ).toBe(minutes);
+    for (const minutes of [0, 3, 11])
+      expect(() =>
+        parseConfig(`defaults:\n  checkin_minutes: ${minutes}\n`),
+      ).toThrow();
+  });
+
   it("uses the agreed defaults for an empty file", () => {
     const config = parseConfig("");
     expect(config.server.port).toBe(8787);

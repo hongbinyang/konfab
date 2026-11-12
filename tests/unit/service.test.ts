@@ -143,6 +143,39 @@ describe("KonfabService", () => {
     ).toBeNull();
   });
 
+  it("inherits the configured check-in interval and isolates room overrides", () => {
+    service = new KonfabService(db, {
+      now: () => now,
+      waitTimeoutSeconds: 50,
+      turnTimeoutMs: TURN_TIMEOUT_MS,
+      maxMessageChars: 100,
+      defaultCheckinMinutes: 5,
+    });
+    service.createRoom("other", "", ["claude"]);
+    const otherSession = service.join("claude", "other").session_id;
+    expect(service.roomState(ROOM).room).toMatchObject({
+      checkin_minutes: null,
+      checkin_default: 5,
+    });
+    service.postUserMessage(ROOM, "work");
+    expect(expectTurn(service.poll("claude", claude, true)).rules).toContain(
+      "every 5 minutes",
+    );
+    service.updateRoom(ROOM, { checkin_minutes: 1 });
+    expect(expectTurn(service.poll("claude", claude, true)).rules).toContain(
+      "every 1 minute",
+    );
+    service.postUserMessage("other", "work");
+    expect(
+      expectTurn(service.poll("claude", otherSession, true)).rules,
+    ).toContain("every 5 minutes");
+    expect(() => service.updateRoom(ROOM, { checkin_minutes: 3 })).toThrow();
+    service.updateRoom(ROOM, { checkin_minutes: null });
+    expect(expectTurn(service.poll("claude", claude, true)).rules).toContain(
+      "every 5 minutes",
+    );
+  });
+
   it("holds parallel mentions during pause", () => {
     service.updateRoom(ROOM, { parallel_lead_mentions: true });
     service.postUserMessage(ROOM, "@codex respond");
@@ -166,7 +199,11 @@ describe("KonfabService", () => {
       app.ensureAgent("a", "A");
       app.ensureAgent("b", "B");
       app.createRoom("disk", "", ["a", "b"]);
-      app.updateRoom("disk", { parallel_lead_mentions: true });
+      app.updateRoom("disk", {
+        parallel_lead_mentions: true,
+        checkin_minutes: 10,
+      });
+      app.createRoom("inherited", "", ["a"]);
       const a = app.join("a", "disk").session_id;
       const b = app.join("b", "disk").session_id;
       app.postUserMessage("disk", "ordinary");
@@ -179,12 +216,23 @@ describe("KonfabService", () => {
       await firstApp.close();
       disk.close();
       disk = openDatabase(path);
-      app = new KonfabService(disk, options);
+      app = new KonfabService(disk, { ...options, defaultCheckinMinutes: 1 });
       app.recoverAfterRestart();
+      expect(app.roomState("disk").room).toMatchObject({
+        checkin_minutes: 10,
+        checkin_default: 1,
+      });
+      expect(app.roomState("inherited").room).toMatchObject({
+        checkin_minutes: null,
+        checkin_default: 1,
+      });
       const nextApp = await buildApp({ service: app, port: 19797 });
       await nextApp.ready();
       await nextApp.close();
       expect(expectTurn(app.poll("a", a, true)).turn_id).toBe(original.turn_id);
+      expect(expectTurn(app.poll("a", a, true)).rules).toContain(
+        "every 10 minutes",
+      );
       expect(expectTurn(app.poll("b", b, true)).turn_id).toBe(parallel.turn_id);
       expect(app.pendingLeadMentions("b", b)).toHaveLength(1);
       app.passTurn("b", b, parallel.turn_id);

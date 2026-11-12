@@ -179,6 +179,26 @@ describe("page API", () => {
     expect(denied.statusCode).toBe(401);
   });
 
+  it("validates and clears a room check-in override", async () => {
+    const room = service.createRoom("checkin", "", ["claude"]);
+    const path = `/api/rooms/${room.id}`;
+    expect((await call("GET", path)).json().room).toMatchObject({
+      checkin_minutes: null,
+      checkin_default: 2,
+    });
+    expect((await call("PATCH", path, { checkin_minutes: 3 })).statusCode).toBe(
+      400,
+    );
+    expect(
+      (await call("PATCH", path, { checkin_minutes: 10 })).json().room
+        .checkin_minutes,
+    ).toBe(10);
+    expect(
+      (await call("PATCH", path, { checkin_minutes: null })).json().room
+        .checkin_minutes,
+    ).toBeNull();
+  });
+
   it("reports actionable field errors for role and skill requests", async () => {
     for (const [url, payload, field] of [
       ["/api/roles", { name: "valid", title: "", description: "ok" }, "title"],

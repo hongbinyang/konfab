@@ -91,6 +91,10 @@ const updateRoomBody = z.object({
   brief: z.string().optional(),
   project_path: z.string().nullable().optional(),
   parallel_lead_mentions: z.boolean().optional(),
+  checkin_minutes: z
+    .union([z.literal(1), z.literal(2), z.literal(5), z.literal(10)])
+    .nullable()
+    .optional(),
 });
 const memberParams = z.object({
   id: z.coerce.number().int().positive(),
@@ -1829,8 +1833,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.patch("/api/rooms/:id", async (request) => {
     const { id } = idParams.parse(request.params);
-    const { name, topic, brief, project_path, parallel_lead_mentions } =
-      updateRoomBody.parse(request.body);
+    const {
+      name,
+      topic,
+      brief,
+      project_path,
+      parallel_lead_mentions,
+      checkin_minutes,
+    } = updateRoomBody.parse(request.body);
     service.updateRoom(id, {
       ...(name !== undefined ? { name } : {}),
       ...(topic !== undefined ? { topic } : {}),
@@ -1839,6 +1849,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       ...(parallel_lead_mentions !== undefined
         ? { parallel_lead_mentions }
         : {}),
+      ...(checkin_minutes !== undefined ? { checkin_minutes } : {}),
     });
     return service.roomState(id);
   });

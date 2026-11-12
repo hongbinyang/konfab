@@ -77,7 +77,7 @@ describe("server and bridge", () => {
     const active = service.poll("claude", session, true);
     expect(active.status).toBe("turn");
     if (active.status === "turn")
-      expect(active.rules).toContain("every 3–5 minutes");
+      expect(active.rules).toContain("every 2 minutes");
     service.postUserMessage(ROOM, "@claude check");
     const response = await app.inject({
       method: "POST",

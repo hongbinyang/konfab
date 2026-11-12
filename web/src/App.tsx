@@ -466,6 +466,9 @@ function Room({
   const [parallelMentions, setParallelMentions] = useState(
     room.parallel_lead_mentions,
   );
+  const [checkinMinutes, setCheckinMinutes] = useState<number | null>(
+    room.checkin_minutes,
+  );
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
   const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
@@ -673,6 +676,7 @@ function Room({
           topic,
           brief,
           parallel_lead_mentions: parallelMentions,
+          checkin_minutes: checkinMinutes,
           ...(projectPath.trim() !== (room.project_path ?? "")
             ? { project_path: projectPath.trim() || null }
             : {}),
@@ -755,6 +759,33 @@ function Room({
               />{" "}
               Answer my @mentions in parallel (experimental)
             </label>
+            <label>
+              Check-in interval while working
+              <select
+                value={checkinMinutes ?? "default"}
+                onChange={(event) =>
+                  setCheckinMinutes(
+                    event.target.value === "default"
+                      ? null
+                      : Number(event.target.value),
+                  )
+                }
+              >
+                <option value="default">
+                  Default ({room.checkin_default} min)
+                </option>
+                {[1, 2, 5, 10].map((value) => (
+                  <option key={value} value={value}>
+                    {value} {value === 1 ? "minute" : "minutes"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="muted">
+              Shorter check-ins may improve responsiveness but use more agent
+              allowance. An agent cannot check in while blocked on a long
+              operation.
+            </p>
             <div className="row">
               <button type="submit">Save</button>
               <button
@@ -817,6 +848,7 @@ function Room({
                     setBrief(room.brief);
                     setProjectPath(room.project_path ?? "");
                     setParallelMentions(room.parallel_lead_mentions);
+                    setCheckinMinutes(room.checkin_minutes);
                     setEditing(true);
                   }}
                 >

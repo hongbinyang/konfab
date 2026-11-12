@@ -199,6 +199,8 @@ export interface RoomState {
     brief: string;
     project_path: string | null;
     parallel_lead_mentions: boolean;
+    checkin_minutes: number | null;
+    checkin_default: number;
     agent_streak: number;
     streak_limit: number;
   };
