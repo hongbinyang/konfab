@@ -16,43 +16,42 @@ Three rules keep this predictable:
 
 ## Where things live
 
-| What                                           | Where                                                        |
-| ---------------------------------------------- | ------------------------------------------------------------ |
-| Your personal skills                           | `~/.konfab/skills/<name>/SKILL.md`                           |
-| Project skills (shared through the repo)       | `<project folder>/.konfab/skills/<name>/SKILL.md`            |
-| Your personal roles                            | `~/.konfab/roles/<name>/ROLE.md`                             |
-| Built-in roles (PM, Implementer, Reviewer, QA) | Shipped with Konfab, read-only                               |
-| Saved revisions, reviews and assignments       | `~/.konfab/konfab.db`                                        |
-| Public skill catalogues                        | GitHub, cached under `~/.konfab/` after you choose **Fetch** |
+| What                                           | Where                                                  |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| Your personal skills                           | `~/.konfab/skills/<name>/SKILL.md`                     |
+| Project skills (shared through the repo)       | `<project folder>/.konfab/skills/<name>/SKILL.md`      |
+| Your personal roles                            | `~/.konfab/roles/<name>/ROLE.md`                       |
+| Built-in roles (PM, Implementer, Reviewer, QA) | Shipped with Konfab, read-only                         |
+| Saved revisions, reviews and assignments       | `~/.konfab/konfab.db`                                  |
+| Public skills                                  | Searched live on GitHub; only skills you use are saved |
 
 The folders are ordinary files you can open in any editor. Each **Save revision** also stores an immutable snapshot in the database, so history survives outside edits.
 
 ## The lifecycle
 
 ```
-Find ──► Add to library ──► Edit (optional) ──► Review ──► Pin in a role ──► Assign ──► Update ──► Retire
+Find ──► Review & assign (or Customize) ──► Update ──► Retire
 ```
 
-### 1. Find a skill
+Most of the time you only need **Change role** on an agent's card: find a skill or role, check the preview, and assign it. Sections 3–5 describe the optional manual path in **⚙ Manage library** for building your own skills and roles.
 
-Open **Library** in the sidebar.
+### 1. Find a skill or role
 
-- **Public:** catalogues from GitHub (Anthropic and OpenAI by default; more under **Sources**). The first time, choose **Fetch**. Nothing downloads until you do. After that, search works offline from the cache, and **Refresh** checks for updates.
-- **Mine / Project:** skills already in your library. Folders that exist on disk but aren't tracked yet show as **Untracked**: choose **Adopt** to start tracking one.
+On an agent's card, select **Change role**. One search covers:
 
-Every card shows its source (Vendor-maintained or Community), licence, and any problems found when checking it against the format.
+- **My roles**, **My skills** and **Project** skills already in your library.
+- **Public** skills from GitHub (Anthropic and OpenAI by default; enable more in **⚙ Manage library → Public**). Names appear immediately and descriptions fill in over a few seconds. Nothing is saved while you search or preview.
 
-### 2. Add it to your library
+Select a result to preview it: what it does, its files, licence, and the exact source commit. Every public result shows whether its source is Vendor-maintained or Community.
 
-From a public skill's preview:
+### 2. Assign it, or customize first
 
-- **Add to Mine** or **Add to Project** copies it exactly as published, with its source, commit and licence recorded.
-- **Duplicate & edit** copies it under a new name so you can change it.
-- **Duplicate & fix** is for skills that break the format, such as a description over 1,024 characters. Fix the problem, then save.
+- **Review & assign to _agent_** approves the exact revision you previewed and assigns it in one step. For a public skill, only that skill's files are copied into your library, verified against the source commit, with its source, commit and licence recorded. Konfab creates a role around it for you.
+- **Customize** opens an editable copy (role name, instructions, skill) in the same window. Choose **Save and assign** when done; the copy goes to **Mine** by default, or **This project**.
 
-Konfab never overwrites an existing folder. If the name is taken, choose another.
+The agent receives its new role on its **next turn**, with a short notice that its role changed.
 
-You can also **create** a skill from scratch in **Mine** or **Project**.
+To build skills from scratch or adopt folders already on disk (shown as **Untracked**), use **⚙ Manage library → Mine** or **Project**.
 
 ### 3. Edit (optional)
 
@@ -68,7 +67,7 @@ Adding or previewing a skill never marks it as reviewed.
 
 ### 5. Build a role
 
-Open **Library → Roles**.
+Open **⚙ Manage library → Roles**.
 
 - The four **built-in** roles are read-only. Choose **Duplicate role** to make an editable copy, titled "… (copy)".
 - Edit the copy's `ROLE.md` (responsibilities) and choose **Add skill** to pin skills. Each pin is the skill's current saved revision at that moment.
@@ -76,7 +75,7 @@ Open **Library → Roles**.
 
 ### 6. Assign it
 
-On an agent's card, choose **Edit role**:
+To assign a role you built manually, choose **Edit role** on an agent's card (or **Change role**, which also lists your roles):
 
 1. Pick a role. Built-in and personal roles are labelled.
 2. Optionally add **room notes**, such as "Work only in your own worktree", which apply only in this room.
@@ -92,7 +91,7 @@ Nothing updates automatically:
 
 - **A skill changed:** saving it creates a new revision, but roles keep pinning the old one. To move a role forward, open the role, remove that skill's pin, **Add skill** again (it pins the current revision), and **Save revision**. Review the new skill revision first, or assignment will be blocked.
 - **A role changed:** saving it creates a new role revision, but rooms keep the one they were assigned. To move a room forward, open **Edit role** on the agent card and assign the role again.
-- **A public skill changed upstream:** choose **Refresh** on its source to see the newer version. Your local copy stays as it is until you add or duplicate the new version.
+- **A public skill changed upstream:** the role shows **Update available** (or **Removed from source**). Your copy stays exactly as it is; to take the new version, find it again in **Change role** and assign it.
 
 The agent gets the new role on its next turn.
 
@@ -102,7 +101,7 @@ The agent gets the new role on its next turn.
 
 ## Converting existing free-text roles
 
-If agents still have free-text roles typed into **Edit role**, choose **Convert all custom roles** in **Library → Roles** (or **Save as role pack** on a single agent card):
+If agents still have free-text roles typed into **Edit role**, choose **Convert all custom roles** in **⚙ Manage library → Roles** (or **Save as role pack** on a single agent card):
 
 1. Konfab lists every member with free-text roles, grouped by identical text.
 2. Tick the groups to convert and adjust names if needed.
@@ -114,8 +113,8 @@ Members already on a role pack are left alone. A converted member can be **rever
 
 | I want to…            | Do this                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------ |
-| Use a public skill    | Public → preview → **Add to Mine** → **Mark saved revision reviewed**                |
-| Change a public skill | Public → **Duplicate & edit** → Save revision → Review                               |
+| Use a public skill    | Agent card → **Change role** → search → preview → **Review & assign**                |
+| Change a public skill | **Change role** → search → **Customize** → **Save and assign**                       |
 | Make my own role      | Roles → built-in → **Duplicate role** → edit → Save revision                         |
 | Give an agent a role  | Agent card → **Edit role** → pick → notes → **Assign role**                          |
 | Roll out a skill edit | Save + review skill → role: remove pin, **Add skill**, save → **Edit role** → assign |
@@ -124,11 +123,11 @@ Members already on a role pack are left alone. A converted member can be **rever
 
 ## Troubleshooting
 
-| Message                                        | Meaning and fix                                                                        |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------- |
-| "Review before assignment: …"                  | A pinned skill revision isn't reviewed. Review it, then assign again.                  |
-| "Skill in use: …" / "Role in use: …"           | Something still pins it. Update or unassign those first.                               |
-| "GitHub rate limit reached; try again after …" | GitHub allows 60 anonymous requests an hour. Wait, or enable a token under **Public**. |
-| "Invalid source package; use Duplicate & fix"  | The public skill breaks the format. Duplicate, fix, then save.                         |
-| Conflict when saving                           | Someone saved first. Reload to see their version, then reapply your change.            |
-| "Project folder unavailable"                   | The room's project folder moved or is missing. Set it again under the room's **Edit**. |
+| Message                               | Meaning and fix                                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| "Review before assignment: …"         | A pinned skill revision isn't reviewed. Review it, then assign again.                                                  |
+| "Skill in use: …" / "Role in use: …"  | Something still pins it. Update or unassign those first.                                                               |
+| "GitHub limit reached; resets at …"   | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#github-token-optional). |
+| A public skill shows a format problem | It breaks the skill format. Use **Customize**, fix it, then **Save and assign**.                                       |
+| Conflict when saving                  | Someone saved first. Reload to see their version, then reapply your change.                                            |
+| "Project folder unavailable"          | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                 |

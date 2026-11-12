@@ -1,87 +1,66 @@
 # Konfab
 
-Konfab is a local group chat where you and your desktop AI apps can talk in shared rooms. You create the rooms, set their topics, and choose who takes part. It runs only on your Mac. Project goals are in [REQUIREMENTS.md](REQUIREMENTS.md), and the technical plan is in [DESIGN.md](DESIGN.md).
+Konfab is a local group chat for you and your desktop AI apps. You open a room, give it a topic, and invite agents such as Claude and Codex. They take turns, talk to each other, and ask you when they need a decision. Everything runs on your Mac.
 
 ![The Konfab web page, showing a room conversation and each agent's status](docs/images/konfab-ui.png)
 
-**Status:** The v1 features are built and pass automated tests, but they have not yet been tried with the real Claude and Codex apps. The biggest open question is how long those apps can stay connected while waiting for a turn. Try it with a throwaway repo first.
+**Status:** early-stage, used day to day with the Claude and Codex desktop apps on macOS. Agents can change files on your Mac, so try it with a throwaway repo first.
 
-Visible next-step routing and explicit handoff repair prevent silent stalls. Unread dividers, soft highlights and room counts help you find new agent replies. The collapsible right panel remembers your browser’s layout choices and keeps urgent requests visible. Agent cards also show reported background work and warn when its progress note is stale. See the [user guide](docs/user-guide.md) for status and recovery.
+## Quick start
 
-## Set up
+You need macOS, [Miniconda](https://docs.anaconda.com/miniconda/) (it provides Node 24), and the Claude and/or Codex desktop app.
 
-```bash
-conda env create -f environment.yml
-```
+1. **Install**
 
-```bash
-conda activate konfab
-```
+   ```bash
+   conda env create -f environment.yml
+   ```
 
-```bash
-npm ci
-```
+   ```bash
+   conda activate konfab && npm ci
+   ```
 
-```bash
-npm run setup
-```
+2. **Connect your apps.** This adds a `konfab` connector to Claude and Codex, keeping a backup of each file it changes:
 
-Setup configures both desktop clients at user scope and backs up changed config files. See the [user guide](docs/user-guide.md) for manual setup and migration.
+   ```bash
+   npm run setup
+   ```
 
-## Run
+   Then restart Codex and reload the Konfab connector in Claude.
 
-```bash
-npm start
-```
+3. **Start Konfab** and open the sign-in link it prints:
 
-Open the sign-in link it prints. To connect your apps and learn how to use Konfab, read the [user guide](docs/user-guide.md). Use **Change role** on a member card to find, review and assign a role or skill, or **Roles** in a room to rearrange the team. Agents see role changes on their next turn in the same session. A desktop app can host multiple named agents in separate conversations. Advisory write locks help agents coordinate shared checkouts, and review or debate formats guide multi-agent rounds.
+   ```bash
+   npm start
+   ```
 
-## Stop
+4. **Open a room.** Create a room, add agents, select **Copy join prompt** for each one, and paste it into a new conversation in that app. When each agent shows **Waiting for a turn**, post a message.
 
-Press **Ctrl+C** in the terminal running `npm start`. Konfab closes its connections and database cleanly, and your rooms and messages are kept.
+The [user guide](docs/user-guide.md) covers each step in detail.
 
-If that terminal is gone, this asks the process listening on Konfab's port to shut down the same way:
+## Everyday use
 
-```bash
-kill $(lsof -ti tcp:8787 -sTCP:LISTEN)
-```
+- **Talk:** post with no mention to give every agent a turn, or use `@name` / `@all`. Agents ask you with `@lead`.
+- **Give agents roles:** select **Change role** on a member card to find a role or skill (yours or from public GitHub sources), preview it, and assign it.
+- **Rearrange the team:** select **Roles** in the room header to swap or rotate roles between agents.
+- **Structured work:** select **Formats** to run a code review or a debate in rounds.
+- **Approvals:** pushes and sending data to outside services wait for your approval on the page.
+- **Save allowance:** waiting agents use your subscription allowance. When you step away, use **Take a break** (agents stop) rather than **Pause** (agents keep waiting).
 
-Stopping the server doesn't stop the agents. To stop them using allowance, select **Take a break** first, or press stop in each app.
+## Stop and restart
 
-To restart, run `npm start` again. Sessions are kept, so agents carry on in the same app conversations without a new join prompt. See [Restart or update Konfab](docs/user-guide.md#7-restart-or-update-konfab) for what to do if an agent stopped or its session ended.
+Press **Ctrl+C** in the terminal running `npm start`. Rooms, messages and agent sessions are kept. Run `npm start` again to restart; agents carry on in the same conversations. See [Restart or update Konfab](docs/user-guide.md#7-restart-or-update-konfab).
 
-## What it does
+## Optional
 
-- **Rooms:** only you can create rooms and control their topics and members. Automatic continuation can recover a stalled handoff, within room limits.
-- **Skill Library:** create and edit personal or project skills, save revisions, review them, and restore history. Search public GitHub sources, preview skills at pinned commits, and add verified copies or repair an invalid copy in a non-assignable draft. An optional status check shows GitHub rate limits and whether it accepted the enabled token.
-- **Roles:** you are always the lead. Give each room a brief and assign agents a built-in or personal role revision, with reviewed skill revisions and room-specific notes. Preview and convert existing custom role text into reusable personal roles.
-- **Turns:** post with no mention to give each agent a turn, or use `@name` or `@all`. Agents can mention you with `@lead`. A room waits for you after 50 agent messages in a row.
-- **Run window:** each agent gets 5 hours of usable time, shown as a countdown. Pause freezes it; a break saves the balance for rejoin. Warnings arrive at 30, 10 and 5 minutes. You can extend an agent by 1 hour from the page, and change the length with `run_hours` in the config.
-- **Search and export:** search a room's messages, or export it as a Markdown file.
-- **Third-party data:** agents ask you before sending private data to anyone other than Anthropic, OpenAI, Meta, or xAI. This relies on agents following instructions, because Konfab can't see or block what the apps send.
-- **Allowance warnings:** the page warns you when an agent reports a problem or stops responding.
+- **GitHub token** for faster public skill search: see [GitHub token](docs/user-guide.md#github-token-optional).
+- **Start at login:** `npm run login-item -- install` (and `uninstall` to turn it off).
 
-Waiting agents use your subscription allowance even when idle, so join agents only to rooms you're using. When you step away, use **Take a break** rather than **Pause**:
+## Documentation
 
-|                                 | Pause                   | Take a break                  |
-| ------------------------------- | ----------------------- | ----------------------------- |
-| New turns                       | Stopped                 | Stopped                       |
-| Agents use allowance while idle | Yes                     | No, they stop                 |
-| How agents come back            | Automatically on Resume | You tell each agent to rejoin |
-
-## Start at login
-
-This is optional. Konfab can start when you log in and restart if it crashes:
-
-```bash
-npm run login-item -- install
-```
-
-To turn this off:
-
-```bash
-npm run login-item -- uninstall
-```
+- [User guide](docs/user-guide.md): setup, rooms, roles, permissions, troubleshooting
+- [Skills and roles](docs/skills-and-roles.md): from finding a skill to assigning a role
+- [Requirements](REQUIREMENTS.md) and [design](DESIGN.md): what Konfab does and how it works
 
 ## Develop
 
@@ -89,12 +68,12 @@ npm run login-item -- uninstall
 npm run check
 ```
 
-This runs type checks, linting, formatting checks, and unit, integration, and smoke tests. It must pass before each commit. See the [test plan](docs/test-plan.md).
+Runs type checks, linting, formatting checks and all tests. It must pass before each commit. See the [test plan](docs/test-plan.md).
 
-## Local data
+## Your data
 
-Konfab stores its config, database, and app configuration entries in `~/.konfab/`. The app configuration file contains secret tokens, so don't commit or share it.
+Konfab keeps its config, database and files in `~/.konfab/`, on your Mac only. Agent tokens live there and in the apps' connector settings, so don't share those files.
 
 ## License
 
-Konfab is available under the [MIT License](LICENSE).
+[MIT](LICENSE)

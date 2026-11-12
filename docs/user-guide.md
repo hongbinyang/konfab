@@ -166,7 +166,57 @@ Select **Roles** in the room header, or open **Role actions → Swap role…** o
 
 On a room member card, select **Change role**. Search your roles and skills, project skills, and enabled public sources; choose a result to preview its instructions, files, licence and source. Public descriptions load progressively, so results can be incomplete while searching or when a source is rate-limited. Select **Review & assign** to approve and pin the shown revision, or **Customize** to edit a separate copy before **Save and assign**. The assigned revision continues to work offline. An update notice means the source skill folder has changed; the assignment stays pinned until you change it. If the folder disappears, the notice says it was removed.
 
-Public search and preview use temporary memory; a selected skill is saved only when you use or customize it. In **⚙ Manage library → Public sources**, **Check GitHub status** makes a request and shows whether GitHub accepted the enabled token and the reported rate limit. It never displays the token; if a token is rejected, check whether it expired. If GitHub limits requests, retry after the displayed reset time. In **⚙ Manage library → Public sources**, you may opt in to a GitHub token for a higher limit; the token is sent only after you enable it. To reclaim previous downloaded indexes, choose **Remove old fetched indexes** there and confirm the estimated size. Saved skills, roles and assignments remain.
+Public search and preview use temporary memory; a selected skill is saved only when you use or customize it. Without a token, GitHub allows 60 requests an hour; if it limits requests, retry after the displayed reset time, or add a [GitHub token](#github-token-optional) for 5,000 an hour. To reclaim space used by older versions of Konfab, choose **Remove old fetched indexes** in **⚙ Manage library → Public** and confirm the estimated size. Saved skills, roles and assignments remain.
+
+## GitHub token (optional)
+
+Public skill search works without a token, but GitHub then allows only 60 requests an hour. With a token you get 5,000. Konfab only reads public repositories, so the token needs no permissions.
+
+**1. Create the token on GitHub**
+
+Go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** ([direct link](https://github.com/settings/personal-access-tokens/new)) and choose:
+
+| Setting           | Value                                  |
+| ----------------- | -------------------------------------- |
+| Token name        | `konfab`                               |
+| Expiration        | your choice, for example 30 or 90 days |
+| Repository access | **Public repositories** (read-only)    |
+| Permissions       | leave all as **No access**             |
+
+Copy the token (it starts with `github_pat_`). Don't paste it into a Konfab room or a chat with an agent.
+
+**2. Store it in your Mac's Keychain (once)**
+
+```bash
+npm run setup -- --github-token
+```
+
+macOS asks twice for **"password data for new item"**. Paste the **GitHub token** there, not your Mac password. Running the command again replaces the stored token.
+
+**3. Restart Konfab and turn it on**
+
+1. Restart Konfab (**Ctrl+C**, then `npm start`). Konfab reads the token once at startup. If macOS asks whether `node` may use the item, choose **Always Allow** so it doesn't ask again.
+2. In **⚙ Manage library → Public**, tick **Use the GitHub token for API requests (macOS Keychain)** and confirm.
+3. Select **Check GitHub status**.
+
+| Status line says                                 | Meaning and what to do                                                                                                                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **using your token · 4,99x of 5,000 left**       | Working.                                                                                                                                                                        |
+| **Token rejected by GitHub**                     | The stored value isn't a valid token: it expired, was deleted on GitHub, or your Mac password was entered at the prompt. Run step 2 again with the current token, then restart. |
+| **token enabled but unavailable in this server** | Konfab found no token at startup. Run step 2, then restart.                                                                                                                     |
+| **no token · … of 60 left**                      | The token option is off; Konfab uses anonymous requests.                                                                                                                        |
+
+Konfab never falls back to anonymous requests when the token option is on but the token fails, so a problem is always visible.
+
+**When the token expires**, create a new one (step 1), run step 2 again and restart Konfab. To stop using a token, untick the option; to delete it from Keychain, run `npm run setup -- --github-token --remove`.
+
+**Good to know**
+
+- The token is sent only to `api.github.com`. It is never shown on the page, written to Konfab's database or logs, or sent to other hosts.
+- Don't type the token into a shell command such as `KONFAB_GITHUB_TOKEN=… npm start`: your shell saves commands in its history. If that happened, delete the token on GitHub and create a new one.
+- Deleting the Keychain item or shell history doesn't revoke a token; only deleting it on GitHub does.
+- Keychain protects the token at rest, but other programs running as your user (including other scripts run by the same `node`) may be able to read it once allowed.
+- Not on macOS? Set the `KONFAB_GITHUB_TOKEN` environment variable for the server from a file only you can read, rather than typing it on the command line. If it's set, it takes priority over Keychain.
 
 ## Local skill library
 
@@ -174,13 +224,7 @@ For a step-by-step walkthrough from finding a skill to assigning and updating a 
 
 Choose **⚙ Manage library** in the sidebar to manage personal skills. To use a project library, first set an existing absolute **Project folder** in a room's Edit form, select that room, and choose **Project** in the library. Personal skills live under the Konfab home in `skills/`; project skills live under `.konfab/skills/` in the selected project. Existing standard skill folders appear as **Untracked** and can be adopted.
 
-Choose **Public** to manage sources used by the role picker. Opening the tab never contacts GitHub. Enable the sources you want to search; suggested sources start disabled. Custom sources accept a public GitHub owner and repository. Public search and preview in the role picker require a GitHub connection.
-
-From a public preview, **Add to Mine** or **Add to Project** downloads the selected package from the preview's pinned commit, verifies each Git blob hash, keeps the nearest repository licence, and creates an unreviewed local revision without overwriting an existing folder. **Duplicate & edit** creates a separate draft first. A public package with validation diagnostics cannot be added directly; use **Duplicate & fix**, edit its name and `SKILL.md`, then validate and save. Import drafts are not skills and cannot be reviewed or assigned until validation succeeds.
-
-On macOS, run `npm run setup -- --github-token` in an interactive terminal to store a GitHub token in your default Keychain. The system prompts for the token; do not put it in the command line. Restart Konfab afterwards. If macOS asks to allow Konfab to use the item, choose **Always Allow** to avoid repeated prompts. Run `npm run setup -- --github-token --remove` to remove the stored item. Removing an item or shell history does not revoke a token; revoke or rotate it on GitHub if it was exposed. Keychain protects the token at rest, but other programs running as your user may be able to access it.
-
-Konfab reads the token once at startup, preferring a nonempty `KONFAB_GITHUB_TOKEN` environment variable over Keychain. Other platforms can use that environment variable. Public shows an opt-in control when a token is available. Enabling it requires confirmation; the token is sent only to `api.github.com` for GitHub requests and is never stored in the database or forwarded to the archive host. Anonymous requests remain the default.
+Choose **Public** to manage the sources the role picker searches. Opening the tab never contacts GitHub. Enable the sources you want to search; suggested sources start disabled. Custom sources accept a public GitHub owner and repository. To find and use a public skill, select **Change role** on a member card (see [Choose a role or skill](#choose-a-role-or-skill)). For the optional token and the **Check GitHub status** button, see [GitHub token](#github-token-optional).
 
 Create a skill with a name and description. Edit `SKILL.md`, add or remove package files, and choose **Save revision** to validate and snapshot the whole package. External folder edits appear as drafts when reopened. The working folder path can be copied for use in another editor. A stale editor receives a conflict instead of overwriting newer changes. History lets you view or restore a revision as a new one. Rename keeps the skill's identity; Duplicate makes a separate skill from the selected saved revision.
 
