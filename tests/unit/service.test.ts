@@ -123,6 +123,26 @@ describe("KonfabService", () => {
     expect(retry.parallel?.source_message_id).toBe(message.message_id);
   });
 
+  it("shows pending mention state only in its own room", () => {
+    service.updateRoom(ROOM, { parallel_lead_mentions: true });
+    service.createRoom("other", "", ["claude"]);
+    service.join("claude", "other");
+    now += 1000;
+    service.postUserMessage(ROOM, "@claude question");
+    expect(
+      service.roomState(ROOM).agents.find((agent) => agent.id === "claude")
+        ?.pending_mention_since,
+    ).toBe(now);
+    expect(
+      service.roomState("other").agents[0]?.pending_mention_since,
+    ).toBeNull();
+    expectTurn(service.poll("claude", claude, true));
+    expect(
+      service.roomState(ROOM).agents.find((agent) => agent.id === "claude")
+        ?.pending_mention_since,
+    ).toBeNull();
+  });
+
   it("holds parallel mentions during pause", () => {
     service.updateRoom(ROOM, { parallel_lead_mentions: true });
     service.postUserMessage(ROOM, "@codex respond");

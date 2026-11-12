@@ -1,0 +1,5 @@
+# Busy-agent mention visibility
+
+During a long turn, the room instructions ask agents to call `report_status` with a brief `working` detail roughly every 3–5 minutes when practical, and to check the response for lead mentions. This is cooperative guidance, not a timer or a delivery guarantee; long tools, client behavior and scheduling can delay it. An agent can acknowledge in its status detail without finishing its turn; `post_message` still ends the turn.
+
+Existing status responses already include pending mention IDs, repeated until a turn is claimed. Clarify that the status detail can acknowledge them. The room member card should show that mentions are queued, based on the server's actual queue; do not label a response as received, seen or delivered based only on server serialization. An explicit acknowledgement protocol could support a stronger indicator later. Tests cover status responses with the setting on and off, queued-to-claimed behavior, room isolation, and ordinary turn instructions. No new network traffic or credential use is needed.

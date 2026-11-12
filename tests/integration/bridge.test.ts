@@ -71,6 +71,25 @@ describe("server and bridge", () => {
     db.close();
   });
 
+  it("does not attach parallel notices when the room setting is off", async () => {
+    const session = service.join("claude", ROOM).session_id;
+    service.postUserMessage(ROOM, "Start work");
+    const active = service.poll("claude", session, true);
+    expect(active.status).toBe("turn");
+    if (active.status === "turn")
+      expect(active.rules).toContain("every 3–5 minutes");
+    service.postUserMessage(ROOM, "@claude check");
+    const response = await app.inject({
+      method: "POST",
+      url: "/agent/report",
+      headers: { host: `127.0.0.1:${PORT}`, authorization: `Bearer ${token}` },
+      payload: { session_id: session, kind: "working", detail: "Working" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().lead_mentions).toBeUndefined();
+    expect(service.roomState(ROOM).agents[0]?.pending_mention_since).toBeNull();
+  });
+
   it("carries a queued lead mention on a busy agent tool response until it is claimed", async () => {
     const enabled = new KonfabService(db, {
       waitTimeoutSeconds: 1,
@@ -96,6 +115,9 @@ describe("server and bridge", () => {
           },
           payload: { session_id: session, kind: "working", detail: "Testing" },
         });
+      expect(
+        enabled.roomState(ROOM).agents[0]?.pending_mention_since,
+      ).toBeTypeOf("number");
       const first = await request();
       expect(first.statusCode).toBe(200);
       expect(first.json().lead_mentions).toEqual([
@@ -108,6 +130,9 @@ describe("server and bridge", () => {
       enabled.passTurn("claude", session, turn.turn_id);
       expect(enabled.poll("claude", session, true).status).toBe("turn");
       expect((await request()).json().lead_mentions).toBeUndefined();
+      expect(
+        enabled.roomState(ROOM).agents[0]?.pending_mention_since,
+      ).toBeNull();
     } finally {
       await isolated.close();
     }

@@ -355,7 +355,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             ...payload,
             lead_mentions: notices,
             lead_mentions_note:
-              "A lead mention is queued; notices repeat until its turn begins.",
+              "A lead mention is queued; notices repeat until its turn begins. You may acknowledge it in a working status detail without ending your turn.",
           }
         : payload;
     } catch {

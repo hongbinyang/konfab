@@ -3050,6 +3050,15 @@ function AgentDetails({
           : {agent.working.detail}
         </p>
       )}
+      {agent.pending_mention_since != null && (
+        <p className="muted">
+          Mention queued · since {formatTime(agent.pending_mention_since)}
+          {agent.working &&
+          agent.working.updated_at > agent.pending_mention_since
+            ? ` · last working status ${formatTime(agent.working.updated_at)}`
+            : ""}
+        </p>
+      )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}
       {availableUpdates.length > 0 && (
         <p className="muted">

@@ -311,6 +311,7 @@ const RULES = [
   "Confirmed decisions reflect the lead's earlier choices; follow the lead's current instructions and propose a change rather than silently acting against a decision.",
   "When you change code, commit it to your own git branch.",
   "If you start work outside your turn (coding, testing, reviewing), call report_status with kind working and a short detail first. Posting or passing clears it.",
+  "During long work, call report_status with kind working and a short detail roughly every 3–5 minutes when practical, and check the reply for lead mentions. A status detail can acknowledge a mention without ending your turn; post_message ends your turn.",
   "If you know you are low on or out of allowance, call report_status.",
   "If post_message warns that no continuation is queued and someone should act next, call hand_off with that message ID and the intended agent, if the tool is available. Otherwise ask the lead to use the page continuation controls.",
   "Set next on each post: self to continue, agent to hand off, lead to wait for the lead, or done when finished.",
@@ -1966,7 +1967,15 @@ export class KonfabService {
       },
       agents: agents.map((agent) => {
         const session = this.activeSession(room.id, agent.id);
+        const pending = room.parallel_lead_mentions
+          ? (this.db
+              .prepare(
+                "SELECT MIN(created_at) AS since FROM turns WHERE room_id=? AND agent_id=? AND state='queued' AND parallel_source_message_id IS NOT NULL",
+              )
+              .get(room.id, agent.id) as { since: number | null })
+          : { since: null };
         return {
+          pending_mention_since: pending.since,
           id: agent.id,
           display_name: agent.display_name,
           role: agent.role_title
