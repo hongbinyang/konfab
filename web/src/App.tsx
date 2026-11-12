@@ -446,7 +446,6 @@ function Room({
         state.read_info?.older_unread_count ??
         0);
   const passes = state.passes ?? [];
-  const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic);
@@ -456,22 +455,24 @@ function Room({
     room.parallel_lead_mentions,
   );
   const listRef = useRef<HTMLOListElement>(null);
-  const messageRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [attachmentError, setAttachmentError] = useState("");
   const atBottom = useRef(true);
   const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
   // On a time tie, a message comes first, because a pass follows what it answers.
-  const timeline = [
-    ...messages.map((message) => ({ kind: "message" as const, ...message })),
-    ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
-    ...state.permissions.map((permission) => ({
-      kind: "permission" as const,
-      ...permission,
-    })),
-  ].sort((a, b) => a.created_at - b.created_at);
+  const timeline = useMemo(
+    () =>
+      [
+        ...messages.map((message) => ({
+          kind: "message" as const,
+          ...message,
+        })),
+        ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
+        ...state.permissions.map((permission) => ({
+          kind: "permission" as const,
+          ...permission,
+        })),
+      ].sort((a, b) => a.created_at - b.created_at),
+    [messages, passes, state.permissions],
+  );
   const [olderActivity, setOlderActivity] = useState<ActivityEvent[]>([]);
   const [hasOlderActivity, setHasOlderActivity] = useState(true);
   const [query, setQuery] = useState("");
@@ -648,53 +649,6 @@ function Room({
     list.scrollTop = nextUnread
       ? nextUnread.offsetTop - list.offsetTop
       : list.scrollHeight;
-  };
-
-  const addFiles = async (files: File[]) => {
-    if (!files.length || uploading) return;
-    if (attachments.length + files.length > 20) {
-      setAttachmentError("Choose up to 20 files per message.");
-      return;
-    }
-    setUploading(true);
-    setAttachmentError("");
-    try {
-      for (const file of files) {
-        const uploaded = await uploadAttachment(room.id, file);
-        setAttachments((current) => [...current, uploaded]);
-      }
-    } catch (error) {
-      setAttachmentError(errorMessage(error));
-    } finally {
-      setUploading(false);
-    }
-  };
-  const removeAttachment = (attachment: Attachment) => {
-    void act(async () => {
-      await request(`/api/rooms/${room.id}/attachments/${attachment.id}`, {
-        method: "DELETE",
-      });
-      setAttachments((current) =>
-        current.filter((item) => item.id !== attachment.id),
-      );
-    });
-  };
-
-  const send = () => {
-    if (uploading || (!body.trim() && !attachments.length)) return;
-    void act(async () => {
-      await request(`/api/rooms/${room.id}/messages`, {
-        method: "POST",
-        body: { body, attachment_ids: attachments.map((item) => item.id) },
-      });
-      setBody("");
-      setAttachments([]);
-      atBottom.current = true;
-    });
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) send();
   };
 
   const save = (event: FormEvent) => {
@@ -1168,96 +1122,171 @@ function Room({
       {room.archived ? (
         <p className="banner">This room is archived and is read-only.</p>
       ) : (
-        <div
-          className="composer"
-          onDragOver={(event) => {
-            event.preventDefault();
+        <Composer
+          roomId={room.id}
+          agents={agents}
+          act={act}
+          onSent={() => {
+            atBottom.current = true;
           }}
-          onDrop={(event) => {
-            event.preventDefault();
-            void addFiles(Array.from(event.dataTransfer.files));
-          }}
-        >
-          <label htmlFor="message">Message</label>
-          {attachmentError && (
-            <p className="attachment-error" role="alert">
-              {attachmentError}
-            </p>
-          )}
-          {(attachments.length > 0 || uploading) && (
-            <div className="attachment-drafts">
-              {attachments.map((item) => (
-                <span className="attachment-chip" key={item.id}>
-                  {item.media_type.startsWith("image/") && (
-                    <img
-                      src={`/api/rooms/${room.id}/attachments/${item.id}?inline=1`}
-                      alt=""
-                    />
-                  )}{" "}
-                  {item.filename}{" "}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${item.filename}`}
-                    onClick={() => removeAttachment(item)}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              {uploading && <span>Uploading…</span>}
-            </div>
-          )}
-          <textarea
-            id="message"
-            ref={messageRef}
-            rows={3}
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={(event) => {
-              const files = Array.from(event.clipboardData.items)
-                .filter(
-                  (item) =>
-                    item.kind === "file" && item.type.startsWith("image/"),
-                )
-                .map((item) => item.getAsFile())
-                .filter((file): file is File => file !== null);
-              if (files.length) {
-                event.preventDefault();
-                void addFiles(files);
-              }
-            }}
-            placeholder={`Message the room, or use ${[
-              ...agents.map((agent) => `@${agent.id}`),
-              "@lead",
-              "@all",
-            ].join(", ")}`}
-          />
-          <EmojiPicker textarea={messageRef} onInsert={setBody} />
-          <input
-            type="file"
-            ref={fileRef}
-            className="visually-hidden"
-            multiple
-            onChange={(event) => {
-              void addFiles(Array.from(event.target.files ?? []));
-              event.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            aria-label="Attach files"
-            onClick={() => fileRef.current?.click()}
-          >
-            📎
-          </button>
-          <button type="button" onClick={send} disabled={uploading}>
-            Send
-          </button>
-        </div>
+        />
       )}
       <RoomRouting state={state} act={act} />
     </>
+  );
+}
+
+function Composer({
+  roomId,
+  agents,
+  act,
+  onSent,
+}: {
+  roomId: number;
+  agents: RoomAgent[];
+  act: Act;
+  onSent: () => void;
+}) {
+  const [body, setBody] = useState("");
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
+  const addFiles = async (files: File[]) => {
+    if (!files.length || uploading) return;
+    if (attachments.length + files.length > 20) {
+      setAttachmentError("Choose up to 20 files per message.");
+      return;
+    }
+    setUploading(true);
+    setAttachmentError("");
+    try {
+      for (const file of files) {
+        const uploaded = await uploadAttachment(roomId, file);
+        setAttachments((current) => [...current, uploaded]);
+      }
+    } catch (error) {
+      setAttachmentError(errorMessage(error));
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removeAttachment = (attachment: Attachment) => {
+    void act(async () => {
+      await request(`/api/rooms/${roomId}/attachments/${attachment.id}`, {
+        method: "DELETE",
+      });
+      setAttachments((current) =>
+        current.filter((item) => item.id !== attachment.id),
+      );
+    });
+  };
+
+  const send = () => {
+    if (uploading || (!body.trim() && !attachments.length)) return;
+    void act(async () => {
+      await request(`/api/rooms/${roomId}/messages`, {
+        method: "POST",
+        body: { body, attachment_ids: attachments.map((item) => item.id) },
+      });
+      setBody("");
+      setAttachments([]);
+      onSent();
+    });
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) send();
+  };
+
+  return (
+    <div
+      className="composer"
+      onDragOver={(event) => {
+        event.preventDefault();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        void addFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
+      <label htmlFor="message">Message</label>
+      {attachmentError && (
+        <p className="attachment-error" role="alert">
+          {attachmentError}
+        </p>
+      )}
+      {(attachments.length > 0 || uploading) && (
+        <div className="attachment-drafts">
+          {attachments.map((item) => (
+            <span className="attachment-chip" key={item.id}>
+              {item.media_type.startsWith("image/") && (
+                <img
+                  src={`/api/rooms/${roomId}/attachments/${item.id}?inline=1`}
+                  alt=""
+                />
+              )}{" "}
+              {item.filename}{" "}
+              <button
+                type="button"
+                aria-label={`Remove ${item.filename}`}
+                onClick={() => removeAttachment(item)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {uploading && <span>Uploading…</span>}
+        </div>
+      )}
+      <textarea
+        id="message"
+        ref={messageRef}
+        rows={3}
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        onKeyDown={onKeyDown}
+        onPaste={(event) => {
+          const files = Array.from(event.clipboardData.items)
+            .filter(
+              (item) => item.kind === "file" && item.type.startsWith("image/"),
+            )
+            .map((item) => item.getAsFile())
+            .filter((file): file is File => file !== null);
+          if (files.length) {
+            event.preventDefault();
+            void addFiles(files);
+          }
+        }}
+        placeholder={`Message the room, or use ${[
+          ...agents.map((agent) => `@${agent.id}`),
+          "@lead",
+          "@all",
+        ].join(", ")}`}
+      />
+      <EmojiPicker textarea={messageRef} onInsert={setBody} />
+      <input
+        type="file"
+        ref={fileRef}
+        className="visually-hidden"
+        multiple
+        onChange={(event) => {
+          void addFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        aria-label="Attach files"
+        onClick={() => fileRef.current?.click()}
+      >
+        📎
+      </button>
+      <button type="button" onClick={send} disabled={uploading}>
+        Send
+      </button>
+    </div>
   );
 }
 
