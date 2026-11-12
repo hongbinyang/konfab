@@ -180,7 +180,7 @@ export function Library({
   return (
     <div className="library">
       <h1>Skill Library</h1>
-      <div className="row">
+      <div className="library-navigation" aria-label="Library sections">
         <button
           aria-pressed={!rolesTab}
           onClick={() => {
@@ -205,7 +205,7 @@ export function Library({
             {error}
           </p>
         )}
-        <div className="row">
+        <div className="library-navigation" aria-label="Skill collections">
           <button
             aria-pressed={!publicTab && scope === "personal" && !trash}
             onClick={() => {
@@ -252,7 +252,7 @@ export function Library({
             Public
           </button>
         </div>
-        {publicTab && <PublicSources roomId={roomId} />}
+        {publicTab && <PublicSources />}
         <div hidden={publicTab}>
           <p>
             {scope === "personal"
@@ -1254,19 +1254,6 @@ type PublicSource = {
     error: string | null;
   };
 };
-type PublicSkill = {
-  path: string;
-  name: string | null;
-  description: string | null;
-  licence: string | null;
-  diagnostic: string | null;
-  source_id: string;
-  owner: string;
-  repository: string;
-  generation_id: string;
-  commit_id: string;
-};
-
 type GitHubStatus = {
   mode: "token" | "public";
   state: "not_checked" | "accepted" | "rejected" | "unavailable";
@@ -1276,23 +1263,8 @@ type GitHubStatus = {
   checked_at: number | null;
 };
 
-function PublicSources({ roomId }: { roomId: number | null }) {
+function PublicSources() {
   const [sources, setSources] = useState<PublicSource[]>([]);
-  const [skills, setSkills] = useState<PublicSkill[]>([]);
-  const [query, setQuery] = useState("");
-  const [preview, setPreview] = useState<null | {
-    source: string;
-    commit: string;
-    name: string | null;
-    description: string | null;
-    licence: string | null;
-    diagnostic: string | null;
-    content: string | null;
-    files: { path: string; size: number; kind: string }[];
-    path: string;
-    sourceId: string;
-    generationId: string;
-  }>(null);
   const [owner, setOwner] = useState("");
   const [repository, setRepository] = useState("");
   const [error, setError] = useState("");
@@ -1303,15 +1275,6 @@ function PublicSources({ roomId }: { roomId: number | null }) {
   }>({ available: false, enabled: false });
   const [github, setGithub] = useState<GitHubStatus | null>(null);
   const [checkingGithub, setCheckingGithub] = useState(false);
-  const [expanded, setExpanded] = useState<string[]>([]);
-  const [importName, setImportName] = useState("");
-  const [draft, setDraft] = useState<null | {
-    id: string;
-    name: string;
-    manifest: string;
-    diagnostic: string | null;
-    revision: number;
-  }>(null);
   const load = useCallback(async () => {
     const data = await request<{
       sources: PublicSource[];
@@ -1327,21 +1290,6 @@ function PublicSources({ roomId }: { roomId: number | null }) {
       setError(e instanceof Error ? e.message : "Sources unavailable"),
     );
   }, [load]);
-  const working = sources.some(
-    (s) => s.latest && ["downloading", "indexing"].includes(s.latest.state),
-  );
-  useEffect(() => {
-    if (!working) return;
-    const timer = window.setInterval(() => void load(), 1200);
-    return () => window.clearInterval(timer);
-  }, [working, load]);
-  async function browse(search = query) {
-    const result = await request<{ skills: PublicSkill[] }>(
-      `/api/library/public?q=${encodeURIComponent(search)}`,
-    );
-    setSkills(result.skills);
-    setPreview(null);
-  }
   async function act(action: () => Promise<void>) {
     try {
       await action();
@@ -1379,8 +1327,7 @@ function PublicSources({ roomId }: { roomId: number | null }) {
       </p>
       <h2>Public sources</h2>
       <p>
-        Nothing downloads automatically. The first index for anthropics/skills
-        and openai/plugins is approximately 30 MB total.
+        Enable sources here, then browse public skills from the role picker.
       </p>
       {error && (
         <p className="banner error" role="alert">
@@ -1397,7 +1344,7 @@ function PublicSources({ roomId }: { roomId: number | null }) {
               if (
                 enabled &&
                 !window.confirm(
-                  "Send KONFAB_GITHUB_TOKEN only to api.github.com on future refreshes? It will not be stored or logged.",
+                  "Send your GitHub token only to api.github.com for future requests? It will not be stored or logged by Konfab.",
                 )
               )
                 return;
@@ -1448,85 +1395,6 @@ function PublicSources({ roomId }: { roomId: number | null }) {
           {checkingGithub ? "Checking…" : "Check GitHub status"}
         </button>
       </section>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void act(() => browse());
-        }}
-      >
-        <input
-          aria-label="Search public skills"
-          placeholder="Search all enabled cached sources"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          disabled={!sources.some((source) => source.current_generation_id)}
-        />
-        <button
-          disabled={!sources.some((source) => source.current_generation_id)}
-        >
-          Search
-        </button>
-      </form>
-      {skills.length > 0 && (
-        <div className="public-results">
-          {skills.map((skill) => (
-            <article key={`${skill.source_id}:${skill.path}`}>
-              <button
-                onClick={() =>
-                  void act(async () => {
-                    const detail = await request<
-                      Omit<
-                        NonNullable<typeof preview>,
-                        "sourceId" | "generationId"
-                      >
-                    >(
-                      `/api/library/sources/${skill.source_id}/preview?generation=${skill.generation_id}&path=${encodeURIComponent(skill.path)}`,
-                    );
-                    setPreview({
-                      ...detail,
-                      sourceId: skill.source_id,
-                      generationId: skill.generation_id,
-                    });
-                    setImportName(skill.name ?? "");
-                    setDraft(null);
-                  })
-                }
-              >
-                {skill.name ?? skill.path}
-              </button>
-              {skill.diagnostic && (
-                <span className="diagnostic-badge" title={skill.diagnostic}>
-                  ⚠ {skill.diagnostic}
-                </span>
-              )}
-              <p
-                className={`public-description ${expanded.includes(skill.path) ? "expanded" : ""}`}
-              >
-                {skill.description ?? "No description"}
-              </p>
-              {skill.description && skill.description.length > 120 && (
-                <button
-                  className="link-button"
-                  onClick={() =>
-                    setExpanded((current) =>
-                      current.includes(skill.path)
-                        ? current.filter((path) => path !== skill.path)
-                        : [...current, skill.path],
-                    )
-                  }
-                >
-                  {expanded.includes(skill.path) ? "Show less" : "Show more"}
-                </button>
-              )}
-              <small>
-                {skill.owner}/{skill.repository} at{" "}
-                {skill.commit_id.slice(0, 8)} ·{" "}
-                {skill.licence ?? "Licence not specified"}
-              </small>
-            </article>
-          ))}
-        </div>
-      )}
       <details>
         <summary>
           Sources ({sources.filter((source) => source.enabled === 1).length}{" "}
@@ -1550,57 +1418,6 @@ function PublicSources({ roomId }: { roomId: number | null }) {
               {source.owner}/{source.repository} ·{" "}
               {source.badge === "vendor" ? "Vendor-maintained" : "Community"}
             </label>{" "}
-            {source.enabled === 1 && (
-              <button
-                disabled={working}
-                onClick={() =>
-                  void act(async () => {
-                    await request(`/api/library/sources/${source.id}/refresh`, {
-                      method: "POST",
-                    });
-                  })
-                }
-              >
-                {source.current_generation_id ? "Refresh" : "Fetch"}
-              </button>
-            )}
-            {source.latest?.state === "downloading" && (
-              <span> Downloading…</span>
-            )}
-            {source.latest?.state === "indexing" && (
-              <span>
-                {" "}
-                Indexing… {source.latest.indexed} of {source.latest.discovered}
-              </span>
-            )}
-            {source.latest &&
-              ["downloading", "indexing"].includes(source.latest.state) && (
-                <button
-                  onClick={() =>
-                    void act(async () => {
-                      await request(
-                        `/api/library/sources/${source.id}/cancel`,
-                        {
-                          method: "POST",
-                        },
-                      );
-                    })
-                  }
-                >
-                  Cancel
-                </button>
-              )}
-            {source.latest?.error && <span> {source.latest.error}</span>}
-            {source.rate_limit_reset && (
-              <span>
-                {" "}
-                Rate limited until{" "}
-                {new Date(source.rate_limit_reset).toLocaleTimeString()}
-              </span>
-            )}
-            {source.current_commit && (
-              <span> Cached at {source.current_commit.slice(0, 8)}</span>
-            )}
           </article>
         ))}
         <form
@@ -1634,170 +1451,6 @@ function PublicSources({ roomId }: { roomId: number | null }) {
           <button>Add source</button>
         </form>
       </details>
-      {preview && (
-        <section>
-          <h3>{preview.name ?? "Invalid skill"}</h3>
-          <p>
-            {preview.source} at {preview.commit.slice(0, 8)} ·{" "}
-            {preview.licence ?? "Licence not specified"}
-          </p>
-          {preview.diagnostic && (
-            <p className="banner error">{preview.diagnostic}</p>
-          )}
-          {preview.content && (
-            <Markdown>
-              {preview.content.replace(
-                /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,
-                "",
-              )}
-            </Markdown>
-          )}
-          <h4>Files</h4>
-          <ul>
-            {preview.files.map((f) => (
-              <li key={f.path}>
-                {f.path} ({f.size} bytes)
-              </li>
-            ))}
-          </ul>
-          <NameField
-            label="Destination name"
-            value={importName}
-            onChange={setImportName}
-          />
-          <button
-            disabled={!!preview.diagnostic || !validName(importName)}
-            onClick={() =>
-              void act(async () => {
-                await request(
-                  `/api/library/sources/${preview.sourceId}/import`,
-                  {
-                    method: "POST",
-                    body: {
-                      generation: preview.generationId,
-                      path: preview.path,
-                      scope: "personal",
-                      name: importName,
-                      mode: "add",
-                    },
-                  },
-                );
-              })
-            }
-          >
-            Add to Mine
-          </button>
-          {roomId && (
-            <button
-              disabled={!!preview.diagnostic || !validName(importName)}
-              onClick={() =>
-                void act(async () => {
-                  await request(
-                    `/api/library/sources/${preview.sourceId}/import`,
-                    {
-                      method: "POST",
-                      body: {
-                        generation: preview.generationId,
-                        path: preview.path,
-                        scope: "project",
-                        room_id: roomId,
-                        name: importName,
-                        mode: "add",
-                      },
-                    },
-                  );
-                })
-              }
-            >
-              Add to Project
-            </button>
-          )}
-          <button
-            disabled={!validName(importName)}
-            onClick={() =>
-              void act(async () => {
-                const result = await request<{ draft_id: string }>(
-                  `/api/library/sources/${preview.sourceId}/import`,
-                  {
-                    method: "POST",
-                    body: {
-                      generation: preview.generationId,
-                      path: preview.path,
-                      scope: "personal",
-                      name: importName,
-                      mode: "duplicate_fix",
-                    },
-                  },
-                );
-                const detail = await request<{
-                  folder_name: string;
-                  manifest: string;
-                  diagnostic: string | null;
-                  revision: number;
-                }>(`/api/library/import-drafts/${result.draft_id}`);
-                setDraft({
-                  id: result.draft_id,
-                  name: detail.folder_name,
-                  manifest: detail.manifest,
-                  diagnostic: detail.diagnostic,
-                  revision: detail.revision,
-                });
-              })
-            }
-          >
-            {preview.diagnostic ? "Duplicate & fix" : "Duplicate & edit"}
-          </button>
-        </section>
-      )}
-      {draft && (
-        <section>
-          <h3>Imported draft</h3>
-          {draft.diagnostic && <p>{draft.diagnostic}</p>}
-          <label>
-            Name
-            <input
-              value={draft.name}
-              onChange={(event) =>
-                setDraft({ ...draft, name: event.target.value })
-              }
-            />
-          </label>
-          <label>
-            SKILL.md
-            <textarea
-              rows={16}
-              value={draft.manifest}
-              onChange={(event) =>
-                setDraft({ ...draft, manifest: event.target.value })
-              }
-            />
-          </label>
-          <button
-            onClick={() =>
-              void act(async () => {
-                const changed = await request<{ revision: number }>(
-                  `/api/library/import-drafts/${draft.id}`,
-                  {
-                    method: "PUT",
-                    body: {
-                      name: draft.name,
-                      manifest: draft.manifest,
-                      base_revision: draft.revision,
-                    },
-                  },
-                );
-                await request(`/api/library/import-drafts/${draft.id}/save`, {
-                  method: "POST",
-                  body: { base_revision: changed.revision },
-                });
-                setDraft(null);
-              })
-            }
-          >
-            Validate and save to Mine
-          </button>
-        </section>
-      )}
     </section>
   );
 }

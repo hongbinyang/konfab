@@ -57,6 +57,7 @@ export interface RunWarning {
 }
 
 export interface Overview {
+  instance_id?: string;
   ui?: { role_picker: boolean };
   run_warnings?: RunWarning[];
   paused_all: boolean;

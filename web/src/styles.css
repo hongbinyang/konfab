@@ -951,3 +951,23 @@ dd {
   max-height: 16rem;
   overflow: auto;
 }
+
+.library-navigation {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+}
+.library-navigation button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.6rem 1rem;
+  border-bottom: 3px solid transparent;
+}
+.library .library-navigation button[aria-pressed="true"] {
+  background: transparent;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}

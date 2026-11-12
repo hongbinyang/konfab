@@ -90,6 +90,8 @@ export function App() {
   const [libraryDirty, setLibraryDirty] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [pageConnected, setPageConnected] = useState(false);
+  const [serverRestarted, setServerRestarted] = useState(false);
+  const instanceId = useRef<string | undefined>(undefined);
   const [error, setError] = useState("");
 
   const selectedRef = useRef(selectedId);
@@ -98,6 +100,11 @@ export function App() {
   const refresh = useCallback(async () => {
     try {
       const next = await request<Overview>("/api/overview");
+      if (next.instance_id) {
+        if (instanceId.current && instanceId.current !== next.instance_id)
+          setServerRestarted(true);
+        else if (!instanceId.current) instanceId.current = next.instance_id;
+      }
       setOverview(next);
       const id = selectedRef.current;
       const openRooms = next.rooms.filter((item) => !item.archived);
@@ -190,6 +197,14 @@ export function App() {
       />
       <main className="chat">
         <RunWarningToasts overview={overview} act={act} />
+        {serverRestarted && (
+          <p className="banner warning" role="status">
+            Konfab restarted. Reload this page to use the latest version.{" "}
+            <button type="button" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </p>
+        )}
         {error && (
           <p className="banner error" role="alert">
             {error}

@@ -79,6 +79,48 @@ describe("page API", () => {
     cookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
   });
 
+  it("changes the overview instance identifier after reopening the database and app", async () => {
+    const path = join(attachmentDir, "restart.db");
+    const options = {
+      waitTimeoutSeconds: 1,
+      turnTimeoutMs: 60_000,
+      maxMessageChars: 1000,
+      attachmentDir,
+      maxAttachmentBytes: 1024,
+    };
+    const diskDb = openDatabase(path);
+    const diskService = new KonfabService(diskDb, options);
+    const firstApp = await buildApp({ service: diskService, port: PORT });
+    const login = await firstApp.inject({
+      method: "GET",
+      url: `/login?code=${diskService.createLoginCode()}`,
+      headers: { host: HOST },
+    });
+    const diskCookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
+    const overview = () => ({
+      method: "GET" as const,
+      url: "/api/overview",
+      headers: { host: HOST, cookie: diskCookie },
+    });
+    const first = (await firstApp.inject(overview())).json().instance_id;
+    expect((await firstApp.inject(overview())).json().instance_id).toBe(first);
+    await firstApp.close();
+    diskDb.close();
+    const reopened = openDatabase(path);
+    const nextApp = await buildApp({
+      service: new KonfabService(reopened, options),
+      port: PORT,
+    });
+    try {
+      const result = await nextApp.inject(overview());
+      expect(result.statusCode).toBe(200);
+      expect(result.json().instance_id).not.toBe(first);
+    } finally {
+      await nextApp.close();
+      reopened.close();
+    }
+  });
+
   it("reports actionable field errors for role and skill requests", async () => {
     for (const [url, payload, field] of [
       ["/api/roles", { name: "valid", title: "", description: "ok" }, "title"],

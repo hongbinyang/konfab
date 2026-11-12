@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import fastifyStatic from "@fastify/static";
 import Fastify, {
@@ -133,6 +134,7 @@ function readCookie(request: FastifyRequest, name: string): string | undefined {
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { service, port, webDir } = options;
+  const instanceId = randomUUID();
   const app = Fastify({
     logger: options.logger
       ? {
@@ -1645,6 +1647,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get("/api/overview", async () => ({
     ...service.overview(),
+    instance_id: instanceId,
     ui: { role_picker: options.rolePicker ?? true },
   }));
 
