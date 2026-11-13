@@ -2812,7 +2812,11 @@ function Agents({
                     {member && (
                       <>
                         <span className={`state ${member.state}`}>
-                          {STATE_LABELS[member.state]}
+                          {room.queued.includes(member.id) &&
+                          (member.state === "working" ||
+                            (member.state === "queued" && member.working))
+                            ? "Working · reply queued"
+                            : STATE_LABELS[member.state]}
                         </span>
                         {member.state === "waiting" &&
                           !member.working &&
@@ -2892,6 +2896,7 @@ function Agents({
                   {member ? (
                     <AgentDetails
                       agent={member}
+                      replyQueued={room.queued.includes(member.id)}
                       peers={room.agents}
                       roomId={room.room.id}
                       archived={room.room.archived}
@@ -2966,6 +2971,7 @@ function AgentManagement({
 
 function AgentDetails({
   agent,
+  replyQueued,
   peers,
   roomId,
   archived,
@@ -2973,6 +2979,7 @@ function AgentDetails({
   act,
 }: {
   agent: RoomAgent;
+  replyQueued: boolean;
   peers: RoomAgent[];
   roomId: number;
   archived: boolean;
@@ -3079,7 +3086,8 @@ function AgentDetails({
           {workingStale
             ? `Working (no update for ${Math.floor(workingElapsed / 60000)} min)`
             : `Working · ${Math.floor(workingElapsed / 60000)} min`}
-          : {agent.working.detail}
+          : {replyQueued ? "will reply after this: " : ""}
+          {agent.working.detail}
         </p>
       )}
       {agent.pending_mention_since != null && (

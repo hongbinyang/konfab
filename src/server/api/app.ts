@@ -328,6 +328,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const noticeRoutes = new Set([
     "/agent/post",
     "/agent/pass",
+    "/agent/hand-off",
+    "/agent/decisions/propose",
+    "/agent/permission",
+    "/agent/permission/wait",
     "/agent/report",
     "/agent/lock/acquire",
     "/agent/lock/release",
@@ -337,6 +341,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/agent/read-role-file",
     "/agent/read-skill-file",
   ]);
+  const endingTurnNotices = new WeakMap<
+    FastifyRequest,
+    ReturnType<KonfabService["pendingLeadMessages"]>
+  >();
+  app.addHook("preHandler", async (request) => {
+    if (!["/agent/post", "/agent/pass"].includes(request.url.split("?")[0]!))
+      return;
+    const sessionId = (request.body as { session_id?: unknown } | null)
+      ?.session_id;
+    if (typeof sessionId !== "string") return;
+    try {
+      endingTurnNotices.set(
+        request,
+        service.pendingLeadMessages(requireAgent(request), sessionId),
+      );
+    } catch {
+      /* Route will handle authentication and session errors. */
+    }
+  });
   app.addHook("preSerialization", async (request, reply, payload) => {
     if (
       !noticeRoutes.has(request.url.split("?")[0]!) ||
@@ -354,12 +377,26 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         requireAgent(request),
         sessionId,
       );
-      return notices.length
+      const leadMessages =
+        endingTurnNotices.get(request) ??
+        service.pendingLeadMessages(requireAgent(request), sessionId);
+      return notices.length || leadMessages
         ? {
             ...payload,
-            lead_mentions: notices,
-            lead_mentions_note:
-              "A lead mention is queued; notices repeat until its turn begins. You may acknowledge it in a working status detail without ending your turn.",
+            ...(leadMessages
+              ? {
+                  lead_messages: leadMessages,
+                  lead_messages_note:
+                    "New lead messages are room context, not necessarily addressed to you. You may acknowledge them in a working status detail. They repeat until a later turn includes them.",
+                }
+              : {}),
+            ...(notices.length
+              ? {
+                  lead_mentions: notices,
+                  lead_mentions_note:
+                    "A lead mention is queued; notices repeat until its turn begins. You may acknowledge it in a working status detail without ending your turn.",
+                }
+              : {}),
           }
         : payload;
     } catch {

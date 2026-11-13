@@ -3049,6 +3049,48 @@ export class KonfabService {
       .all(room.id, agentId) as { message_id: number }[];
   }
 
+  /** Repeat unseen lead context until a new turn snapshots it. */
+  pendingLeadMessages(agentId: string, sessionId: string) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    const active = this.db
+      .prepare(
+        "SELECT last_message_id FROM turns WHERE session_id = ? AND state = 'active'",
+      )
+      .get(sessionId) as { last_message_id: number | null } | undefined;
+    if (!active && session.working_detail === null) return null;
+    const member = this.db
+      .prepare(
+        "SELECT last_seen_message_id FROM room_members WHERE room_id = ? AND agent_id = ?",
+      )
+      .get(session.room_id, agentId) as { last_seen_message_id: number };
+    const boundary = active?.last_message_id ?? member.last_seen_message_id;
+    const rows = this.db
+      .prepare(
+        "SELECT id, body FROM messages WHERE room_id = ? AND sender_type = 'user' AND id > ? ORDER BY id LIMIT 3",
+      )
+      .all(session.room_id, boundary) as {
+      id: number;
+      body: string;
+      mentions: string;
+    }[];
+    if (!rows.length) return null;
+    const count = this.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM messages WHERE room_id = ? AND sender_type = 'user' AND id > ?",
+      )
+      .get(session.room_id, boundary) as { count: number };
+    return {
+      messages: rows.map((row) => ({
+        message_id: row.id,
+        excerpt: Array.from(row.body.replace(/[\p{C}\s]+/gu, " ").trim())
+          .slice(0, 120)
+          .join(""),
+        addressed_to: parseMentions(row.body).filter((name) => name !== "lead"),
+      })),
+      more: count.count - rows.length,
+    };
+  }
+
   // Permissions
 
   recordBridgeProtocol(agentId: string, protocol: number): void {

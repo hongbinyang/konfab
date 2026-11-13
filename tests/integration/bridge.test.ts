@@ -90,6 +90,55 @@ describe("server and bridge", () => {
     expect(service.roomState(ROOM).agents[0]?.pending_mention_since).toBeNull();
   });
 
+  it("repeats bounded lead messages while busy and clears them when a turn is claimed", async () => {
+    const session = service.join("claude", ROOM).session_id;
+    service.postUserMessage(ROOM, "Start work");
+    const turn = service.poll("claude", session, true);
+    if (turn.status !== "turn") throw new Error("expected turn");
+    const first = service.postUserMessage(ROOM, "Hello\n" + "x".repeat(130));
+    service.postUserMessage(ROOM, "@someone else");
+    service.postUserMessage(ROOM, "Third");
+    service.postUserMessage(ROOM, "Fourth");
+    const request = () =>
+      app.inject({
+        method: "POST",
+        url: "/agent/report",
+        headers: {
+          host: `127.0.0.1:${PORT}`,
+          authorization: `Bearer ${token}`,
+        },
+        payload: { session_id: session, kind: "working", detail: "Testing" },
+      });
+    const notice = (await request()).json().lead_messages;
+    expect(notice.messages).toHaveLength(3);
+    expect(notice.messages[0].message_id).toBe(first.message_id);
+    expect(notice.messages[0].excerpt).toHaveLength(120);
+    expect(notice.messages[0].excerpt).not.toContain("\n");
+    expect(notice.messages[1].addressed_to).toEqual(["someone"]);
+    expect(notice.more).toBe(1);
+    expect((await request()).json().lead_messages).toEqual(notice);
+    service.passTurn("claude", session, turn.turn_id);
+    expect(service.poll("claude", session, true).status).toBe("turn");
+    expect((await request()).json().lead_messages).toBeUndefined();
+  });
+
+  it("includes pending lead messages on the reply that ends a turn", async () => {
+    const session = service.join("claude", ROOM).session_id;
+    service.postUserMessage(ROOM, "Start");
+    const turn = service.poll("claude", session, true);
+    if (turn.status !== "turn") throw new Error("expected turn");
+    const message = service.postUserMessage(ROOM, "A question");
+    const reply = await app.inject({
+      method: "POST",
+      url: "/agent/pass",
+      headers: { host: `127.0.0.1:${PORT}`, authorization: `Bearer ${token}` },
+      payload: { session_id: session, turn_id: turn.turn_id },
+    });
+    expect(reply.json().lead_messages.messages[0].message_id).toBe(
+      message.message_id,
+    );
+  });
+
   it("carries a queued lead mention on a busy agent tool response until it is claimed", async () => {
     const enabled = new KonfabService(db, {
       waitTimeoutSeconds: 1,

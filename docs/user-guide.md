@@ -272,3 +272,5 @@ A short list to confirm a new setup works. Record results as you go.
 | **Role**           | Give an agent a role with **Change role**. Its next turn mentions the new role.                              |        |
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Idle cost**      | Leave agents idle for an hour and watch **Calls per hour** and your allowance.                               |        |
+
+Busy agents can receive short notices for new lead messages on eligible tool replies. Notices can repeat and do not prove the app displayed them.

@@ -176,6 +176,27 @@ describe("KonfabService", () => {
     );
   });
 
+  it("notifies only about lead messages in the working session's room", () => {
+    service.createRoom("other", "", ["claude"]);
+    const other = service.join("claude", "other").session_id;
+    service.reportStatus("claude", claude, "working", "Editing");
+    expect(service.pendingLeadMessages("claude", claude)).toBeNull();
+    service.postUserMessage("other", "Different room");
+    expect(service.pendingLeadMessages("claude", claude)).toBeNull();
+    const message = service.postUserMessage(ROOM, "Plain lead message");
+    expect(service.pendingLeadMessages("claude", other)).toBeNull();
+    expect(
+      service
+        .pendingLeadMessages("claude", claude)
+        ?.messages.map((m) => m.message_id),
+    ).toEqual([message.message_id]);
+    const turn = expectTurn(service.poll("claude", claude, true));
+    expect(service.pendingLeadMessages("claude", claude)).toBeNull();
+    service.postAgentMessage("claude", claude, turn.turn_id, "Agent reply");
+    service.reportStatus("claude", claude, "working", "More work");
+    expect(service.pendingLeadMessages("claude", claude)).toBeNull();
+  });
+
   it("holds parallel mentions during pause", () => {
     service.updateRoom(ROOM, { parallel_lead_mentions: true });
     service.postUserMessage(ROOM, "@codex respond");
@@ -210,7 +231,10 @@ describe("KonfabService", () => {
       const original = expectTurn(app.poll("a", a, true));
       app.postUserMessage("disk", "@b parallel");
       const parallel = expectTurn(app.poll("b", b, true));
-      app.postUserMessage("disk", "@b follow-up");
+      const notice = app.postUserMessage("disk", "@b follow-up");
+      expect(app.pendingLeadMessages("b", b)?.messages[0]?.message_id).toBe(
+        notice.message_id,
+      );
       const firstApp = await buildApp({ service: app, port: 19797 });
       await firstApp.ready();
       await firstApp.close();
@@ -235,6 +259,9 @@ describe("KonfabService", () => {
       );
       expect(expectTurn(app.poll("b", b, true)).turn_id).toBe(parallel.turn_id);
       expect(app.pendingLeadMentions("b", b)).toHaveLength(1);
+      expect(app.pendingLeadMessages("b", b)?.messages[0]?.message_id).toBe(
+        notice.message_id,
+      );
       app.passTurn("b", b, parallel.turn_id);
       expectTurn(app.poll("b", b, true));
     } finally {
