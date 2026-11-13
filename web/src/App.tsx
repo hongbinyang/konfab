@@ -2684,7 +2684,8 @@ function Agents({
   const [newRole, setNewRole] = useState("");
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [rolePreview, setRolePreview] = useState<RolePreview | null>(null);
-  const [roleConfirmed, setRoleConfirmed] = useState(false);
+  const [confirmedRevision, setConfirmedRevision] = useState("");
+  const previewRequest = useRef(0);
   const [addToRoom, setAddToRoom] = useState(true);
   const [agentError, setAgentError] = useState("");
   const appCount = (appId: string) =>
@@ -2711,8 +2712,9 @@ function Agents({
     setNewId("");
     setIdEdited(false);
     setNewRole("");
+    previewRequest.current += 1;
     setRolePreview(null);
-    setRoleConfirmed(false);
+    setConfirmedRevision("");
     setAddToRoom(true);
     setAgentError("");
     setAdding(true);
@@ -2721,13 +2723,21 @@ function Agents({
       .catch(() => setRoles([]));
   };
   const pickRole = (id: string) => {
+    const requestId = ++previewRequest.current;
     setNewRole(id);
     setRolePreview(null);
-    setRoleConfirmed(false);
+    setConfirmedRevision("");
     if (id)
       request<RolePreview>(`/api/roles/${encodeURIComponent(id)}`)
-        .then((detail) => setRolePreview(detail))
-        .catch((error) => setAgentError(errorMessage(error)));
+        .then((detail) => {
+          if (requestId !== previewRequest.current) return;
+          setRolePreview(detail);
+          setConfirmedRevision("");
+        })
+        .catch((error) => {
+          if (requestId === previewRequest.current)
+            setAgentError(errorMessage(error));
+        });
   };
   const roleUnreviewed =
     rolePreview?.skills.filter((skill) => !skill.reviewed) ?? [];
@@ -2736,7 +2746,7 @@ function Agents({
     !newRole ||
     (rolePreview?.id === newRole &&
       roleUnreviewed.length === 0 &&
-      roleConfirmed);
+      confirmedRevision === rolePreview.revision_id);
   const addAgent = async (event: FormEvent) => {
     event.preventDefault();
     if (!roleReady) return;
@@ -2904,9 +2914,11 @@ function Agents({
                     <label className="check">
                       <input
                         type="checkbox"
-                        checked={roleConfirmed}
+                        checked={confirmedRevision === rolePreview.revision_id}
                         onChange={(event) =>
-                          setRoleConfirmed(event.target.checked)
+                          setConfirmedRevision(
+                            event.target.checked ? rolePreview.revision_id : "",
+                          )
                         }
                       />{" "}
                       I reviewed this role (rev {rolePreview.number}) and want
