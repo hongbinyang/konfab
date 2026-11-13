@@ -383,3 +383,17 @@ Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the pr
 | RM2 | MUST | Decision cards show their numbers, and `#N` references link to the card. |
 | RM3 | MUST | Typing in the message box stays responsive in long rooms (measured under 5 ms per keystroke with 500 long messages). |
 | RM4 | MUST | After a server restart, an open page offers to reload. |
+
+### Proposed: Room agent names
+
+These requirements are under review and are not yet implemented.
+
+| ID | Priority | Requirement |
+| -- | -------- | ----------- |
+| AN1 | MUST | The lead can set, change or clear a room-specific name for each room member, including default agents. Clearing it restores the existing display name and ID behavior. Other rooms are unaffected; archived rooms are read-only. Agents cannot rename themselves or other members. |
+| AN2 | MUST | Each room name has a mention handle using the existing mention syntax. The page shows the exact handle, and lets the lead choose a usable handle when the name cannot itself be mentioned. Agents receive current member names and handles on their next turn or wait result; a rename does not interrupt an active turn. |
+| AN3 | MUST | Case-insensitive handle mentions route to the intended member in lead and agent messages, handoffs, availability notices and parallel mentions. Existing ID mentions remain valid aliases; `@lead` and `@all` keep their meanings. Sessions, identities, join behavior and existing integrations remain compatible. |
+| AN4 | MUST | Reject reserved and ambiguous handles, including conflicts with another member's handle or ID and conflicts introduced when adding a member. Give an actionable error; never silently choose a recipient. A removed member retains its room name if re-added, unless it would conflict, in which case the add is rejected. |
+| AN5 | MUST | Renames never alter the recipients or text of earlier messages. Room views show the current room name for the member, including message senders, cards, status, availability, team and format controls and continuation controls. Elsewhere the existing display name remains in use. A member without a room name retains existing behavior. |
+| AN6 | MUST | The page does not present the standalone default-agent marker as a name; the app and agent identity remain discoverable. |
+| AN7 | LATER | Mention autocomplete, global handles and changing agent IDs. |
