@@ -66,8 +66,6 @@ export interface DeliveredIdentity {
   pins: Array<Pin & { name: string; number: number }>;
 }
 
-export const EMPTY_IDENTITY: DeliveredIdentity = { instructions: "", pins: [] };
-
 export function envelopeBytes(envelope: unknown): number {
   return Buffer.byteLength(JSON.stringify(envelope));
 }

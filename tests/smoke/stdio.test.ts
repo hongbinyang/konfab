@@ -365,11 +365,12 @@ describe("built app over real processes", () => {
   });
 
   it("rotates an app credential for its default and named agents", async () => {
-    const added = await page("/api/apps/claude/agents", {
+    const added = await page("/api/agents", {
       method: "POST",
       body: JSON.stringify({
         id: "claude-dev",
         display_name: "Dev",
+        app_id: "claude",
         room_id: roomId,
       }),
     });

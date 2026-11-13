@@ -402,6 +402,27 @@ describe("Assign skills dialog", () => {
     });
   });
 
+  it("shows each supporting file of a previewed skill", async () => {
+    api.routes.files = (url) =>
+      url.includes("notes.md")
+        ? json(200, {
+            content_base64: Buffer.from("supporting notes").toString("base64"),
+          })
+        : undefined;
+    const { user } = setup();
+    await user.click(
+      await screen.findByRole("button", { name: /^konfab-dev/ }),
+    );
+    const files = await screen.findByRole("list", { name: "Files" });
+    expect(files.textContent).toContain("SKILL.md");
+    await user.click(
+      within(files).getAllByRole("button", { name: "View" })[0]!,
+    );
+    expect(
+      (await screen.findByLabelText("File SKILL.md")).textContent,
+    ).toContain("line from");
+  });
+
   it("diffs lines removed from and added to a skill", () => {
     expect(lineDiff("a\nb\nc", "a\nc\nd")).toEqual([
       { kind: "removed", line: "b" },

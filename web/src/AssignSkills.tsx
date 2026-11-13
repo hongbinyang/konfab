@@ -280,6 +280,10 @@ export function AssignSkills({
   const [previewHash, setPreviewHash] = useState("");
   const [previewLicence, setPreviewLicence] = useState<string | null>(null);
   const [files, setFiles] = useState<Array<{ path: string; size: number }>>([]);
+  const [fileView, setFileView] = useState<null | {
+    path: string;
+    text: string | null;
+  }>(null);
   const [pins, setPins] = useState<Pick[]>(initial?.pins ?? []);
   const [instructions, setInstructions] = useState(initial?.instructions ?? "");
   const [baseRevision, setBaseRevision] = useState<number | undefined>(
@@ -494,6 +498,7 @@ export function AssignSkills({
     setPreviewHash("");
     setPreviewLicence(null);
     setFiles([]);
+    setFileView(null);
     try {
       if (item.kind === "public") {
         const params = new URLSearchParams({
@@ -525,6 +530,31 @@ export function AssignSkills({
     } catch (e) {
       if (version === selectionVersion.current)
         setError(e instanceof Error ? e.message : "Unable to load the preview");
+    }
+  };
+
+  /** Shows one supporting file of the previewed skill, exactly as it would be copied or assigned. */
+  const viewFile = async (item: Result, path: string) => {
+    const version = selectionVersion.current;
+    setFileView({ path, text: null });
+    try {
+      const url =
+        item.kind === "public"
+          ? `/api/library/live/file?${new URLSearchParams({
+              source_id: item.public.source_id,
+              commit: item.public.commit,
+              path: item.public.path,
+              file: path,
+            })}`
+          : `/api/library/skills/${encodeURIComponent(item.skill.id)}/revisions/${item.skill.current_revision_id}/files?path=${encodeURIComponent(path)}`;
+      const data = await request<{ content_base64: string }>(url);
+      if (version === selectionVersion.current)
+        setFileView({ path, text: decode(data.content_base64) });
+    } catch (e) {
+      if (version === selectionVersion.current) {
+        setFileView(null);
+        setError(e instanceof Error ? e.message : "Unable to load the file");
+      }
     }
   };
 
@@ -905,12 +935,25 @@ export function AssignSkills({
               <>
                 <pre>{preview || "Loading…"}</pre>
                 {files.length > 0 && (
-                  <p className="muted">
-                    Files:{" "}
-                    {files
-                      .map((file) => `${file.path} (${file.size} bytes)`)
-                      .join(", ")}
-                  </p>
+                  <ul className="preview-files" aria-label="Files">
+                    {files.map((file) => (
+                      <li key={file.path}>
+                        {file.path} ({file.size} bytes){" "}
+                        <button
+                          type="button"
+                          className="link"
+                          onClick={() => void viewFile(selected, file.path)}
+                        >
+                          View
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {fileView && (
+                  <pre aria-label={`File ${fileView.path}`}>
+                    {fileView.text ?? "Loading…"}
+                  </pre>
                 )}
                 {selected.kind === "public" && (
                   <p className="muted">

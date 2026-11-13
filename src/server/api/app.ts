@@ -114,7 +114,6 @@ export interface AppOptions {
   skills?: SkillLibrary;
   sources?: SkillSources;
   skillsHome?: string;
-  rolePicker?: boolean;
   port: number;
   webDir?: string;
   logger?: boolean;
@@ -1354,20 +1353,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { ok: true };
   });
 
-  app.post("/api/apps/:appId/agents", async (request, reply) => {
-    const { appId } = z
-      .object({ appId: z.string().min(1) })
-      .parse(request.params);
-    const body = z
-      .object({
-        id: z.string().min(1),
-        display_name: z.string().min(1),
-        room_id: z.number().int().positive().optional(),
-      })
-      .parse(request.body);
-    service.addAppAgent(appId, body.id, body.display_name, body.room_id);
-    return reply.code(201).send({ ok: true });
-  });
   app.post("/api/agents", async (request, reply) => {
     const body = z
       .object({
@@ -1467,7 +1452,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.get("/api/overview", async () => ({
     ...service.overview(),
     instance_id: instanceId,
-    ui: { role_picker: options.rolePicker ?? true },
   }));
 
   app.post("/api/rooms", async (request, reply) => {
