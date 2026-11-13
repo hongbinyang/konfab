@@ -37,9 +37,12 @@ export function RoomNameForm({
           Fixed
         </span>{" "}
         <span>
+          {reason}
           {agent.room_name
-            ? reason
-            : `${reason} This agent joined without a room name, so it keeps its agent ID.`}
+            ? ""
+            : agent.name_fixed
+              ? " This agent joined without a room name, so it keeps its agent ID."
+              : " It has no room name, so it keeps its agent ID."}
         </span>
       </p>
     );

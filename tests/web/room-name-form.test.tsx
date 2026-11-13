@@ -116,10 +116,28 @@ describe("room name form", () => {
     ).toBeTruthy();
   });
 
-  it("is read-only in an archived room", () => {
+  it("is read-only in an archived room, without claiming the agent joined", () => {
     render(<RoomNameForm roomId={7} agent={member} archived />);
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByText(/This room is archived/)).toBeTruthy();
+    expect(screen.getByText("@claude")).toBeTruthy();
+    const note = screen.getByText(/This room is archived/);
+    expect(note.textContent).toContain(
+      "It has no room name, so it keeps its agent ID.",
+    );
+    expect(note.textContent).not.toMatch(/joined/);
+  });
+
+  it("explains an archived room with a joined, unnamed agent", () => {
+    render(
+      <RoomNameForm
+        roomId={7}
+        agent={{ ...member, name_fixed: true }}
+        archived
+      />,
+    );
+    expect(screen.getByText(/This room is archived/).textContent).toContain(
+      "joined without a room name",
+    );
   });
 });
 
