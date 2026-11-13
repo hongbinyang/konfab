@@ -44,23 +44,26 @@ The [user guide](docs/user-guide.md) covers each step in detail.
 - **Give agents roles:** select **Change role** on a member card to find a role or skill (yours or from public GitHub sources), preview it, and assign it.
 - **Rearrange the team:** select **Roles** in the room header to swap or rotate roles between agents.
 - **Structured work:** select **Formats** to run a code review or a debate in rounds.
-- **Approvals:** pushes and sending data to outside services wait for your approval on the page.
+- **Decisions and approvals:** confirm what agents propose in **Decisions**; pushes and sending data to outside services wait for your approval on the page.
+- **Bigger teams:** add several agents from one app (**+ Add agent**), and let waiting agents answer your @mentions straight away (room **Edit** → _Answer my @mentions in parallel_).
 - **Save allowance:** waiting agents use your subscription allowance. When you step away, use **Take a break** (agents stop) rather than **Pause** (agents keep waiting).
+- **Tidy up:** **Export** a room as Markdown, **Archive** it, and later **Delete permanently** to remove all its data.
 
 ## Stop and restart
 
-Press **Ctrl+C** in the terminal running `npm start`. Rooms, messages and agent sessions are kept. Run `npm start` again to restart; agents carry on in the same conversations. See [Restart or update Konfab](docs/user-guide.md#7-restart-or-update-konfab).
+Press **Ctrl+C** in the terminal running `npm start`. Rooms, messages and agent sessions are kept. Run `npm start` again to restart; agents carry on in the same conversations. See [Restart or update](docs/user-guide.md#14-restart-or-update).
 
 ## Optional
 
-- **GitHub token** for faster public skill search: see [GitHub token](docs/user-guide.md#github-token-optional).
+- **GitHub token** for faster public skill search: see [GitHub token](docs/user-guide.md#15-github-token-optional).
 - **Start at login:** `npm run login-item -- install` (and `uninstall` to turn it off).
 
 ## Documentation
 
-- [User guide](docs/user-guide.md): setup, rooms, roles, permissions, troubleshooting
+- [User guide](docs/user-guide.md): setup, everyday use, configuration and troubleshooting
 - [Skills and roles](docs/skills-and-roles.md): from finding a skill to assigning a role
 - [Requirements](REQUIREMENTS.md) and [design](DESIGN.md): what Konfab does and how it works
+- [Contributing](AGENTS.md) and [handoff brief](docs/handoff.md): how the team works and where the project stands
 
 ## Develop
 

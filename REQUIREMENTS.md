@@ -1,7 +1,7 @@
 # Konfab: Requirements
 
-**Status:** Final for v1
-**Updated:** 2026-11-08 (v1.1 scope added in section 16)
+**Status:** v1 shipped; later additions in sections 16 and 17
+**Updated:** 2026-11-12
 
 Priority levels:
 
@@ -48,7 +48,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 
 | ID | Priority | Requirement |
 |---|---|---|
-| R1 | MUST | The user can create, rename, and archive rooms. |
+| R1 | MUST | The user can create, rename, archive and permanently delete rooms (see RM1). |
 | R2 | MUST | Each room has a topic set by the user, and agents receive it when they join. The user can change it at any time. |
 | R3 | MUST | The user chooses which agents belong to each room, and can add or remove them. |
 | R4 | MUST | Only the user can create rooms, change topics, or change membership. |
@@ -60,7 +60,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | R12 | MUST | The user is always the lead. Every turn tells agents to follow the lead's instructions and decisions. |
 | R13 | MUST | The user can write a brief for each room, and a role for each agent in each room, on the web page. These apply from the agent's next turn, and Konfab's core rules always come after them. |
 | R10 | SHOULD | Messages can be searched and exported. |
-| R11 | LATER | Threads, reactions, and file attachments. |
+| R11 | LATER | Threads and reactions. (File attachments shipped in V5.) |
 
 ## 5. User interface
 
@@ -89,7 +89,7 @@ Experimental parallel lead mentions are opt-in per room. They allow distinct age
 | A2 | MUST | Konfab provides tools to join a room, wait for a turn, post a message, pass on a turn, read history, report status, and request permission. |
 | A3 | MUST | One app conversation joins one room. To join another room, the user starts another conversation, which keeps each topic's context separate. |
 | A4 | MUST | A dropped agent can rejoin by pasting the join prompt again. It resumes from its last-seen message, without duplicate turns. |
-| A5 | MUST | Within a room, one agent takes a turn at a time. |
+| A5 | MUST | Within a room, one agent takes a turn at a time, except the lead's @mentions when a room enables parallel answers (TM4). |
 | A6 | MUST | When the user posts without a mention, each room member gets a turn in order and may reply or pass. |
 | A7 | MUST | An @mention gives a turn only to the named agents. Agents can @mention each other and the lead (`@lead`). Mentioning the lead gives no agent a turn and is highlighted on the page. |
 | A8 | MUST | A turn includes every message that agent has not yet seen, up to a size limit. Older messages are available through history. |
@@ -326,25 +326,60 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | RH1 | MUST | An agent post with no other agent recipient and no queued continuation returns a routing warning with a repair hint. Replays return the same post result. The hand_off tool lets the author of the room’s latest agent message, within 10 minutes, explicitly queue another live member. It refuses pause, break, archive, unavailable targets and the agent-streak limit. The original post already counts toward that limit; repair never bypasses it. Source/target repeats return the same turn, including after restart. |
 | RH2 | MUST | The page shows active and queued recipients, including repaired routing, and neutrally indicates when no continuation is queued. Explicit Ask-to-continue buttons post an auditable user request. Suspension and fresh reported background work suppress the no-continuation prompt. No language heuristics or automatic recipient guessing are used. Repairs appear in the Activity timeline. |
 
-## Local skill library (phase 1)
-
-- Personal and explicitly configured project libraries manage standard skill folders. Untracked folders can be adopted.
-- Create, duplicate, edit, rename, save and move unused skills to Trash. A saved revision contains the complete package; history can be viewed and restored as a new revision. External edits are drafts and conflicting edits are rejected.
-- Review is recorded per revision. New revisions begin unreviewed. Scripts are stored as files and are never run by Konfab.
-- Existing custom role text can be previewed and converted into personal role packs, grouped by exact text, with optional assignment and conflict-checked restoration of the original text.
 
 ## Automatic continuation
 
-- Agent posts can explicitly continue themselves, hand off to an agent, wait for the lead, or finish. Existing mention routing remains compatible.
-- A bounded, cancellable per-room watchdog recovers unaddressed legacy posts. It respects pause, break, approvals, streak limits and run windows, and stops after three automatic recoveries in an hour.
-- Working heartbeats refresh the owning active turn; a timeout can be recovered once. Routing receipts, pending plans and caps survive restart.
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| AC1 | MUST | Agent posts can explicitly continue themselves, hand off to an agent, wait for the lead, or finish. Existing mention routing remains compatible. |
+| AC2 | MUST | A bounded, cancellable per-room watchdog recovers unaddressed legacy posts. It respects pause, break, approvals, streak limits and run windows, and stops after three automatic recoveries in an hour. |
+| AC3 | MUST | Working heartbeats refresh the owning active turn; a timeout can be recovered once. Routing receipts, pending plans and caps survive restart. |
 
-The member role picker searches local and enabled public skills, previews pinned content, and records explicit review before assignment. Search and preview use temporary memory; removing old indexes leaves saved skills and roles intact. An explicit GitHub status check reports rate-limit headers and token rejection without exposing or logging credentials, and never falls back to anonymous access after a rejected token.
+## 17. Version 1.2
 
-### Team role reassignment
+Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the project room. Design notes for each are in [docs/design](docs/design/).
 
-A room lead can preview and stage swaps, rotations, saved-role assignments and removals for any number of members, then apply them atomically. A stale role prevents the entire change. Notes travel with the role; edit permissions stay with the member. Active turns retain their previous role until the next turn. A system-labelled handover message records the changes. On the next turn, a replayable notice identifies a role change or removal, while note-only edits do not ask for a handover.
+### V6. Connector setup
 
-### Multiple agents per desktop app
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| CS1 | MUST | `npm run setup` adds a user-level `konfab` connector to both apps by default, edits only that entry, backs up changed files and is idempotent. `--manual` writes instructions instead; `--rotate` issues new tokens; `--migrate <folder>` removes an old project `.mcp.json` entry. Existing tokens are reused, never silently rotated. |
 
-An app credential can own multiple named agents. Each room session is bound to its agent and the authenticated app; an app cannot join as another app's agent. Existing credentials and default-agent joins survive upgrades. The lead can add, rename and archive non-default agents, with a configurable coordination limit and retained history. A room still schedules one active turn at a time.
+### V7. Skill library and role packs
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| SL1 | MUST | Personal (`~/.konfab/skills`) and project (`<project>/.konfab/skills`) libraries manage standard Agent Skills folders. Untracked folders can be adopted. |
+| SL2 | MUST | Skills can be created, duplicated, edited, renamed, saved as complete revisions, restored from history and moved to Trash when unused. External edits are drafts; conflicting edits are rejected. |
+| SL3 | MUST | Review is recorded per saved revision; new revisions begin unreviewed. Konfab stores scripts as files and never runs them. |
+| SL4 | MUST | A role pack is a `ROLE.md` plus pinned, reviewed skill revisions and per-room notes. Roles are instructions only and grant no permissions. Agents can read their role and bounded supporting files on demand. |
+| SL5 | MUST | Existing custom role text can be previewed and converted into personal role packs, with optional assignment and conflict-checked restoration. |
+
+### V8. Choose a role (role picker)
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RP1 | MUST | **Change role** on a member card opens one window that searches the user's roles, personal skills, project skills and enabled public sources, with combinable filters, location hints and helpful empty states. |
+| RP2 | MUST | A preview shows instructions, files, licence and the source commit. **Review & assign** approves and pins exactly that revision and assigns it in one transaction; **Customize** saves an editable copy (personal or project), then assigns it. |
+| RP3 | MUST | Public sources are searched on demand: names first, then descriptions loaded into memory only. Nothing is stored until assign or customize, and then only that skill, verified against the source commit. **Update available** or **Removed from source** never changes an assignment automatically. |
+| RP4 | MUST | GitHub requests use an in-memory cache, conditional requests and rate-limit tracking; a limit shows its reset time and keeps loaded results. An optional token, stored in macOS Keychain or the `KONFAB_GITHUB_TOKEN` environment variable, is sent only to `api.github.com` after the user enables it, is never logged, and never falls back to anonymous access when rejected. **Check GitHub status** shows the result. |
+| RP5 | MUST | **⚙ Manage library** replaces the Library navigation entry for editing skills and roles, managing sources and the token, and removing old downloaded indexes after confirmation. |
+
+### V9. Teams and parallel work
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| TM1 | MUST | The lead can stage swaps, rotations, assignments and removals of roles for any number of members and apply them atomically; a stale change applies nothing. Notes move with the role; edit access stays with the member. A system handover message records the change. |
+| TM2 | MUST | An agent mid-turn keeps its previous role until its next turn. The next turn carries a one-time notice for a first assignment, a change, notes-only edits or a removal. |
+| TM3 | MUST | An app credential can own several named agents (default limit four, configurable). Each session is bound to its agent and authenticated app; an app cannot act as another app's agent; calls without a session are rejected. |
+| TM4 | SHOULD | With the per-room setting on (off by default), the lead's @mentions give waiting agents an immediate parallel turn, at most three per room. A busy mentioned agent gets a repeated note at its next Konfab call and a queued turn. Unaddressed posts, handoffs and format steps stay serial; an agent never has two active turns. |
+| TM5 | MUST | Busy agents are asked to check in with a working status at a per-room interval (1, 2, 5 or 10 minutes; default 2, configurable). Check-ins are cooperative; the member card shows queued mentions and the latest later status. |
+
+### V10. Rooms and quality
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RM1 | MUST | The lead can permanently delete an archived room after typing its name. All room data and its attachment folder are removed in one transaction plus tombstoned file cleanup, room IDs are never reused, the database is compacted, and a content-free audit line is kept. |
+| RM2 | MUST | Decision cards show their numbers, and `#N` references link to the card. |
+| RM3 | MUST | Typing in the message box stays responsive in long rooms (measured under 5 ms per keystroke with 500 long messages). |
+| RM4 | MUST | After a server restart, an open page offers to reload. |

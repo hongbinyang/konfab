@@ -115,19 +115,20 @@ Members already on a role pack are left alone. A converted member can be **rever
 | --------------------- | ------------------------------------------------------------------------------------ |
 | Use a public skill    | Agent card → **Change role** → search → preview → **Review & assign**                |
 | Change a public skill | **Change role** → search → **Customize** → **Save and assign**                       |
-| Make my own role      | Roles → built-in → **Duplicate role** → edit → Save revision                         |
-| Give an agent a role  | Agent card → **Edit role** → pick → notes → **Assign role**                          |
+| Make my own role      | ⚙ Manage library → Roles → built-in → **Duplicate role** → edit → Save revision      |
+| Swap or rotate roles  | Room header → **Roles** → drag roles between members → **Apply**                     |
+| Give an agent a role  | Agent card → **Change role** → **My roles** → pick → **Assign**                      |
 | Roll out a skill edit | Save + review skill → role: remove pin, **Add skill**, save → **Edit role** → assign |
 | Undo an edit          | History → **Restore** (creates a new revision)                                       |
 | Stop using something  | Unassign or update its users → **Move to Trash**                                     |
 
 ## Troubleshooting
 
-| Message                               | Meaning and fix                                                                                                        |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| "Review before assignment: …"         | A pinned skill revision isn't reviewed. Review it, then assign again.                                                  |
-| "Skill in use: …" / "Role in use: …"  | Something still pins it. Update or unassign those first.                                                               |
-| "GitHub limit reached; resets at …"   | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#github-token-optional). |
-| A public skill shows a format problem | It breaks the skill format. Use **Customize**, fix it, then **Save and assign**.                                       |
-| Conflict when saving                  | Someone saved first. Reload to see their version, then reapply your change.                                            |
-| "Project folder unavailable"          | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                 |
+| Message                               | Meaning and fix                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| "Review before assignment: …"         | A pinned skill revision isn't reviewed. Review it, then assign again.                                                     |
+| "Skill in use: …" / "Role in use: …"  | Something still pins it. Update or unassign those first.                                                                  |
+| "GitHub limit reached; resets at …"   | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#15-github-token-optional). |
+| A public skill shows a format problem | It breaks the skill format. Use **Customize**, fix it, then **Save and assign**.                                          |
+| Conflict when saving                  | Someone saved first. Reload to see their version, then reapply your change.                                               |
+| "Project folder unavailable"          | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                    |
