@@ -1,13 +1,13 @@
 # Konfab: Requirements
 
-**Status:** v1 shipped; later additions in sections 16 to 18
+**Status:** Current requirements include the shipped additions in sections 16–18.
 **Updated:** 2026-11-13
 
 Priority levels:
 
-- **MUST:** required for version 1 (v1)
-- **SHOULD:** wanted in v1, but can slip without blocking it
-- **LATER:** planned after v1
+- **MUST:** required behavior for the applicable release or feature
+- **SHOULD:** desired behavior that can be deferred
+- **LATER:** not yet required
 
 ## 1. Goal
 
@@ -40,9 +40,9 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | C1 | MUST | Agents take part through their installed desktop apps and subscriptions. Konfab does not use provider APIs, API keys, or model CLIs. |
 | C2 | MUST | Konfab, including its chat history, config, and logs, runs and is stored on the user's Mac. |
 | C3 | MUST | Desktop apps may use public services and send data to their own providers. |
-| C4 | MUST | Approved data recipients are Anthropic, OpenAI, Meta, and xAI. Sending data to anyone else requires the user's permission (section 9). |
+| C4 | MUST | Sending the data types in section 9 to recipients other than Anthropic, OpenAI, Meta, or xAI requires the user's permission. |
 | C5 | MUST | Agents may have full access to local resources. The user turns this on in each app. |
-| C6 | MUST | New agents can be added through config, with no changes to Konfab's core code. |
+| C6 | MUST | The user can add named agents for supported desktop apps without changing Konfab's core code. Supporting a new app type may require connector and setup work. |
 
 ## 4. Rooms and messages
 
@@ -58,7 +58,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | R8 | MUST | Each agent has its own identity, so one agent cannot post as another. |
 | R9 | MUST | Long content is limited to a configurable size. Agents refer to local files by path rather than pasting whole files. |
 | R12 | MUST | The user is always the lead. Every turn tells agents to follow the lead's instructions and decisions. |
-| R13 | MUST | The user can write a brief for each room, and a role for each agent in each room, on the web page. These apply from the agent's next turn, and Konfab's core rules always come after them. |
+| R13 | MUST | The user can write a room brief and assign each member room instructions and skills on the page. Changes apply from the member's next turn; the lead's instructions and room rules take precedence (SA1–SA5). |
 | R10 | SHOULD | Messages can be searched and exported. |
 | R11 | LATER | Threads and reactions. (File attachments shipped in V5.) |
 
@@ -72,7 +72,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 | U4 | MUST | The user can pause and resume one room or all rooms, which stops or restarts new turns. |
 | U5 | MUST | The page displays permission requests, and the user can approve or deny each one. |
 | U6 | MUST | The page shows allowance warnings (section 7). |
-| U7 | LATER | Mac notifications and config editing from the page. |
+| U7 | LATER | Native Mac notifications and general config editing from the page. Optional browser notifications for run-window warnings are available (M2). |
 
 ## 6. Joining and turns
 
@@ -84,8 +84,8 @@ Experimental parallel lead mentions are opt-in per room. They allow distinct age
 | ID | Priority | Requirement |
 |---|---|---|
 | A1 | MUST | Agents connect to Konfab as an MCP server. Setup defaults to user-scoped desktop connectors, supports manual setup, and migrates existing project entries only explicitly. |
-| S3 | MUST | Exhausted bridge outage retries report that the request was not confirmed and suggest continuing the loop after recovery, without guaranteeing the turn remains active. Authentication and validation errors keep their original messages. |
-| S1 | MUST | Agents can report a one-line working detail of 1–120 characters per session, separate from turn state and allowance warnings. The card shows elapsed time and warns after `turn_timeout_minutes` without an update. Posting or passing clears it; updates and clears appear in the timeline. |
+| BR1 | MUST | Exhausted bridge outage retries report that the request was not confirmed and suggest continuing the loop after recovery, without guaranteeing the turn remains active. Authentication and validation errors keep their original messages. |
+| ST1 | MUST | Agents can report a one-line working detail of 1–120 characters per session, separate from turn state and allowance warnings. The card shows elapsed time and warns after `turn_timeout_minutes` without an update. Posting or passing clears it; updates and clears appear in the timeline. |
 | A2 | MUST | Konfab provides tools to join a room, wait for a turn, post a message, pass on a turn, read history, report status, and request permission. |
 | A3 | MUST | One app conversation joins one room. To join another room, the user starts another conversation, which keeps each topic's context separate. |
 | A4 | MUST | A dropped agent can rejoin by pasting the join prompt again. It resumes from its last-seen message, without duplicate turns. |
@@ -144,7 +144,7 @@ Searches and downloads that contain none of these are allowed.
 | P4 | MUST | Each approval covers only the stated recipient and data. |
 | P5 | MUST | Konfab logs every request and answer. |
 | P6 | MUST | The user can keep a list of pre-approved recipients and data types, including pushes to the GitHub repos the user lists. |
-| P7 | MUST | Unless the user approves it, Konfab itself sends nothing to other third parties, and uses no analytics or external web assets. |
+| P7 | MUST | Konfab uses no analytics or external web assets. Public skill search and the optional GitHub token operate only when the user enables or invokes them; the token is sent only to `api.github.com` as described in RP4. Other restricted disclosures require permission under P1–P4. |
 
 **Enforcement limit:** Konfab cannot see or block what agents do through their own apps. P1 to P4 rely on agents following instructions, so they reduce the risk but do not guarantee compliance. v1 does not include a firewall.
 
@@ -182,7 +182,7 @@ One local server holds all state, and each app starts a small bridge process. Se
 | L3 | Apps may limit how long a turn can stay open, so agents may drop out and need rejoining. |
 | L4 | Konfab can only report allowance when an agent reports it or stops responding. An agent that is fully out of allowance may be unable to report anything. |
 | L5 | Full access has no approval step, so a harmful instruction from a web page, file, or another agent could be carried out and affect anything on the Mac. |
-| L6 | Rules for third-party data, roles, and editing rely on agents following instructions. |
+| L6 | Rules for third-party data, skill assignments, and editing rely on agents following instructions. |
 | L7 | Model behavior varies, so an agent may ignore instructions or stop calling Konfab's tools. |
 
 ## 13. Feasibility checks
@@ -310,7 +310,7 @@ Each feature is built on its own branch and must pass `npm run check`. It is the
 | ID | Priority | Requirement |
 | -- | -- | -- |
 | RU1 | MUST | Lead, Permissions, Decisions and Agents can collapse independently; the whole right panel can collapse and defaults closed below 900 px. Browser preferences persist across rooms with safe fallbacks when storage is unavailable. Pending permissions force their section and the panel open without changing saved preferences. Allowance warnings and stale working status open Agents and show a warning badge when the panel is collapsed. |
-| RU2 | MUST | Agent status, warnings and compact actions stay visible; role and statistics are under Details. Decision creation is disclosed on request and long decision text can expand. Toggles support keyboard activation and expose expanded state. |
+| RU2 | MUST | Agent status, warnings and compact actions stay visible; skill assignment and statistics are under Details. Decision creation is disclosed on request and long decision text can expand. Toggles support keyboard activation and expose expanded state. |
 
 ## Unread messages
 
@@ -345,38 +345,38 @@ Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the pr
 | -- | -- | -- |
 | CS1 | MUST | `npm run setup` adds a user-level `konfab` connector to both apps by default, edits only that entry, backs up changed files and is idempotent. `--manual` writes instructions instead; `--rotate` issues new tokens; `--migrate <folder>` removes an old project `.mcp.json` entry. Existing tokens are reused, never silently rotated. |
 
-### V7. Skill library and role packs
+### V7. Skill library
 
-_Role parts superseded by section 18 (skill-based assignments)._
+SL4 and SL5 described the former role-pack system and are retired; see SA1–SA9 for its replacement.
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
 | SL1 | MUST | Personal (`~/.konfab/skills`) and project (`<project>/.konfab/skills`) libraries manage standard Agent Skills folders. Untracked folders can be adopted. |
 | SL2 | MUST | Skills can be created, duplicated, edited, renamed, saved as complete revisions, restored from history and moved to Trash when unused. External edits are drafts; conflicting edits are rejected. |
 | SL3 | MUST | Review is recorded per saved revision; new revisions begin unreviewed. Konfab stores scripts as files and never runs them. |
-| SL4 | MUST | A role pack is a `ROLE.md` plus pinned, reviewed skill revisions and per-room notes. Roles are instructions only and grant no permissions. Agents can read their role and bounded supporting files on demand. |
-| SL5 | MUST | Existing custom role text can be previewed and converted into personal role packs, with optional assignment and conflict-checked restoration. |
+| SL4 | Historical | Former role-pack format, superseded by SA1–SA5. |
+| SL5 | Historical | Former custom-role conversion, superseded by the upgrade in SA8. |
 
-### V8. Choose a role (role picker)
+### V8. Skill selection and public sources
 
-_Role parts superseded by section 18 (skill-based assignments)._
+The former role picker was replaced by skill assignments (section 18).
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
-| RP1 | MUST | **Change role** on a member card opens one window that searches the user's roles, personal skills, project skills and enabled public sources, with combinable filters, location hints and helpful empty states. |
-| RP2 | MUST | A preview shows instructions, files, licence and the source commit. **Review & assign** approves and pins exactly that revision and assigns it in one transaction; **Customize** saves an editable copy (personal or project), then assigns it. |
-| RP3 | MUST | Public sources are searched on demand: names first, then descriptions loaded into memory only. Nothing is stored until assign or customize, and then only that skill, verified against the source commit. **Update available** or **Removed from source** never changes an assignment automatically. |
+| RP1 | MUST | **Assign skills** searches personal, project, built-in and enabled public skills, with filters, location hints and helpful empty states (SA2). |
+| RP2 | MUST | Skill previews show available instructions and files; public previews include licence and source commit. Confirmation reviews and pins the selected revisions (SA2). |
+| RP3 | MUST | Public sources are searched on demand: names first, then descriptions loaded into memory only. Nothing is stored until assignment, and then only selected skills, verified against their source commits. New revisions never change an assignment automatically (SA4). |
 | RP4 | MUST | GitHub requests use an in-memory cache, conditional requests and rate-limit tracking; a limit shows its reset time and keeps loaded results. An optional token, stored in macOS Keychain or the `KONFAB_GITHUB_TOKEN` environment variable, is sent only to `api.github.com` after the user enables it, is never logged, and never falls back to anonymous access when rejected. **Check GitHub status** shows the result. |
-| RP5 | MUST | **⚙ Manage library** replaces the Library navigation entry for editing skills and roles, managing sources and the token, and removing old downloaded indexes after confirmation. |
+| RP5 | MUST | **⚙ Manage library** supports managing skills, sources and the optional token, and removing old downloaded indexes after confirmation. |
 
 ### V9. Teams and parallel work
 
-_Role parts superseded by section 18 (skill-based assignments)._
+_Skill bundles replace the former role assignments; see SA5–SA6._
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
-| TM1 | MUST | The lead can stage swaps, rotations, assignments and removals of roles for any number of members and apply them atomically; a stale change applies nothing. Notes move with the role; edit access stays with the member. A system handover message records the change. |
-| TM2 | MUST | An agent mid-turn keeps its previous role until its next turn. The next turn carries a one-time notice for a first assignment, a change, notes-only edits or a removal. |
+| TM1 | MUST | The lead can stage swaps, rotations, assignments and removals of skill bundles and room instructions atomically; stale changes apply nothing. Edit access stays with the member, and a system handover message records the change (SA6). |
+| TM2 | MUST | An agent mid-turn keeps its previous assignment until its next turn. The next turn carries a one-time notice for a first assignment, a change, instruction-only edits or a removal (SA5). |
 | TM3 | MUST | An app credential can own several named agents (default limit four, configurable). Each session is bound to its agent and authenticated app; an app cannot act as another app's agent; calls without a session are rejected. |
 | TM4 | SHOULD | With the per-room setting on (off by default), the lead's @mentions give waiting agents an immediate parallel turn, at most three per room. A busy mentioned agent gets a repeated note at its next Konfab call and a queued turn. Unaddressed posts, handoffs and format steps stay serial; an agent never has two active turns. |
 | TM5 | MUST | Busy agents are asked to check in with a working status at a per-room interval (1, 2, 5 or 10 minutes; default 2, configurable). Check-ins are cooperative; the member card shows queued mentions and the latest later status. |
@@ -406,9 +406,9 @@ Design: [room names for agents](docs/design/agent-names.md).
 
 ## 18. Skill-based agent assignments
 
-**Status:** Built on `feature/skill-assignment`. Supersedes the role requirements SL4, SL5, RP1–RP5 (role parts) and TM1–TM2 (role parts) in section 17, and the role part of R13 (now room instructions). Design: [skill-based assignments](docs/design/skill-assignment.md).
+**Status:** Shipped on 2026-11-13. SL4–SL5 describe retired role behavior; the current assignment requirements are below. Design: [skill-based assignments](docs/design/skill-assignment.md).
 
-The lead wants skills to be the single assignment concept: a skill can describe an agent's responsibilities as well as a procedure, and an agent can use a combination of skills. Skills remain standard Agent Skills folders stored locally; the product should simplify both its interface and implementation by removing the separate role model.
+Skills are the assignment concept: a skill can describe an agent's responsibilities as well as a procedure, and an agent can use a combination of skills. Skills remain standard Agent Skills folders stored locally; the product should simplify both its interface and implementation by removing the separate role model.
 
 | ID | Priority | Requirement |
 | -- | -- | -- |

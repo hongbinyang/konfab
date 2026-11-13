@@ -41,7 +41,7 @@ The [user guide](docs/user-guide.md) covers each step in detail.
 ## Everyday use
 
 - **Talk:** post with no mention to give every agent a turn, or use `@name` / `@all`. Agents ask you with `@lead`.
-- **Give agents skills:** select **Assign skills** on a member card to find skills (yours, built-in, or from public GitHub sources), preview them, put them in order, and assign them. A skill can describe a responsibility, a procedure, or both.
+- **Give agents skills:** select **Assign skills** on a member card to find skills (yours, built-in, or from public GitHub sources), preview them, put them in order, and assign them. A skill can describe a responsibility, a procedure, or both. Assignments pin reviewed revisions; update them explicitly when a skill changes.
 - **Rearrange the team:** select **Team** in the room header to swap or rotate skills between agents.
 - **Structured work:** select **Formats** to run a code review or a debate in rounds.
 - **Decisions and approvals:** confirm what agents propose in **Decisions**; pushes and sending data to outside services wait for your approval on the page.
