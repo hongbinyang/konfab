@@ -735,15 +735,7 @@ type PublicSource = {
   repository: string;
   badge: "vendor" | "community";
   enabled: number;
-  current_generation_id: string | null;
-  current_commit: string | null;
   rate_limit_reset: number | null;
-  latest: null | {
-    state: "downloading" | "indexing" | "complete" | "failed";
-    discovered: number;
-    indexed: number;
-    error: string | null;
-  };
 };
 type GitHubStatus = {
   mode: "token" | "public";

@@ -255,7 +255,6 @@ describe("page API", () => {
         { scope: "personal", name: "valid", description: "" },
         "description",
       ],
-      ["/api/library/sources/example/import", { name: "valid" }, "sourceId"],
     ] as const) {
       const response = await call("POST", url, payload);
       expect(response.statusCode).toBe(400);

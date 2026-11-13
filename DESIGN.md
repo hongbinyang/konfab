@@ -67,7 +67,7 @@ Tables, grouped (see `src/server/db/index.ts` for the ordered migrations):
 | Turns and sessions    | `sessions`, `turns`, `handoffs`, `automatic_continuations`, `format_runs`, `bridge_receipts`, `observed_waits` |
 | Assignments           | `room_member_skills` (ordered pins: skill revision, full or summary)                                          |
 | Skills                | `skill_libraries` (personal, project, built-in), `skills`, `skill_revisions`, `skill_revision_files`, `skill_blobs`, `skill_reviews`, `skill_usages`, plus journals for imports, renames and working folders |
-| Public sources        | `skill_sources` and the live-search cache (`source_cached_*`); older index tables kept for cleanup            |
+| Public sources        | `skill_sources`; tables from the removed indexed-source flow (`source_generations`, `source_*`) remain only so old downloads can be deleted            |
 | Lead and oversight    | `permission_requests`, `decisions`, `decision_versions`, `agent_reports`, `write_locks`, `run_warnings`, `run_warning_state`, `events` |
 | Page and housekeeping | `login_codes`, `web_sessions`, `settings`, `pending_room_cleanup`                                              |
 | Upgrade from roles    | `legacy_role_revisions`, `legacy_role_files`, `upgrade_log` (kept for connectors that joined before v33)      |
