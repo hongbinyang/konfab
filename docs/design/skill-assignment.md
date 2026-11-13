@@ -154,7 +154,7 @@ After the database step, a startup task writes each converted skill's working fo
 
 Leftover staging folders from a crash are cleaned up by the existing journal recovery at startup. Delivery reads blobs from the database, so a folder problem never affects agents.
 
-**Failure and recovery.** If backup or conversion fails, the transaction rolls back, the server does not start, and it prints the cause plus the backup path. Fixing the cause and restarting retries from scratch. Connected bridges retry through the outage as today (S3).
+**Failure and recovery.** If backup or conversion fails, the transaction rolls back, the server does not start, and it prints the cause plus the backup path. Fixing the cause and restarting retries from scratch. Connected bridges retry through the outage as today (BR1).
 
 ## Tests
 

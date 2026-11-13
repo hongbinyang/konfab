@@ -416,7 +416,7 @@ function Room({
   onDeleted: (message: string) => void;
 }) {
   const { room, agents } = state;
-  const [teamRolesOpen, setTeamRolesOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const [formatOpen, setFormatOpen] = useState(false);
   const [olderMessages, setOlderMessages] = useState<RoomState["messages"]>([]);
   const [olderReadInfo, setOlderReadInfo] = useState<LeadReadInfo | null>(null);
@@ -706,11 +706,11 @@ function Room({
 
   return (
     <>
-      {teamRolesOpen && (
+      {teamOpen && (
         <TeamSkills
           roomId={room.id}
           agents={agents}
-          onClose={() => setTeamRolesOpen(false)}
+          onClose={() => setTeamOpen(false)}
           onApplied={() => void act(async () => {})}
         />
       )}
@@ -834,7 +834,7 @@ function Room({
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() => setTeamRolesOpen(true)}
+                  onClick={() => setTeamOpen(true)}
                 >
                   Team
                 </button>
@@ -1231,8 +1231,8 @@ function DeleteRoom({
             undone.
           </p>
           <p>
-            Backups, exports, other apps’ conversations, personal skills, roles,
-            and project files are not removed.
+            Backups, exports, other apps’ conversations, personal skills and
+            project files are not removed.
           </p>
           <p>
             <a href={`/api/rooms/${roomId}/export`} download>

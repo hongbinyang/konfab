@@ -802,7 +802,7 @@ function PublicSources() {
               );
               if (
                 !window.confirm(
-                  `Remove approximately ${(bytes / 1024 / 1024).toFixed(1)} MB of old fetched indexes? Your saved skills and roles are not affected.`,
+                  `Remove approximately ${(bytes / 1024 / 1024).toFixed(1)} MB of old fetched indexes? Your saved skills are not affected.`,
                 )
               )
                 return;

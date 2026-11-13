@@ -106,7 +106,7 @@ export function TeamSkills({
   };
   return (
     <dialog
-      className="team-roles"
+      className="team-dialog"
       ref={dialog}
       aria-label="Team"
       onCancel={(event) => {
@@ -129,7 +129,7 @@ export function TeamSkills({
         {rows.map((row) => (
           <section
             key={row.id}
-            className="role-team-row"
+            className="team-row"
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();

@@ -1035,7 +1035,7 @@ dd {
   }
 }
 
-.team-roles {
+.team-dialog {
   width: min(54rem, 94vw);
   max-height: 90vh;
   overflow: auto;
@@ -1043,20 +1043,20 @@ dd {
   border-radius: 0.75rem;
   padding: 1.25rem;
 }
-.team-roles::backdrop {
+.team-dialog::backdrop {
   background: rgb(0 0 0 / 50%);
 }
-.team-roles .role-team-row {
+.team-dialog .team-row {
   border: 1px solid #d3d8df;
   border-radius: 0.5rem;
   padding: 0.75rem;
   overflow-wrap: anywhere;
 }
-.team-roles .role-team-row button[draggable] {
+.team-dialog .team-row button[draggable] {
   max-width: 100%;
   white-space: normal;
 }
-.team-roles pre {
+.team-dialog pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 16rem;
