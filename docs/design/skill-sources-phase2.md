@@ -165,3 +165,12 @@ private-repository support or broaden the existing push-approval rules.
   add/duplicate, offline/rate-limited states and personal/project tabs on an
   isolated instance. Run `npm run check`, update README/user guide/requirements,
   request code review, then commit and use scoped approval for any push.
+
+## Removal (2026-11-13)
+
+Live search replaced this flow, and the page no longer called it, so it was removed.
+
+- **API clients:** the removed routes were `/api/library/sources/:id/{refresh,cancel,skills,preview,import}`, `/api/library/public` and `/api/library/import-drafts/*`. They were page-only (cookie-authenticated); the agent bridge never used them, and no other client is documented. They now return 404. Source settings, live search, the token and **Remove old indexes** keep their routes.
+- **Persisted data:** no migration and no deletion. `source_generations`, `source_entries`, `source_manifests` and the `source_cached_*` tables keep any index an earlier version downloaded until the lead chooses **Remove old indexes**; `legacyIndexSize` still reports it. Saved skills that were imported from an index are ordinary skills and are unaffected. Leftover `skill_import_drafts` rows are no longer shown.
+- **Recovery and cleanup:** startup no longer marks interrupted index refreshes as failed, because no refresh can start. An index left half-written by an old crash is never read; it is counted in the old-index size and deleted with **Remove old indexes**. Startup recovery of skill import journals stays, for journals left by an earlier version.
+- **Tests:** source listing and toggling, and old-index cleanup on rows inserted directly; token and rate-limit handling stay covered by the GitHub client and status tests. `tar-stream` was only used here and was removed from the dependencies.
