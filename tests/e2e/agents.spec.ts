@@ -1,22 +1,23 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 
-function loginPath(): string {
+function loginUrl(): string {
   const env = JSON.parse(process.env.KONFAB_E2E_ENV ?? "{}") as Record<
     string,
     string
   >;
   const output = execFileSync("node", ["dist/cli/login-link.js"], {
-    env: { ...process.env, ...env },
+    env,
     encoding: "utf8",
   });
-  const url = /http:\/\/\S+\/login\?code=\S+/.exec(output)?.[0];
-  if (!url) throw new Error("No login link");
-  return new URL(url).pathname + new URL(url).search;
+  const code = /[?&]code=([^\s&]+)/.exec(output)?.[1];
+  const base = process.env.KONFAB_E2E_BASE_URL;
+  if (!code || !base) throw new Error("No login link");
+  return `${base}/login?code=${code}`;
 }
 
 async function openRoom(page: Page, name: string): Promise<void> {
-  await page.goto(loginPath());
+  await page.goto(loginUrl());
   await page.getByLabel("Name", { exact: true }).fill(name);
   await page.getByRole("button", { name: "Create room" }).click();
   await expect(page.getByRole("heading", { name: `# ${name}` })).toBeVisible();
