@@ -1,14 +1,14 @@
 # Konfab: Design
 
-**Status:** Implemented, except where noted. Real-app testing is still to come.
-**Updated:** 2026-11-06
+**Status:** Baseline architecture and historical design, not a complete description of current behavior. For a current developer orientation and links to feature designs, see [Developer handoff](docs/developer-handoff.md).
+**Baseline date:** 2026-11-06
 **Based on:** [REQUIREMENTS.md](REQUIREMENTS.md)
 
 ## 1. Summary
 
 Konfab is a local chat server with a web page for the user and a small MCP bridge for each agent conversation. The server owns all state and decides whose turn it is. Agents never talk to each other directly.
 
-The design rests on one unproven assumption: that the desktop apps can keep calling a waiting tool for long enough to be useful. Phase 0 tests this before the rest is built (section 14).
+Desktop-app behavior depends on the client and model. The project has been used with real apps; automated tests do not establish how every app will behave. See the [test plan](docs/test-plan.md).
 
 ## 2. Architecture
 
@@ -95,7 +95,7 @@ The exact versions are fixed by the lockfile when the project is set up.
 - **Type checks:** TypeScript in strict mode, with `zod` validating all external input.
 - **Formatting and linting:** ESLint and Prettier.
 - **Tests:** a single `npm run check` runs types, lint, and tests. It must pass before each commit.
-- **Database changes:** numbered SQL migration files, applied at startup inside a transaction.
+- **Database changes:** ordered SQL migrations in `src/server/db/index.ts`, applied at startup in transactions.
 - **Secrets:** tokens are never committed or logged.
 - **Docs:** README covers setup, and the user guide covers app configuration and backups.
 
@@ -110,7 +110,6 @@ konfab/
   package.json
   package-lock.json
   tsconfig.json
-  config.example.yaml
   src/
     shared/      Types and validation used by all parts
     server/
@@ -125,7 +124,7 @@ konfab/
   tests/
     unit/
     integration/
-    e2e/
+    smoke/
   docs/
     user-guide.md
 ```
@@ -141,7 +140,7 @@ All local data lives in `~/.konfab/`, with the folder set to `0700` and files to
 | `logs/` | Server logs, with tokens redacted |
 
 ```yaml
-# config.example.yaml
+# Illustrative config.yaml excerpt
 server:
   port: 8787
 
@@ -158,9 +157,7 @@ agents:
   codex:
     display_name: Codex
 
-pre_approvals:
-  - recipient: github.com/OWNER/REPO
-    data: code_push
+pre_approvals: []
 ```
 
 Adding an agent means adding a config entry and creating a token, with no core code changes (C6).
@@ -227,7 +224,7 @@ The rules are repeated with each turn, in case an agent loses them during a long
 
 ## 8. Turn scheduling
 
-Each room has at most one active turn. All scheduling runs in one module that the server calls on each relevant event, plus a 30-second timer for run-window expiry and timeouts.
+By default each room has at most one ordinary active turn. The optional parallel-mentions prototype can additionally give explicitly mentioned waiting agents their own turns, subject to per-agent and room limits. See [parallel mentions](docs/design/parallel-lead.md). Scheduling runs in the service on relevant events and periodic ticks.
 
 ### Who gets a turn
 
@@ -249,7 +246,7 @@ Each room has at most one active turn. All scheduling runs in one module that th
 The scheduler takes the first queued turn where all of these are true:
 
 - The room is not paused or archived.
-- The room has no active turn.
+- The room has no active ordinary turn (parallel lead-mention turns follow separate rules).
 - The consecutive-message limit has not been reached.
 - The agent has an active run window.
 - The agent has a waiting session in that room.
@@ -261,7 +258,7 @@ Turns for agents whose run window ended or who have not joined stay queued, and 
 ```text
 queued --> active --> completed
    |          |--> skipped   (no response within the timeout)
-   |          `--> abandoned (session replaced or server restarted)
+   |          `--> abandoned (for example, session replaced)
    `--> dropped (replaced by a newer user post)
 ```
 
@@ -270,7 +267,7 @@ queued --> active --> completed
 - **No lost messages:** `last_seen_message_id` advances only when an agent posts or passes. A skipped or abandoned turn's messages are delivered again on the next turn.
 - **No duplicate posts:** each turn accepts one result. A repeated call with the same `turn_id` returns the original result, so a retry cannot post twice.
 - **Rejoin:** joining the same room as the same agent creates a new session and marks the old one `replaced`. Any active turn is abandoned and queued again.
-- **Restart:** the server marks all active turns `abandoned` and queues them again at startup. Bridges retry automatically, and the agent's existing session ID keeps working.
+- **Restart:** the server retains active turns whose owning sessions are still active; it abandons and requeues turns without a valid owner. Bridges retry automatically, and existing active session IDs can continue.
 - **Large backlogs:** if unseen messages exceed the size limit, the turn includes the most recent ones plus a `truncated` flag, and the agent uses `read_history` for the rest.
 
 ### Lead, briefs, and roles

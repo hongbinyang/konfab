@@ -1,13 +1,13 @@
 # Konfab test plan
 
-**Updated:** 2026-11-06
+**Baseline:** 2026-11-06; the results in section 7 are historical, not current release evidence. See [Developer handoff](developer-handoff.md) for the current workflow.
 **Applies to:** [REQUIREMENTS.md](../REQUIREMENTS.md) and [DESIGN.md](../DESIGN.md)
 
 ## 1. Goals
 
 - Catch bugs in the same change that introduces them.
 - Prove each requirement with a named test or a recorded manual result.
-- Keep rooms reliable: no lost messages, no duplicate posts, and one active turn per room.
+- Keep rooms reliable: no lost messages, no duplicate posts, and the ordinary and parallel turn invariants.
 - Find out what only real desktop apps can prove, once those tests are scheduled.
 
 ## 2. How we test along the way
@@ -25,13 +25,13 @@ Run all commands inside the `konfab` conda environment.
 
 ## 3. Test levels
 
-| Level           | Location                           | What it proves                                                                                    | Status                               |
-| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                             |
-| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                   | In place                             |
-| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart             | In place                             |
-| **Browser**     | Manual for now, then Playwright    | Page behavior, safe message display, and layout                                                   | Checked by hand, automation deferred |
-| **End to end**  | [User guide](user-guide.md) checks | Real Claude and Codex apps: connection, wait limits, allowance use, and agent behavior            | **Deferred**                         |
+| Level           | Location                           | What it proves                                                                                    | Status                                                  |
+| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                                                |
+| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                   | In place                                                |
+| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart             | In place                                                |
+| **Browser**     | Manual for now, then Playwright    | Page behavior, safe message display, and layout                                                   | Checked by hand, automation deferred                    |
+| **End to end**  | [User guide](user-guide.md) checks | Real desktop apps: connection, wait limits, allowance use, and agent behavior                     | Partial; repeat for affected clients and record results |
 
 Automated tests use scripted agents instead of real models. They prove that Konfab behaves correctly, but not how real apps or models behave.
 
@@ -44,30 +44,30 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 
 ## 5. Coverage by requirement
 
-| Area                                                     | Requirements      | Tested by                          | Status                                            |
-| -------------------------------------------------------- | ----------------- | ---------------------------------- | ------------------------------------------------- |
-| Rooms, topics, and membership                            | R1 to R5          | Unit, integration                  | Pass                                              |
-| History survives restarts                                | R6                | Smoke                              | Pass                                              |
-| Message details, identity, and size limit                | R7 to R9          | Unit, integration                  | Pass                                              |
-| Live room list, messages, and posting                    | U1                | Integration, smoke, manual browser | Pass                                              |
-| Agent status, join prompts, pause, permissions, warnings | U2 to U6          | Unit, integration, manual browser  | Pass                                              |
-| Bridge tools                                             | A1, A2            | Integration, smoke                 | Pass                                              |
-| One conversation per room                                | A3                | Unit                               | Pass                                              |
-| Rejoining without duplicates                             | A4                | Unit, smoke                        | Pass                                              |
-| Turn order, mentions, and streak limit                   | A5 to A11         | Unit, smoke                        | Pass                                              |
-| Agent rules                                              | A12, P1           | Unit                               | Pass                                              |
-| Daily hours and breaks                                   | M1 to M3, M5      | Unit, integration, smoke           | Pass, not yet confirmed with real apps            |
-| Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                              |
-| Lead, room brief, roles, and editing                     | R12, R13, F3      | Unit, integration, manual browser  | Pass, relies on agents following them             |
-| Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it               |
-| No outside assets                                        | P7                | Smoke                              | Pass                                              |
-| Loopback, auth, and request protection                   | S1 to S3          | Integration, smoke                 | Pass                                              |
-| Secrets in storage and logs                              | S4                | Integration, smoke                 | Pass                                              |
-| Message display safety                                   | Design section 12 | Manual browser                     | Pass, automation deferred                         |
-| Search and export                                        | R10               | Unit, integration, manual browser  | Pass                                              |
-| Extended hours and closing time                          | Design section 9  | Unit, integration, manual browser  | Pass                                              |
-| Start at login                                           | S5                | Unit for the generated file        | File validated, not yet installed on a real login |
-| Real apps connect and stay connected                     | T1 to T5          | End to end                         | **Not yet run**                                   |
+| Area                                                     | Requirements      | Tested by                          | Status                                                      |
+| -------------------------------------------------------- | ----------------- | ---------------------------------- | ----------------------------------------------------------- |
+| Rooms, topics, and membership                            | R1 to R5          | Unit, integration                  | Pass                                                        |
+| History survives restarts                                | R6                | Smoke                              | Pass                                                        |
+| Message details, identity, and size limit                | R7 to R9          | Unit, integration                  | Pass                                                        |
+| Live room list, messages, and posting                    | U1                | Integration, smoke, manual browser | Pass                                                        |
+| Agent status, join prompts, pause, permissions, warnings | U2 to U6          | Unit, integration, manual browser  | Pass                                                        |
+| Bridge tools                                             | A1, A2            | Integration, smoke                 | Pass                                                        |
+| One conversation per room                                | A3                | Unit                               | Pass                                                        |
+| Rejoining without duplicates                             | A4                | Unit, smoke                        | Pass                                                        |
+| Turn order, mentions, and streak limit                   | A5 to A11         | Unit, smoke                        | Pass                                                        |
+| Agent rules                                              | A12, P1           | Unit                               | Pass                                                        |
+| Daily hours and breaks                                   | M1 to M3, M5      | Unit, integration, smoke           | Pass, not yet confirmed with real apps                      |
+| Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                                        |
+| Lead, room brief, roles, and editing                     | R12, R13, F3      | Unit, integration, manual browser  | Pass, relies on agents following them                       |
+| Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it                         |
+| No outside assets                                        | P7                | Smoke                              | Pass                                                        |
+| Loopback, auth, and request protection                   | S1 to S3          | Integration, smoke                 | Pass                                                        |
+| Secrets in storage and logs                              | S4                | Integration, smoke                 | Pass                                                        |
+| Message display safety                                   | Design section 12 | Manual browser                     | Pass, automation deferred                                   |
+| Search and export                                        | R10               | Unit, integration, manual browser  | Pass                                                        |
+| Extended hours and closing time                          | Design section 9  | Unit, integration, manual browser  | Pass                                                        |
+| Start at login                                           | S5                | Unit for the generated file        | File validated, not yet installed on a real login           |
+| Real apps connect and stay connected                     | T1 to T5          | End to end                         | Partially exercised; not a complete compatibility guarantee |
 
 ## 6. Exit criteria
 
@@ -87,7 +87,7 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 
 Coverage is a way to find untested code, not proof of quality, so these targets don't replace the requirement table above.
 
-## 7. Current results
+## 7. Historical baseline results
 
 Results from 2026-11-06 on `phase-0-connection-test`:
 
@@ -103,7 +103,7 @@ Results from 2026-11-06 on `phase-0-connection-test`:
 
 ### Known gaps
 
-- Nothing has been run with the real apps.
+- Real-app behavior is not covered by automated tests; repeat affected end-to-end checks when a client or its connector changes.
 - Page behavior has no automated browser tests.
 - Starting at login has not been installed and tested through a real login.
 - Agent rules can be tested only for being sent, not for being followed.
