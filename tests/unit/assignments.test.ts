@@ -37,8 +37,10 @@ describe("skill assignments", () => {
   };
   const builtin = (name: string, delivery: Delivery = "full") => {
     const row = db
-      .prepare("SELECT id, current_revision_id FROM skills WHERE id = ?")
-      .get(`builtin:${name}`) as { id: string; current_revision_id: string };
+      .prepare(
+        "SELECT id, current_revision_id FROM skills WHERE library_id = 'builtin' AND folder_name = ?",
+      )
+      .get(name) as { id: string; current_revision_id: string };
     return { skill_id: row.id, revision_id: row.current_revision_id, delivery };
   };
   const assign = (

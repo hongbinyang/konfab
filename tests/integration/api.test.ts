@@ -434,8 +434,12 @@ describe("page API", () => {
   it("adds an agent with its app and room skills in one step", async () => {
     const room = service.createRoom("add-agent", "", ["codex"]);
     const builtin = (await call("GET", "/api/library/builtin")).json()
-      .skills as Array<{ id: string; current_revision_id: string }>;
-    const skill = builtin.find((item) => item.id === "builtin:reviewer")!;
+      .skills as Array<{
+      id: string;
+      name: string;
+      current_revision_id: string;
+    }>;
+    const skill = builtin.find((item) => item.name === "reviewer")!;
     const pins = [
       { skill_id: skill.id, revision_id: skill.current_revision_id },
     ];
@@ -508,17 +512,26 @@ describe("page API", () => {
   it("assigns several skills in order, measures them, and rejects stale or oversized assignments", async () => {
     const room = service.createRoom("assign-test", "", ["codex"]);
     const builtin = (await call("GET", "/api/library/builtin")).json()
-      .skills as Array<{ id: string; current_revision_id: string }>;
-    const pin = (id: string, delivery = "full") => {
-      const skill = builtin.find((item) => item.id === id)!;
+      .skills as Array<{
+      id: string;
+      name: string;
+      current_revision_id: string;
+    }>;
+    const pin = (name: string, delivery = "full") => {
+      const skill = builtin.find((item) => item.name === name)!;
       return {
         skill_id: skill.id,
         revision_id: skill.current_revision_id,
         delivery,
       };
     };
+    // Built-in skills open in the library like any other skill.
+    for (const skill of builtin)
+      expect(
+        (await call("GET", `/api/library/skills/${skill.id}`)).statusCode,
+      ).toBe(200);
     const url = `/api/rooms/${room.id}/members/codex/assignment`;
-    const pins = [pin("builtin:reviewer"), pin("builtin:qa", "summary")];
+    const pins = [pin("reviewer"), pin("qa", "summary")];
     const size = await call("POST", `${url}/size`, {
       instructions: "Example notes",
       pins,
@@ -548,7 +561,7 @@ describe("page API", () => {
     ).toBe(409);
     const duplicate = await call("PUT", url, {
       base_revision: 1,
-      pins: [pin("builtin:qa"), pin("builtin:qa")],
+      pins: [pin("qa"), pin("qa")],
     });
     expect(duplicate.statusCode).toBe(400);
     // A long skill fits only as a summary; the full text would exceed 64 KiB.

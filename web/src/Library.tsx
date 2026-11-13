@@ -355,7 +355,11 @@ export function Library({
                 Licence: {selected.licence ?? "Not specified"} · Provenance:{" "}
                 {selected.provenance_json === "{}"
                   ? "Created or adopted locally"
-                  : "Derived from another saved skill revision"}
+                  : selected.provenance_json.includes('"builtin":true')
+                    ? "Ships with Konfab"
+                    : selected.provenance_json.includes("converted_from_role")
+                      ? "Converted from a role when roles became skills"
+                      : "Derived from another saved skill revision"}
               </p>
               <p>
                 Working folder:{" "}

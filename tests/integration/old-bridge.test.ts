@@ -107,14 +107,16 @@ describe("a connector started before roles became skills", () => {
     // The lead changes the assignment: a different order, a built-in skill sent as a summary.
     const current = service.memberAssignment(1, "claude");
     const qa = db
-      .prepare("SELECT current_revision_id FROM skills WHERE id = 'builtin:qa'")
-      .get() as { current_revision_id: string };
+      .prepare(
+        "SELECT id, current_revision_id FROM skills WHERE library_id = 'builtin' AND folder_name = 'qa'",
+      )
+      .get() as { id: string; current_revision_id: string };
     service.setAssignment(1, "claude", {
       base_revision: current.revision,
       instructions: "Work in your own worktree.",
       pins: [
         {
-          skill_id: "builtin:qa",
+          skill_id: qa.id,
           revision_id: qa.current_revision_id,
           delivery: "summary",
         },

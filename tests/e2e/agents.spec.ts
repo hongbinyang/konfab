@@ -23,7 +23,7 @@ async function openRoom(page: Page, name: string): Promise<void> {
   await expect(page.getByRole("heading", { name: `# ${name}` })).toBeVisible();
 }
 
-test("add an agent with an app and a confirmed role, then talk to the room", async ({
+test("add an agent with an app and skills, change them, then talk to the room", async ({
   page,
 }, testInfo) => {
   const room = `e2e-${testInfo.project.name}`;
@@ -34,21 +34,41 @@ test("add an agent with an app and a confirmed role, then talk to the room", asy
   const name = `QA ${testInfo.project.name}`;
   await form.getByLabel("Display name").fill(name);
   await form.getByLabel(/^App/).selectOption("codex");
-  await form
-    .getByLabel(/^Role in this room/)
-    .selectOption({ label: "Reviewer" });
-  await expect(form.getByText(/^Preview: Reviewer · rev \d+$/)).toBeVisible();
 
-  const submit = form.getByRole("button", { name: "Add agent", exact: true });
-  await expect(submit).toBeDisabled();
-  await form.getByLabel(/I reviewed this role/).check();
-  await expect(submit).toBeEnabled();
-  await submit.click();
+  // Choose skills: two built-in skills, the second sent as a summary.
+  await form.getByRole("button", { name: "Choose skills…" }).click();
+  const picker = page.getByRole("dialog", { name: /Assign skills/ });
+  await picker.getByRole("button", { name: "Built-in", exact: true }).click();
+  await picker.getByRole("button", { name: "Add reviewer" }).click();
+  await picker.getByRole("button", { name: "Add qa" }).click();
+  const selected = picker.getByRole("region", { name: "Selected skills" });
+  await selected
+    .getByRole("group", { name: "How qa is sent" })
+    .getByRole("button", { name: "Summary" })
+    .click();
+  await expect(
+    picker.getByText(/Size the agent receives: .* of 64\.0 KiB/),
+  ).toBeVisible();
+  await picker.getByLabel(/Room instructions/).fill("Review every change.");
+  await picker.getByRole("button", { name: "Use these 2 skills" }).click();
+  await expect(form.getByText("reviewer · full text")).toBeVisible();
+  await expect(form.getByText("qa · summary")).toBeVisible();
+  await form.getByRole("button", { name: "Add agent", exact: true }).click();
 
   const card = page.locator(".compact-agent", { hasText: name });
   await expect(card.getByText("App: Codex")).toBeVisible();
-  await expect(card.getByText(/^Role: Reviewer rev \d+$/)).toBeVisible();
+  await expect(
+    card.getByText(/^Skills: reviewer rev \d+ \+ 1 skill$/),
+  ).toBeVisible();
   await expect(card.getByText("Not joined")).toBeVisible();
+
+  // Reorder from the card's Assign skills; the change saves and the label follows.
+  await card.getByRole("button", { name: "Assign skills" }).click();
+  const again = page.getByRole("dialog", { name: /Assign skills/ });
+  await again.getByRole("button", { name: "Move qa up" }).click();
+  await again.getByRole("button", { name: /^Assign 2 skills to / }).click();
+  await expect(again).toBeHidden();
+  await expect(card.getByText(/^Skills: qa rev \d+ \+ 1 skill$/)).toBeVisible();
 
   await page
     .getByPlaceholder(/Message the room/)

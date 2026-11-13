@@ -27,6 +27,14 @@ import {
   type SkillFile,
 } from "./skill-files.js";
 
+/** A stable UUID for a built-in skill, so library routes accept it and reseeding finds it. */
+export function builtinSkillId(name: string): string {
+  const hex = createHash("sha256")
+    .update(`konfab-builtin-skill:${name}`)
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 /** Local library persistence. Filesystem operations are kept outside SQL transactions. */
 export class SkillLibrary {
   constructor(
@@ -457,7 +465,15 @@ export class SkillLibrary {
           400,
           "Built-in skill name must match its folder",
         );
-      const id = `builtin:${entry.name}`;
+      // Look up by folder so a database seeded earlier keeps its skill identity.
+      const id =
+        (
+          this.db
+            .prepare(
+              "SELECT id FROM skills WHERE library_id = 'builtin' AND folder_name = ?",
+            )
+            .get(entry.name) as { id: string } | undefined
+        )?.id ?? builtinSkillId(entry.name);
       const hash = packageHash(files);
       const current = this.db
         .prepare(

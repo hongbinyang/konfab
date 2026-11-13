@@ -1169,6 +1169,12 @@ form.room-name .row {
   flex: 1;
   min-width: 0;
 }
+.assign-skills .role-picker-results li > button:not(.result) {
+  flex: 0 0 auto;
+  width: auto;
+  align-self: center;
+  display: inline-block;
+}
 .assign-skills footer {
   display: flex;
   gap: 8px;
@@ -1214,9 +1220,19 @@ form.room-name .row {
   padding: 2px 8px;
   font-size: 0.85em;
 }
+.segmented button {
+  background: var(--surface);
+  color: var(--text);
+}
 .segmented button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-text);
+}
+.assign-selected .row > button {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+  padding: 2px 8px;
 }
 .chip.warning {
   background: var(--warning-surface);
