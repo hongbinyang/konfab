@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Assign skills – mockup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #fff;
+        --surface: #f4f4f5;
+        --raised: #fff;
+        --text: #18181b;
+        --muted: #5f5f67;
+        --border: #d4d4d8;
+        --accent: #1d4ed8;
+        --accent-text: #fff;
+        --error: #b91c1c;
+        --error-surface: #fee2e2;
+        --warn: #92400e;
+        --warn-surface: #fef3c7;
+        --good: #166534;
+        --good-surface: #dcfce7;
+        --add: #dcfce7;
+        --del: #fee2e2;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --background: #18181b;
+        --surface: #27272a;
+        --raised: #1f1f23;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --border: #3f3f46;
+        --accent: #93c5fd;
+        --accent-text: #18181b;
+        --error: #fca5a5;
+        --error-surface: #450a0a;
+        --warn: #fcd34d;
+        --warn-surface: #422006;
+        --good: #86efac;
+        --good-surface: #052e16;
+        --add: #052e16;
+        --del: #450a0a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--text);
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0;
+        flex: 1;
+      }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-text);
+        border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      button.link {
+        background: none;
+        border: none;
+        color: var(--accent);
+        padding: 0;
+      }
+      .note {
+        margin: 12px 16px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 13px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        min-height: calc(100vh - 110px);
+      }
+      .timeline {
+        padding: 16px;
+        color: var(--muted);
+        border-right: 1px solid var(--border);
+      }
+      .members {
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--raised);
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 15px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .card .meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .card .actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .badge {
+        font-size: 12px;
+        border-radius: 999px;
+        padding: 1px 8px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .badge.update {
+        background: var(--warn-surface);
+        color: var(--warn);
+        border-color: transparent;
+      }
+      .badge.good {
+        background: var(--good-surface);
+        color: var(--good);
+        border-color: transparent;
+      }
+      .badge.bad {
+        background: var(--error-surface);
+        color: var(--error);
+        border-color: transparent;
+      }
+      .skillline {
+        font-size: 13px;
+        margin-top: 4px;
+      }
+      dialog {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0;
+        background: var(--background);
+        color: var(--text);
+        width: min(1100px, 96vw);
+        max-height: 92vh;
+      }
+      dialog.small {
+        width: min(620px, 96vw);
+      }
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.4);
+      }
+      .dhead {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .dhead h2 {
+        margin: 0;
+        font-size: 17px;
+        flex: 1;
+      }
+      .dbody {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr;
+        min-height: 520px;
+      }
+      .dbody.single {
+        display: block;
+        padding: 14px 16px;
+      }
+      .pane {
+        padding: 12px 16px;
+        overflow: auto;
+        max-height: 70vh;
+      }
+      .pane + .pane {
+        border-left: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .dfoot {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+      }
+      .dfoot .hint {
+        flex: 1;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      input[type="search"],
+      textarea,
+      select {
+        font: inherit;
+        color: var(--text);
+        background: var(--background);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 8px;
+        width: 100%;
+      }
+      textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      .tabs button[aria-pressed="true"] {
+        background: var(--accent);
+        color: var(--accent-text);
+        border-color: var(--accent);
+      }
+      .result {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        padding: 8px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .result:hover,
+      .result[aria-selected="true"] {
+        background: var(--surface);
+      }
+      .result .grow {
+        flex: 1;
+        min-width: 0;
+      }
+      .result .desc {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .preview {
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .preview pre {
+        white-space: pre-wrap;
+        font-size: 12px;
+        background: var(--surface);
+        padding: 8px;
+        border-radius: 6px;
+        max-height: 180px;
+        overflow: auto;
+      }
+      ol.selected {
+        list-style: none;
+        padding: 0;
+        margin: 8px 0;
+        display: grid;
+        gap: 8px;
+      }
+      ol.selected li {
+        background: var(--background);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      ol.selected li .row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .pos {
+        font-weight: 600;
+        color: var(--muted);
+        width: 1.5em;
+      }
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .seg button {
+        border: none;
+        border-radius: 0;
+        padding: 2px 8px;
+        font-size: 12px;
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--accent);
+        color: var(--accent-text);
+      }
+      .meter {
+        height: 8px;
+        border-radius: 999px;
+        background: var(--border);
+        overflow: hidden;
+        margin: 6px 0 2px;
+      }
+      .meter span {
+        display: block;
+        height: 100%;
+        background: var(--good);
+      }
+      .meter.over span {
+        background: var(--error);
+      }
+      .error {
+        background: var(--error-surface);
+        color: var(--error);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .warnbox {
+        background: var(--warn-surface);
+        color: var(--warn);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .diff {
+        font:
+          12px/1.45 ui-monospace,
+          monospace;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        margin-top: 6px;
+      }
+      .diff div {
+        padding: 0 8px;
+        white-space: pre-wrap;
+      }
+      .diff .a {
+        background: var(--add);
+      }
+      .diff .d {
+        background: var(--del);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .small {
+        font-size: 13px;
+      }
+      label.inline {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      @media (max-width: 760px) {
+        main,
+        .dbody {
+          grid-template-columns: 1fr;
+        }
+        .pane + .pane {
+          border-left: none;
+          border-top: 1px solid var(--border);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>konfab-improvement</h1>
+      <button id="team">Team</button>
+      <button id="library">⚙ Manage library</button>
+      <button id="theme" title="Switch light/dark">Dark mode</button>
+    </header>
+    <p class="note">
+      Mockup only: nothing is saved. It shows the skill-based assignment flow
+      from the design (docs/design/skill-assignment.md). Try:
+      <b>Assign skills</b> on a card (add, reorder, switch Full/Summary, add the
+      long skill to see the limit), the <b>Update available</b> badge,
+      <b>⚙ Manage library → Update members…</b>, <b>Team</b>, and adding the
+      public <i>webapp-testing</i> skill twice to see the local-changes choice.
+    </p>
+    <main>
+      <section class="timeline">
+        <p>Room conversation…</p>
+      </section>
+      <section class="members" id="members"></section>
+    </main>
+
+    <!-- Assign skills -->
+    <dialog id="assign">
+      <div class="dhead">
+        <h2 id="assign-title">Assign skills</h2>
+        <button data-close>✕</button>
+      </div>
+      <div class="dbody">
+        <div class="pane">
+          <input
+            type="search"
+            id="q"
+            placeholder="Search skills: my skills, project, built-in and public"
+          />
+          <div class="tabs" id="tabs"></div>
+          <div id="results"></div>
+          <div id="preview"></div>
+        </div>
+        <div class="pane">
+          <strong>Selected, in order</strong>
+          <div class="small muted">
+            The agent follows room rules and your instructions first, then these
+            skills in this order. When skills conflict, the earlier one wins.
+          </div>
+          <ol class="selected" id="selected"></ol>
+          <label for="instructions"
+            ><strong>Room instructions</strong>
+            <span class="small muted">(only in this room)</span></label
+          >
+          <textarea id="instructions"></textarea>
+          <div class="small" style="margin-top: 10px">
+            Size the agent receives: <span id="size"></span>
+          </div>
+          <div class="meter" id="meter"><span></span></div>
+          <div id="size-error"></div>
+        </div>
+      </div>
+      <div class="dfoot">
+        <span class="hint" id="assign-hint"></span>
+        <button data-close>Cancel</button>
+        <button class="primary" id="confirm-assign"></button>
+      </div>
+    </dialog>
+
+    <!-- Local changes choice -->
+    <dialog id="conflict" class="small">
+      <div class="dhead">
+        <h2>webapp-testing has local changes</h2>
+        <button data-close>✕</button>
+      </div>
+      <div class="dbody single">
+        <p>
+          Your library has <b>webapp-testing rev 3</b>, which you edited after
+          copying it. GitHub has a newer version (commit 4f2c1a9). Konfab won't
+          overwrite your changes.
+        </p>
+        <div class="diff">
+          <div class="d">- Run the dev server with npm start.</div>
+          <div class="a">+ Run the dev server with npm run dev.</div>
+          <div class="a">+ Take screenshots at mobile and desktop widths.</div>
+        </div>
+      </div>
+      <div class="dfoot">
+        <button data-close>Cancel</button>
+        <button id="keep-local">Keep my version</button>
+        <button class="primary" id="add-separate">
+          Add upstream as webapp-testing-2
+        </button>
+      </div>
+    </dialog>
+
+    <!-- Library: skill detail + update members -->
+    <dialog id="lib">
+      <div class="dhead">
+        <h2>Manage library · konfab-dev</h2>
+        <button data-close>✕</button>
+      </div>
+      <div class="dbody single">
+        <p class="small muted">
+          Personal skill · current <b>rev 3</b> (saved today, not reviewed) ·
+          <span class="badge">Mine</span>
+        </p>
+        <h3 style="margin: 8px 0 4px; font-size: 15px">Used by</h3>
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Room</th>
+              <th>Member</th>
+              <th>Pinned</th>
+            </tr>
+          </thead>
+          <tbody id="usages"></tbody>
+        </table>
+        <h3 style="margin: 14px 0 4px; font-size: 15px">Changes in rev 3</h3>
+        <div class="diff">
+          <div>## Responsibilities</div>
+          <div class="d">- Commit after review.</div>
+          <div class="a">
+            + Commit after review, then hand the push to the PM.
+          </div>
+          <div class="a">+ Report what you verified and what you didn't.</div>
+        </div>
+      </div>
+      <div class="dfoot">
+        <span class="hint" id="lib-hint"
+          >Select members to move to rev 3. Others stay pinned.</span
+        >
+        <button data-close>Close</button>
+        <button class="primary" id="update-members" disabled>
+          Review rev 3 and update 0 members
+        </button>
+      </div>
+    </dialog>
+
+    <!-- Team -->
+    <dialog id="teamdlg" class="small">
+      <div class="dhead">
+        <h2>Team · move skill bundles</h2>
+        <button data-close>✕</button>
+      </div>
+      <div class="dbody single">
+        <p class="small muted">
+          A bundle is a member's skills and room instructions. Room names, apps
+          and edit permission stay with each member.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Now</th>
+              <th>After</th>
+            </tr>
+          </thead>
+          <tbody id="team-rows"></tbody>
+        </table>
+      </div>
+      <div class="dfoot">
+        <button data-close>Cancel</button>
+        <button class="primary" id="team-apply">Apply</button>
+      </div>
+    </dialog>
+
+    <script>
+      const LIMIT = 64;
+      const catalog = [
+        {
+          id: "konfab-dev",
+          name: "konfab-dev",
+          source: "Mine",
+          rev: 2,
+          latest: 3,
+          reviewed: true,
+          kib: 2.4,
+          desc: "Konfab developer: design, implement, test, commit after review.",
+          body: "# Konfab developer\n\n## Responsibilities\n- Clarify requirements with the PM.\n- Write the design note, implement with tests.\n- Commit after review.",
+        },
+        {
+          id: "pm",
+          name: "pm",
+          source: "Mine",
+          rev: 1,
+          latest: 1,
+          reviewed: true,
+          kib: 2.1,
+          desc: "Converted from the role Product manager.",
+          body: "# Product manager\n\n- Turn requests into specs…",
+        },
+        {
+          id: "b-reviewer",
+          name: "reviewer",
+          source: "Built-in",
+          rev: 1,
+          latest: 1,
+          reviewed: true,
+          kib: 1.6,
+          desc: "Reviews changes for correctness, safety and fit with the spec.",
+          body: "# Reviewer\n\n## Responsibilities\n- Read the diff against the spec…",
+        },
+        {
+          id: "b-qa",
+          name: "qa",
+          source: "Built-in",
+          rev: 1,
+          latest: 1,
+          reviewed: true,
+          kib: 1.4,
+          desc: "Tests changes the way users will use them.",
+          body: "# QA\n\n- Test with a real server and browser…",
+        },
+        {
+          id: "test-plan",
+          name: "test-plan",
+          source: "Project",
+          rev: 4,
+          latest: 4,
+          reviewed: false,
+          kib: 5.2,
+          desc: "Write a test plan for a change (project skill).",
+          body: "---\nname: test-plan\n---\n# Test plan\n…",
+        },
+        {
+          id: "long-spec",
+          name: "long-spec",
+          source: "Mine",
+          rev: 1,
+          latest: 1,
+          reviewed: true,
+          kib: 70,
+          desc: "A long reference (70 KiB) — too large to send in full.",
+          body: "# Long spec\n\n(70 KiB of reference material)…",
+        },
+        {
+          id: "webapp-testing",
+          name: "webapp-testing",
+          source: "Public · anthropics/skills",
+          vendor: true,
+          rev: null,
+          latest: null,
+          reviewed: false,
+          kib: 3.8,
+          desc: "Test local web apps with Playwright: screenshots, logs, interactions.",
+          body: "---\nname: webapp-testing\nlicense: Apache-2.0\n---\n# Web app testing\n…",
+        },
+      ];
+      const byId = Object.fromEntries(catalog.map((s) => [s.id, s]));
+      const members = [
+        {
+          id: "claude",
+          app: "Claude",
+          canEdit: true,
+          instructions: "",
+          pins: [
+            { id: "konfab-dev", rev: 2, delivery: "full" },
+            { id: "b-qa", rev: 1, delivery: "summary" },
+          ],
+        },
+        {
+          id: "codex",
+          app: "Codex",
+          canEdit: false,
+          instructions: "Push only after the lead approves.",
+          pins: [{ id: "pm", rev: 1, delivery: "full" }],
+        },
+      ];
+      let publicAdds = 0;
+      let draft = null;
+      let tab = "All";
+      let previewId = null;
+
+      const $ = (id) => document.getElementById(id);
+      const esc = (t) =>
+        String(t).replace(
+          /[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+        );
+
+      function label(m) {
+        if (!m.pins.length)
+          return m.instructions ? "Room instructions only" : "No skills";
+        const first = byId[m.pins[0].id];
+        const more = m.pins.length - 1;
+        return `${first.name} rev ${m.pins[0].rev}${more ? ` + ${more} skill${more > 1 ? "s" : ""}` : ""}`;
+      }
+      function renderMembers() {
+        $("members").innerHTML = members
+          .map((m) => {
+            const update = m.pins.some((p) => byId[p.id].latest > p.rev);
+            return `<div class="card">
+              <h3>${m.id} <span class="badge">${m.app}</span>${update ? `<button class="badge update" data-update="${m.id}">Update available</button>` : ""}</h3>
+              <div class="meta">Waiting for a turn</div>
+              <div class="skillline"><b>${esc(label(m))}</b></div>
+              ${m.pins.map((p, i) => `<div class="small muted">${i + 1}. ${esc(byId[p.id].name)} rev ${p.rev} · ${p.delivery === "full" ? "full text" : "summary"}</div>`).join("")}
+              ${m.instructions ? `<div class="small">“${esc(m.instructions)}”</div>` : ""}
+              <div class="actions">
+                <button data-assign="${m.id}">Assign skills</button>
+                <label class="inline small"><input type="checkbox" ${m.canEdit ? "checked" : ""} data-edit="${m.id}" /> May edit files</label>
+              </div>
+            </div>`;
+          })
+          .join("");
+      }
+
+      // ---------- Assign dialog ----------
+      function openAssign(memberId, focusUpdates) {
+        const m = members.find((x) => x.id === memberId);
+        draft = {
+          member: m,
+          instructions: m.instructions,
+          pins: m.pins.map((p) => ({ ...p })),
+          review: new Set(),
+          focusUpdates,
+        };
+        previewId = null;
+        $("assign-title").textContent = `Assign skills · ${m.id}`;
+        $("instructions").value = m.instructions;
+        renderAssign();
+        $("assign").showModal();
+      }
+      function size() {
+        const pins = draft.pins.reduce((n, p) => {
+          const s = byId[p.id];
+          return n + (p.delivery === "full" ? s.kib : 0.3);
+        }, 0);
+        return (
+          Math.round((pins + 1.1 + draft.instructions.length / 1024) * 10) / 10
+        );
+      }
+      function renderAssign() {
+        const tabs = ["All", "Mine", "Project", "Built-in", "Public"];
+        $("tabs").innerHTML = tabs
+          .map(
+            (t) =>
+              `<button aria-pressed="${t === tab}" data-tab="${t}">${t}</button>`,
+          )
+          .join("");
+        const q = $("q").value.toLowerCase();
+        const list = catalog.filter(
+          (s) =>
+            (tab === "All" || s.source.startsWith(tab)) &&
+            (!q || (s.name + s.desc).toLowerCase().includes(q)),
+        );
+        $("results").innerHTML = list
+          .map((s) => {
+            const chosen = draft.pins.some((p) => p.id === s.id);
+            return `<div class="result" data-preview="${s.id}" aria-selected="${previewId === s.id}">
+              <div class="grow"><b>${esc(s.name)}</b> <span class="badge">${esc(s.source)}</span>${s.vendor ? ' <span class="badge">Vendor-maintained</span>' : ""}
+              <div class="desc">${esc(s.desc)}</div></div>
+              ${chosen ? '<span class="badge good">Added</span>' : `<button data-add="${s.id}">Add</button>`}
+            </div>`;
+          })
+          .join("");
+        const p = previewId && byId[previewId];
+        $("preview").innerHTML = p
+          ? `<div class="preview"><b>${esc(p.name)}</b> ${p.rev ? `rev ${p.rev}` : "commit 4f2c1a9"} · ${esc(p.source)} · ${p.kib} KiB
+              <pre>${esc(p.body)}</pre>
+              ${p.source.startsWith("Public") ? '<div class="small muted">Nothing is saved while you browse. Assigning copies it to your library and records its source and commit.</div>' : ""}</div>`
+          : `<div class="small muted" style="margin-top:10px">Select a result to preview it.</div>`;
+
+        $("selected").innerHTML = draft.pins.length
+          ? draft.pins
+              .map((pin, i) => {
+                const s = byId[pin.id];
+                const newer = s.latest && s.latest > pin.rev;
+                const unreviewed = pin.unreviewed;
+                return `<li>
+                  <div class="row">
+                    <span class="pos">${i + 1}</span>
+                    <b style="flex:1">${esc(s.name)} ${pin.rev ? `rev ${pin.rev}` : "(new copy)"}</b>
+                    <button title="Move up" data-up="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
+                    <button title="Move down" data-down="${i}" ${i === draft.pins.length - 1 ? "disabled" : ""}>↓</button>
+                    <button title="Remove" data-remove="${i}">✕</button>
+                  </div>
+                  <div class="row small" style="margin-top:4px">
+                    <span class="seg"><button aria-pressed="${pin.delivery === "full"}" data-full="${i}">Full text</button><button aria-pressed="${pin.delivery === "summary"}" data-summary="${i}">Summary</button></span>
+                    <span class="muted">${pin.delivery === "full" ? `${s.kib} KiB` : "name and description; agent reads it when needed"}</span>
+                    ${unreviewed ? '<span class="badge update">Not reviewed — confirming reviews it</span>' : '<span class="badge good">Reviewed</span>'}
+                  </div>
+                  ${newer ? `<div class="row small" style="margin-top:4px"><span class="badge update">rev ${s.latest} available</span> <button class="link" data-diff="${i}">${pin.showDiff ? "Hide changes" : "Show changes"}</button> <button data-bump="${i}">Use rev ${s.latest}</button></div>` : ""}
+                  ${pin.showDiff ? '<div class="diff"><div class="d">- Commit after review.</div><div class="a">+ Commit after review, then hand the push to the PM.</div><div class="a">+ Report what you verified and what you didn\'t.</div></div>' : ""}
+                </li>`;
+              })
+              .join("")
+          : '<li class="muted small">No skills selected. The agent gets only room instructions, if any.</li>';
+
+        const kib = size();
+        const over = kib > LIMIT;
+        $("size").textContent = `${kib} of ${LIMIT} KiB`;
+        $("meter").className = over ? "meter over" : "meter";
+        $("meter").firstElementChild.style.width =
+          `${Math.min(100, (kib / LIMIT) * 100)}%`;
+        $("size-error").innerHTML = over
+          ? `<div class="error">These skills total ${kib} KiB; agents can receive up to ${LIMIT} KiB. Switch a skill to <b>Summary</b>, remove one, or move long material out of SKILL.md into supporting files.</div>`
+          : "";
+        const toReview = draft.pins.filter((p) => p.unreviewed);
+        $("assign-hint").textContent = over
+          ? `Too large to send (${kib} of ${LIMIT} KiB): switch a skill to Summary or remove one.`
+          : toReview.length
+            ? `Confirming marks ${toReview.map((p) => byId[p.id].name + (p.rev ? ` rev ${p.rev}` : "")).join(", ")} as reviewed.`
+            : "Applies from the agent's next turn.";
+        $("confirm-assign").disabled = over;
+        $("confirm-assign").textContent =
+          `Assign ${draft.pins.length} skill${draft.pins.length === 1 ? "" : "s"} to ${draft.member.id}`;
+      }
+      $("assign").addEventListener("click", (e) => {
+        const t = e.target.closest("button, .result");
+        if (!t) return;
+        const d = t.dataset;
+        if (d.tab) tab = d.tab;
+        else if (d.add) {
+          const s = byId[d.add];
+          if (s.id === "webapp-testing" && publicAdds > 0) {
+            $("conflict").showModal();
+            return;
+          }
+          if (s.id === "webapp-testing") publicAdds += 1;
+          draft.pins.push({
+            id: s.id,
+            rev: s.rev,
+            delivery: "full",
+            unreviewed: !s.reviewed,
+          });
+        } else if (d.preview) previewId = d.preview;
+        else if (d.up) {
+          const i = +d.up;
+          [draft.pins[i - 1], draft.pins[i]] = [
+            draft.pins[i],
+            draft.pins[i - 1],
+          ];
+        } else if (d.down) {
+          const i = +d.down;
+          [draft.pins[i + 1], draft.pins[i]] = [
+            draft.pins[i],
+            draft.pins[i + 1],
+          ];
+        } else if (d.remove) draft.pins.splice(+d.remove, 1);
+        else if (d.full) draft.pins[+d.full].delivery = "full";
+        else if (d.summary) draft.pins[+d.summary].delivery = "summary";
+        else if (d.diff)
+          draft.pins[+d.diff].showDiff = !draft.pins[+d.diff].showDiff;
+        else if (d.bump) {
+          const pin = draft.pins[+d.bump];
+          pin.rev = byId[pin.id].latest;
+          pin.unreviewed = true;
+          pin.showDiff = false;
+        } else if (t.hasAttribute("data-close")) {
+          $("assign").close();
+          return;
+        } else if (t.id === "confirm-assign") {
+          draft.member.pins = draft.pins.map(({ id, rev, delivery }) => ({
+            id,
+            rev: rev ?? 1,
+            delivery,
+          }));
+          draft.member.instructions = draft.instructions;
+          for (const p of draft.pins)
+            if (p.id === "webapp-testing") {
+              byId[p.id].rev = 1;
+              byId[p.id].latest = 1;
+              byId[p.id].source = "Mine (from anthropics/skills)";
+              byId[p.id].reviewed = true;
+            }
+          $("assign").close();
+          renderMembers();
+          return;
+        }
+        renderAssign();
+      });
+      $("q").addEventListener("input", renderAssign);
+      $("instructions").addEventListener("input", (e) => {
+        draft.instructions = e.target.value;
+        renderAssign();
+      });
+      $("keep-local").addEventListener("click", () => {
+        draft.pins.push({ id: "webapp-testing", rev: 3, delivery: "full" });
+        $("conflict").close();
+        renderAssign();
+      });
+      $("add-separate").addEventListener("click", () => {
+        catalog.push({
+          ...byId["webapp-testing"],
+          id: "webapp-testing-2",
+          name: "webapp-testing-2",
+          rev: null,
+        });
+        byId["webapp-testing-2"] = catalog.at(-1);
+        draft.pins.push({
+          id: "webapp-testing-2",
+          rev: null,
+          delivery: "full",
+          unreviewed: true,
+        });
+        $("conflict").close();
+        renderAssign();
+      });
+
+      // ---------- Library: update members ----------
+      const usages = [
+        {
+          room: "konfab-improvement",
+          member: "claude",
+          rev: 2,
+          archived: false,
+        },
+        { room: "docs-sprint", member: "claude", rev: 2, archived: false },
+        { room: "old-experiment", member: "codex", rev: 1, archived: true },
+      ];
+      function renderLibrary() {
+        $("usages").innerHTML = usages
+          .map(
+            (u, i) =>
+              `<tr><td><input type="checkbox" data-u="${i}" ${u.archived ? "disabled" : ""} /></td><td>${u.room}${u.archived ? ' <span class="badge">Archived — not updated</span>' : ""}</td><td>${u.member}</td><td>rev ${u.rev}</td></tr>`,
+          )
+          .join("");
+      }
+      $("lib").addEventListener("change", () => {
+        const n = $("lib").querySelectorAll("input[data-u]:checked").length;
+        $("update-members").disabled = !n;
+        $("update-members").textContent =
+          `Review rev 3 and update ${n} member${n === 1 ? "" : "s"}`;
+      });
+      $("update-members").addEventListener("click", () => {
+        const picked = [
+          ...$("lib").querySelectorAll("input[data-u]:checked"),
+        ].map((b) => usages[+b.dataset.u]);
+        for (const u of picked)
+          if (u.room === "konfab-improvement") {
+            const m = members.find((x) => x.id === u.member);
+            const pin = m.pins.find((p) => p.id === "konfab-dev");
+            if (pin) pin.rev = 3;
+          }
+        for (const u of picked) u.rev = 3;
+        byId["konfab-dev"].latest = 3;
+        $("lib").close();
+        renderMembers();
+      });
+
+      // ---------- Team ----------
+      let team = null;
+      function renderTeam() {
+        $("team-rows").innerHTML = members
+          .map(
+            (
+              m,
+            ) => `<tr><td>${m.id}</td><td class="small">${esc(label(m))}</td><td>
+            <select data-team="${m.id}">
+              ${[
+                "keep",
+                ...members
+                  .filter((o) => o.id !== m.id)
+                  .map((o) => "from:" + o.id),
+                "none",
+              ]
+                .map(
+                  (v) =>
+                    `<option value="${v}" ${team[m.id] === v ? "selected" : ""}>${v === "keep" ? "Keep" : v === "none" ? "No skills" : `Take ${v.slice(5)}'s bundle`}</option>`,
+                )
+                .join("")}
+            </select></td></tr>`,
+          )
+          .join("");
+      }
+      $("team").addEventListener("click", () => {
+        team = Object.fromEntries(members.map((m) => [m.id, "keep"]));
+        renderTeam();
+        $("teamdlg").showModal();
+      });
+      $("teamdlg").addEventListener("change", (e) => {
+        if (e.target.dataset.team) team[e.target.dataset.team] = e.target.value;
+      });
+      $("team-apply").addEventListener("click", () => {
+        const before = Object.fromEntries(
+          members.map((m) => [
+            m.id,
+            { pins: m.pins, instructions: m.instructions },
+          ]),
+        );
+        for (const m of members) {
+          const v = team[m.id];
+          if (v === "none") Object.assign(m, { pins: [], instructions: "" });
+          else if (v.startsWith("from:"))
+            Object.assign(m, structuredClone(before[v.slice(5)]));
+        }
+        $("teamdlg").close();
+        renderMembers();
+      });
+
+      // ---------- Wiring ----------
+      document.addEventListener("click", (e) => {
+        const t = e.target.closest("button");
+        if (!t) return;
+        if (t.dataset.assign) openAssign(t.dataset.assign, false);
+        if (t.dataset.update) openAssign(t.dataset.update, true);
+        if (t.hasAttribute("data-close")) t.closest("dialog").close();
+      });
+      $("library").addEventListener("click", () => {
+        renderLibrary();
+        $("lib").showModal();
+      });
+      $("theme").addEventListener("click", () => {
+        const dark = document.documentElement.dataset.theme !== "dark";
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        $("theme").textContent = dark ? "Light mode" : "Dark mode";
+      });
+      renderMembers();
+    </script>
+  </body>
+</html>
