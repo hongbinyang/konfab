@@ -25,22 +25,25 @@ export function RoomNameForm({
   const owner = agent.account_name ?? agent.display_name;
   const inputId = `room-name-${agent.id}`;
 
-  if (agent.name_fixed || archived)
-    return agent.room_name ? (
+  if (agent.name_fixed || archived) {
+    const reason = archived
+      ? "This room is archived, so names can't change."
+      : "Names are fixed once the agent joins this room.";
+    return (
       <p className="room-name muted">
-        Name in this room: <strong>@{agent.room_name}</strong>{" "}
-        <span
-          className="chip"
-          title={
-            archived
-              ? "This room is archived."
-              : "Names are fixed once the agent joins this room."
-          }
-        >
+        {agent.room_name ? "Name in this room: " : "Mentioned as "}
+        <strong>@{agent.room_name ?? agent.id}</strong>{" "}
+        <span className="chip" title={reason}>
           Fixed
+        </span>{" "}
+        <span>
+          {agent.room_name
+            ? reason
+            : `${reason} This agent joined without a room name, so it keeps its agent ID.`}
         </span>
       </p>
-    ) : null;
+    );
+  }
 
   const save = async (name: string | null) => {
     setBusy(true);

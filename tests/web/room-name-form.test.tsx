@@ -96,19 +96,30 @@ describe("room name form", () => {
     expect(screen.getByText("Fixed").getAttribute("title")).toBe(
       "Names are fixed once the agent joins this room.",
     );
+    expect(
+      screen.getByText("Names are fixed once the agent joins this room."),
+    ).toBeTruthy();
   });
 
-  it("shows nothing for a joined agent without a name, or in an archived room", () => {
-    const { container, rerender } = render(
+  it("explains why a joined agent without a name keeps its agent ID", () => {
+    render(
       <RoomNameForm
         roomId={7}
         agent={{ ...member, name_fixed: true }}
         archived={false}
       />,
     );
-    expect(container.textContent).toBe("");
-    rerender(<RoomNameForm roomId={7} agent={member} archived />);
     expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("@claude")).toBeTruthy();
+    expect(
+      screen.getByText(/joined without a room name, so it keeps its agent ID/),
+    ).toBeTruthy();
+  });
+
+  it("is read-only in an archived room", () => {
+    render(<RoomNameForm roomId={7} agent={member} archived />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/This room is archived/)).toBeTruthy();
   });
 });
 
