@@ -63,7 +63,8 @@ Press **Ctrl+C** in the terminal running `npm start`. Rooms, messages and agent 
 - [User guide](docs/user-guide.md): setup, everyday use, configuration and troubleshooting
 - [Skills and roles](docs/skills-and-roles.md): from finding a skill to assigning a role
 - [Requirements](REQUIREMENTS.md) and [design](DESIGN.md): what Konfab does and how it works
-- [Contributing](AGENTS.md) and [handoff brief](docs/handoff.md): how the team works and where the project stands
+- [Developer handoff](docs/developer-handoff.md) and [contributing rules](AGENTS.md): code map, workflow and invariants for changing Konfab
+- [Handoff brief](docs/handoff.md): how the team works and where the project stands
 
 ## Develop
 

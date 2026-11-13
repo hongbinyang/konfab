@@ -1,6 +1,6 @@
 # Handoff brief
 
-Read this first when joining a new Konfab project room. It summarises where the project stands and how the team works, so a fresh room and fresh app conversations can continue without the old room's history. Updated on 2026-11-12 at main `5e564ea`. Newcomers: read the [README](../README.md), then the [user guide](user-guide.md), then this brief.
+Read this first when joining a new Konfab project room. It summarises where the project stands and how the team works, so a fresh room and fresh app conversations can continue without the old room's history. Updated on 2026-11-12 at main `5e564ea`. Newcomers: read the [README](../README.md), then the [user guide](user-guide.md), then this brief; developers continue with the [developer handoff](developer-handoff.md).
 
 ## How we work
 
