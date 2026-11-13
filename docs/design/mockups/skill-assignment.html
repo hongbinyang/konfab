@@ -414,10 +414,13 @@
       <button id="theme" title="Switch light/dark">Dark mode</button>
     </header>
     <p class="note">
-      Mockup only: nothing is saved. It shows the skill-based assignment flow
-      from the design (docs/design/skill-assignment.md). Try:
-      <b>Assign skills</b> on a card (add, reorder, switch Full/Summary, add the
-      long skill to see the limit), the <b>Update available</b> badge,
+      Mockup only: nothing is saved. It shows only the parts of the room page
+      that change; the conversation, status, formats and the rest of Konfab stay
+      as they are. An agent has two attributes: its <b>app</b> (the desktop app
+      that runs it) and its <b>skills</b> in each room. Try:
+      <b>+ Add agent</b> (app, name, skills), <b>Assign skills</b> on a card
+      (add, reorder, switch Full/Summary, add the long skill to see the limit),
+      the <b>Update available</b> badge,
       <b>⚙ Manage library → Update members…</b>, <b>Team</b>, and adding the
       public <i>webapp-testing</i> skill twice to see the local-changes choice.
     </p>
@@ -425,8 +428,62 @@
       <section class="timeline">
         <p>Room conversation…</p>
       </section>
-      <section class="members" id="members"></section>
+      <section class="members">
+        <div style="display: flex; align-items: center; gap: 8px">
+          <strong style="flex: 1">Agents</strong>
+          <button id="add-agent">+ Add agent</button>
+        </div>
+        <div id="members" style="display: grid; gap: 10px"></div>
+      </section>
     </main>
+
+    <!-- Add agent -->
+    <dialog id="addagent" class="small">
+      <div class="dhead">
+        <h2>Add agent</h2>
+        <button data-close>✕</button>
+      </div>
+      <div
+        class="dbody single"
+        style="display: grid; grid-template-columns: 1fr; gap: 10px"
+      >
+        <label
+          >Display name
+          <input id="new-name" type="search" placeholder="Reviewer"
+        /></label>
+        <label
+          >Agent ID <span class="small muted">(used for @mentions)</span>
+          <input id="new-id" type="search" placeholder="reviewer"
+        /></label>
+        <label
+          >App
+          <select id="new-app"></select>
+          <span class="small muted"
+            >The desktop app that runs this agent. Agents on one app share its
+            allowance.</span
+          >
+        </label>
+        <label class="inline"
+          ><input type="checkbox" id="new-in-room" checked /> Add to this
+          room</label
+        >
+        <div>
+          <strong>Skills in this room</strong>
+          <div id="new-skills" class="small muted">No skills yet.</div>
+          <button id="new-choose" style="margin-top: 6px">
+            Choose skills…
+          </button>
+        </div>
+      </div>
+      <div class="dfoot">
+        <span class="hint"
+          >Next: <b>Copy join prompt</b> on the new card, and paste it into a
+          new conversation in that app.</span
+        >
+        <button data-close>Cancel</button>
+        <button class="primary" id="new-add" disabled>Add agent</button>
+      </div>
+    </dialog>
 
     <!-- Assign skills -->
     <dialog id="assign">
@@ -653,10 +710,18 @@
         },
       ];
       const byId = Object.fromEntries(catalog.map((s) => [s.id, s]));
+      const MAX_PER_APP = 4;
+      // Apps with an installed connector can run agents. Others need a connector adapter first.
+      const apps = [
+        { id: "claude", name: "Claude", connected: true },
+        { id: "codex", name: "Codex", connected: true },
+        { id: "gemini", name: "Gemini", connected: false },
+        { id: "grok", name: "Grok", connected: false },
+      ];
       const members = [
         {
           id: "claude",
-          app: "Claude",
+          app: "claude",
           canEdit: true,
           instructions: "",
           pins: [
@@ -666,7 +731,7 @@
         },
         {
           id: "codex",
-          app: "Codex",
+          app: "codex",
           canEdit: false,
           instructions: "Push only after the lead approves.",
           pins: [{ id: "pm", rev: 1, delivery: "full" }],
@@ -695,14 +760,16 @@
         $("members").innerHTML = members
           .map((m) => {
             const update = m.pins.some((p) => byId[p.id].latest > p.rev);
+            const app = apps.find((a) => a.id === m.app);
             return `<div class="card">
-              <h3>${m.id} <span class="badge">${m.app}</span>${update ? `<button class="badge update" data-update="${m.id}">Update available</button>` : ""}</h3>
-              <div class="meta">Waiting for a turn</div>
-              <div class="skillline"><b>${esc(label(m))}</b></div>
+              <h3>${m.id} ${update ? `<button class="badge update" data-update="${m.id}">Update available</button>` : ""}</h3>
+              <div class="meta">${m.joined === false ? "Not joined yet" : "Waiting for a turn"}</div>
+              <div class="skillline"><span class="badge">App: ${app.name}</span> <span class="badge">Skills</span> <b>${esc(label(m))}</b></div>
               ${m.pins.map((p, i) => `<div class="small muted">${i + 1}. ${esc(byId[p.id].name)} rev ${p.rev} · ${p.delivery === "full" ? "full text" : "summary"}</div>`).join("")}
               ${m.instructions ? `<div class="small">“${esc(m.instructions)}”</div>` : ""}
               <div class="actions">
                 <button data-assign="${m.id}">Assign skills</button>
+                <button>Copy join prompt</button>
                 <label class="inline small"><input type="checkbox" ${m.canEdit ? "checked" : ""} data-edit="${m.id}" /> May edit files</label>
               </div>
             </div>`;
@@ -711,8 +778,8 @@
       }
 
       // ---------- Assign dialog ----------
-      function openAssign(memberId, focusUpdates) {
-        const m = members.find((x) => x.id === memberId);
+      function openAssign(memberId, focusUpdates, pending) {
+        const m = pending ?? members.find((x) => x.id === memberId);
         draft = {
           member: m,
           instructions: m.instructions,
@@ -809,7 +876,9 @@
             : "Applies from the agent's next turn.";
         $("confirm-assign").disabled = over;
         $("confirm-assign").textContent =
-          `Assign ${draft.pins.length} skill${draft.pins.length === 1 ? "" : "s"} to ${draft.member.id}`;
+          draft.member === newAgent
+            ? `Use these ${draft.pins.length} skill${draft.pins.length === 1 ? "" : "s"}`
+            : `Assign ${draft.pins.length} skill${draft.pins.length === 1 ? "" : "s"} to ${draft.member.id}`;
       }
       $("assign").addEventListener("click", (e) => {
         const t = e.target.closest("button, .result");
@@ -862,6 +931,11 @@
             delivery,
           }));
           draft.member.instructions = draft.instructions;
+          if (draft.member === newAgent) {
+            $("assign").close();
+            renderNewAgent();
+            return;
+          }
           for (const p of draft.pins)
             if (p.id === "webapp-testing") {
               byId[p.id].rev = 1;
@@ -991,6 +1065,92 @@
             Object.assign(m, structuredClone(before[v.slice(5)]));
         }
         $("teamdlg").close();
+        renderMembers();
+      });
+
+      // ---------- Add agent ----------
+      let newAgent = null;
+      let idEdited = false;
+      function renderNewAgent() {
+        const count = (id) => members.filter((m) => m.app === id).length;
+        const selected = $("new-app").value;
+        $("new-app").innerHTML = apps
+          .map((a) => {
+            const full = count(a.id) >= MAX_PER_APP;
+            const label = !a.connected
+              ? `${a.name} (needs a connector, later)`
+              : `${a.name} (${count(a.id)}/${MAX_PER_APP})`;
+            return `<option value="${a.id}" ${!a.connected || full ? "disabled" : ""}>${label}</option>`;
+          })
+          .join("");
+        if (selected) $("new-app").value = selected;
+        $("new-skills").innerHTML = newAgent.pins.length
+          ? newAgent.pins
+              .map(
+                (p, i) =>
+                  `${i + 1}. ${esc(byId[p.id].name)} rev ${p.rev ?? 1} · ${p.delivery === "full" ? "full text" : "summary"}`,
+              )
+              .join("<br />") +
+            (newAgent.instructions
+              ? `<br />“${esc(newAgent.instructions)}”`
+              : "")
+          : "No skills yet. You can add them later with Assign skills.";
+        $("new-choose").disabled = !$("new-in-room").checked;
+        $("new-add").disabled =
+          !$("new-name").value.trim() ||
+          !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test($("new-id").value) ||
+          members.some((m) => m.id === $("new-id").value);
+      }
+      $("add-agent").addEventListener("click", () => {
+        newAgent = {
+          id: "",
+          app: "",
+          pins: [],
+          instructions: "",
+          canEdit: false,
+        };
+        idEdited = false;
+        $("new-name").value = "";
+        $("new-id").value = "";
+        $("new-app").value = "";
+        renderNewAgent();
+        $("addagent").showModal();
+      });
+      $("new-name").addEventListener("input", (e) => {
+        if (!idEdited)
+          $("new-id").value = e.target.value
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+        renderNewAgent();
+      });
+      $("new-id").addEventListener("input", () => {
+        idEdited = true;
+        renderNewAgent();
+      });
+      $("new-in-room").addEventListener("change", renderNewAgent);
+      $("new-choose").addEventListener("click", () => {
+        newAgent.id = $("new-id").value || "new agent";
+        openAssign(null, false, newAgent);
+      });
+      $("new-add").addEventListener("click", () => {
+        if (!$("new-in-room").checked) {
+          $("addagent").close();
+          alert(
+            `${$("new-id").value} was added to ${$("new-app").selectedOptions[0].text.split(" (")[0]}. Add it to a room from that room's Members.`,
+          );
+          return;
+        }
+        members.push({
+          ...newAgent,
+          id: $("new-id").value,
+          app: $("new-app").value,
+          pins: $("new-in-room").checked
+            ? newAgent.pins.map((p) => ({ ...p, rev: p.rev ?? 1 }))
+            : [],
+          joined: false,
+        });
+        $("addagent").close();
         renderMembers();
       });
 
