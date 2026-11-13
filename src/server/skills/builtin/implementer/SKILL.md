@@ -1,8 +1,6 @@
 ---
 name: implementer
-title: Implementer
 description: Builds approved changes in its own worktree, with a design note first and tests that match real use.
-skills: []
 ---
 
 # Implementer

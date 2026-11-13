@@ -117,6 +117,9 @@ export function deleteRoomRows(
       "DELETE FROM handoffs WHERE source_message_id IN (SELECT id FROM messages WHERE room_id=?) OR turn_id IN (SELECT id FROM turns WHERE room_id=?)",
     ).run(id, id);
     db.prepare(
+      "DELETE FROM skill_usages WHERE (owner_type='assignment' AND owner_id LIKE ? || ':%') OR (owner_type='turn' AND owner_id IN (SELECT CAST(id AS TEXT) FROM turns WHERE room_id=?))",
+    ).run(String(id), id);
+    db.prepare(
       "DELETE FROM decision_versions WHERE decision_id IN (SELECT id FROM decisions WHERE room_id=?)",
     ).run(id);
     for (const table of ["observed_waits", "run_warning_state", "run_warnings"])
@@ -129,9 +132,8 @@ export function deleteRoomRows(
       "attachments",
       "decisions",
       "write_locks",
-      "room_member_roles",
+      "room_member_skills",
       "room_agent_names",
-      "converted_role_history",
       "agent_reports",
       "permission_requests",
       "events",

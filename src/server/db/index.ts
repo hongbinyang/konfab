@@ -1,8 +1,15 @@
 import Database from "better-sqlite3";
+import { randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { upgradeRolesToSkills } from "./skill-upgrade.js";
 
 export type Db = Database.Database;
 
-const MIGRATIONS: readonly string[] = [
+/** A migration is SQL, or a function for steps that SQL cannot express. Both run in one transaction. */
+type Migration = string | ((db: Db) => void);
+
+const MIGRATIONS: readonly Migration[] = [
   `
   CREATE TABLE agents (
     id TEXT PRIMARY KEY,
@@ -518,21 +525,78 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX room_agent_names_by_name ON room_agent_names(room_id, lower(name));
   ALTER TABLE messages ADD COLUMN mentioned TEXT;
   `,
+  (db) => upgradeRolesToSkills(db),
 ];
+
+/** The schema version at which roles were replaced by skill assignments. */
+export const SKILL_UPGRADE_VERSION = MIGRATIONS.length;
+
+/** The backup written before the most recent role-to-skill upgrade attempt in this process. */
+export let lastUpgradeBackup: string | null = null;
 
 export function openDatabase(path: string): Db {
   const db = new Database(path);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
-  migrate(db);
+  const current = db.pragma("user_version", { simple: true }) as number;
+  let guard: number | undefined;
+  if (path !== ":memory:" && current > 0 && current < SKILL_UPGRADE_VERSION) {
+    const backup = backupBeforeUpgrade(db, path, current);
+    lastUpgradeBackup = backup.path;
+    guard = backup.dataVersion;
+  }
+  try {
+    migrate(db, MIGRATIONS.length, guard);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   db.prepare("DELETE FROM bridge_receipts WHERE created_at < ?").run(
     Date.now() - 24 * 60 * 60 * 1000,
   );
   return db;
 }
 
-export function migrate(db: Db, target = MIGRATIONS.length): void {
+export class ConcurrentUseError extends Error {}
+
+/**
+ * Writes a consistent copy of the database before the role-to-skill upgrade.
+ * VACUUM INTO reads through SQLite's transaction view, so committed data still
+ * in the WAL file is included. Returns the backup path and the connection's
+ * data_version, which changes if another connection commits afterwards.
+ */
+export function backupBeforeUpgrade(
+  db: Db,
+  path: string,
+  from: number,
+): { path: string; dataVersion: number } {
+  const dir = join(dirname(path), "backups");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const dataVersion = db.pragma("data_version", { simple: true }) as number;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const name = `konfab-pre-skills-v${from}-${stamp}-${randomBytes(4).toString("hex")}.db`;
+  const temporary = join(dir, `.${name}.partial`);
+  const target = join(dir, name);
+  try {
+    db.prepare("VACUUM INTO ?").run(temporary);
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, target);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw new Error(
+      `Konfab could not back up its database before upgrading, so it did not upgrade: ${(error as Error).message}`,
+      { cause: error },
+    );
+  }
+  return { path: target, dataVersion };
+}
+
+export function migrate(
+  db: Db,
+  target = MIGRATIONS.length,
+  guard?: number,
+): void {
   const current = db.pragma("user_version", { simple: true }) as number;
   if (current >= target) return;
 
@@ -541,16 +605,29 @@ export function migrate(db: Db, target = MIGRATIONS.length): void {
   db.pragma("foreign_keys = OFF");
   try {
     for (let version = current; version < target; version += 1) {
-      const sql = MIGRATIONS[version];
-      if (sql === undefined) continue;
-      db.transaction(() => {
-        db.exec(sql);
+      const step = MIGRATIONS[version];
+      if (step === undefined) continue;
+      const run = db.transaction(() => {
+        if (typeof step === "string") db.exec(step);
+        else {
+          if (
+            guard !== undefined &&
+            (db.pragma("data_version", { simple: true }) as number) !== guard
+          )
+            throw new ConcurrentUseError(
+              "Another process is using the Konfab database; stop it and start again.",
+            );
+          step(db);
+        }
         const violations = db.pragma("foreign_key_check") as unknown[];
         if (violations.length > 0) {
           throw new Error(`Migration ${version + 1} broke foreign keys`);
         }
         db.pragma(`user_version = ${version + 1}`);
-      })();
+      });
+      // A function step takes the write lock first, so nothing can write between the check and the commit.
+      if (typeof step === "string") run();
+      else run.immediate();
     }
   } finally {
     db.pragma("foreign_keys = ON");

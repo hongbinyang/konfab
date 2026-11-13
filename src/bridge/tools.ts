@@ -188,6 +188,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "/agent/wait-finished",
       "/agent/history",
       "/agent/read-role",
+      "/agent/read-assignment",
       "/agent/read-role-file",
       "/agent/read-skill-file",
       "/agent/decisions/read",
@@ -282,9 +283,27 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   );
 
   server.registerTool(
+    "read_assignment",
+    {
+      description:
+        "Read your assignment in this room: your room instructions and skills, in order.",
+      inputSchema: { session_id: z.string() },
+    },
+    async (body, extra) => {
+      try {
+        return asToolResult(
+          await call("/agent/read-assignment", body, extra.signal),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+  server.registerTool(
     "read_role",
     {
-      description: "Read your currently assigned role context.",
+      description:
+        "Deprecated: use read_assignment. Reads your assignment (room instructions and skills); kept for conversations that joined before roles became skills.",
       inputSchema: { session_id: z.string() },
     },
     async (body, extra) => {
@@ -299,7 +318,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     "read_role_file",
     {
       description:
-        "Read a bounded chunk of a file from your assigned role revision.",
+        "Deprecated: reads a file of a role that was converted to a skill. Use read_skill_file for skills.",
       inputSchema: {
         session_id: z.string(),
         role_revision_id: z.string().uuid(),
@@ -322,7 +341,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     "read_skill_file",
     {
       description:
-        "Read a bounded chunk from a skill pinned by your assigned role.",
+        "Read a bounded chunk of a file from one of your assigned skills.",
       inputSchema: {
         session_id: z.string(),
         skill_revision_id: z.string().uuid(),

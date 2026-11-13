@@ -379,26 +379,40 @@ describe("Phase 1 behavior", () => {
       expect(rules).toContain("follow the lead");
     });
 
-    it("sends the room brief and the agent's own role", () => {
-      service.updateRoom(ROOM, { brief: "Ship the parser by Friday." });
-      service.setMemberRole(ROOM, "claude", {
-        role: "Review every change for bugs.",
-        can_edit: false,
+    const setInstructions = (
+      room: string,
+      agent: string,
+      instructions: string,
+      canEdit: boolean,
+    ) => {
+      service.setMemberEdit(room, agent, canEdit);
+      service.setAssignment(room, agent, {
+        base_revision: service.memberAssignment(room, agent).revision,
+        instructions,
+        pins: [],
       });
-      service.setMemberRole(ROOM, "codex", {
-        role: "Implement the agreed changes.",
-        can_edit: true,
-      });
+    };
 
-      const claudeRules = turnFor("claude").rules;
-      expect(claudeRules).toContain("Ship the parser by Friday.");
-      expect(claudeRules).toContain("Review every change for bugs.");
-      expect(claudeRules).not.toContain("Implement the agreed changes.");
-      expect(claudeRules).toContain("Only Codex may edit");
+    it("sends the room brief and the agent's own instructions", () => {
+      service.updateRoom(ROOM, { brief: "Ship the parser by Friday." });
+      setInstructions(ROOM, "claude", "Review every change for bugs.", false);
+      setInstructions(ROOM, "codex", "Implement the agreed changes.", true);
+
+      const turn = turnFor("claude");
+      expect(turn.rules).toContain("Ship the parser by Friday.");
+      expect(turn.rules).toContain("Follow your assignment");
+      expect(turn.assignment).toMatchObject({
+        changed: true,
+        instructions: "Review every change for bugs.",
+      });
+      expect(JSON.stringify(turn)).not.toContain(
+        "Implement the agreed changes.",
+      );
+      expect(turn.rules).toContain("Only Codex may edit");
     });
 
     it("tells the editing agent that it may edit", () => {
-      service.setMemberRole(ROOM, "codex", { role: "", can_edit: true });
+      service.setMemberEdit(ROOM, "codex", true);
       expect(turnFor("codex").rules).toContain("You may edit");
     });
 
@@ -417,68 +431,62 @@ describe("Phase 1 behavior", () => {
 
     it("applies changes on the next turn, without rejoining", () => {
       const active = turnFor("claude");
-      service.setMemberRole(ROOM, "claude", {
-        role: "New role",
-        can_edit: false,
-      });
+      setInstructions(ROOM, "claude", "New role", false);
       const roomState = service.roomState(ROOM);
       expect(roomState.agents[0]).toMatchObject({
-        role: "New role",
+        assignment: { instructions: "New role" },
         can_edit: false,
       });
       expect(
-        expectTurn(service.poll("claude", claude, true)).rules,
+        JSON.stringify(expectTurn(service.poll("claude", claude, true))),
       ).not.toContain("New role");
       service.passTurn("claude", claude, active.turn_id);
       service.postUserMessage(ROOM, "@claude next");
       const next = expectTurn(service.poll("claude", claude, true));
-      expect(next.rules).toContain("New role");
+      expect(next.assignment).toMatchObject({
+        instructions: "New role",
+        notice: expect.stringContaining("You have been given an assignment"),
+      });
     });
 
-    it("includes the brief and role when an agent joins", () => {
+    it("includes the brief and instructions when an agent joins", () => {
       service.updateRoom(ROOM, { brief: "Room goals" });
-      service.setMemberRole(ROOM, "claude", {
-        role: "Critic",
-        can_edit: false,
-      });
+      setInstructions(ROOM, "claude", "Critic", false);
       const joined = service.join("claude", ROOM);
       expect(joined.rules).toContain("Room goals");
-      expect(joined.rules).toContain("Critic");
+      expect(joined.assignment).toMatchObject({ instructions: "Critic" });
     });
 
-    it("keeps roles per room", () => {
+    it("keeps assignments per room", () => {
       service.createRoom("other", "", ["claude"]);
-      service.setMemberRole(ROOM, "claude", {
-        role: "Reviewer here",
-        can_edit: false,
-      });
-      expect(service.roomState("other").agents[0]?.role).toBe("");
+      setInstructions(ROOM, "claude", "Reviewer here", false);
+      expect(
+        service.roomState("other").agents[0]?.assignment.instructions,
+      ).toBe("");
     });
 
-    it("clears a role when the agent leaves the room", () => {
-      service.setMemberRole(ROOM, "claude", {
-        role: "Reviewer",
-        can_edit: true,
-      });
+    it("clears an assignment when the agent leaves the room", () => {
+      setInstructions(ROOM, "claude", "Reviewer", true);
       service.setMembers(ROOM, ["codex"]);
       service.setMembers(ROOM, ["codex", "claude"]);
       expect(service.roomState(ROOM).agents[1]).toMatchObject({
-        role: "",
+        assignment: { instructions: "", skill_count: 0 },
         can_edit: false,
       });
     });
 
     it("rejects unknown members and overly long text", () => {
       service.createRoom("other", "", []);
+      expect(() => service.setMemberEdit("other", "claude", false)).toThrow(
+        "not in that room",
+      );
       expect(() =>
-        service.setMemberRole("other", "claude", { role: "", can_edit: false }),
-      ).toThrow("not in that room");
-      expect(() =>
-        service.setMemberRole(ROOM, "claude", {
-          role: "x".repeat(2001),
-          can_edit: false,
+        service.setAssignment(ROOM, "claude", {
+          base_revision: 0,
+          instructions: "x".repeat(6001),
+          pins: [],
         }),
-      ).toThrow("2000");
+      ).toThrow("6000");
       expect(() =>
         service.updateRoom(ROOM, { brief: "x".repeat(4001) }),
       ).toThrow("4000");
@@ -967,7 +975,7 @@ describe("database migration", () => {
         .run();
       old.close();
       const upgraded = openDatabase(file);
-      expect(upgraded.pragma("user_version", { simple: true })).toBe(32);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(33);
       expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
         name: "existing",
         brief: "kept",
@@ -1010,7 +1018,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(32);
+      expect(db.pragma("user_version", { simple: true })).toBe(33);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });

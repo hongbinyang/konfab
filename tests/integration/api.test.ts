@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 import { createHash } from "node:crypto";
 import {
+  mkdirSync,
   mkdtempSync,
   rmSync,
   existsSync,
@@ -16,7 +17,6 @@ import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { SkillLibrary } from "../../src/server/domain/skills.js";
 import { SkillSources } from "../../src/server/domain/skill-sources.js";
 import { KonfabService } from "../../src/server/domain/service.js";
-import { RoleLibrary } from "../../src/server/domain/roles.js";
 
 const PORT = 18788;
 const HOST = `127.0.0.1:${PORT}`;
@@ -57,16 +57,12 @@ describe("page API", () => {
     sources = new SkillSources(db, {
       fetch: (input, init) => sourceFetch(input, init),
     });
-    const roles = new RoleLibrary(db);
-    roles.seedBuiltins("src/server/roles/builtin");
-    db.prepare(
-      "INSERT INTO role_libraries(id,kind,root_path) VALUES ('personal','personal',?)",
-    ).run(join(attachmentDir, "roles"));
+    const skills = new SkillLibrary(db);
+    skills.seedBuiltins("src/server/skills/builtin");
     app = await buildApp({
       service,
-      skills: new SkillLibrary(db),
+      skills,
       sources,
-      roles,
       skillsHome: attachmentDir,
       port: PORT,
     });
@@ -149,13 +145,8 @@ describe("page API", () => {
 
   it("returns configured picker locations without creating skill directories", async () => {
     const room = service.createRoom("picker-locations", "", ["claude"]);
-    const customRoles = join(attachmentDir, "custom-role-library");
-    db.prepare("UPDATE role_libraries SET root_path=? WHERE id='personal'").run(
-      customRoles,
-    );
     const path = `/api/rooms/${room.id}/picker-locations`;
     const initial = (await call("GET", path)).json();
-    expect(initial.roles).toBe(customRoles);
     expect(initial.skills).toBe(join(attachmentDir, "skills"));
     expect(initial.project).toBeNull();
     expect(initial.sources).toEqual(
@@ -257,14 +248,8 @@ describe("page API", () => {
     ).toBe(201);
   });
 
-  it("reports actionable field errors for role and skill requests", async () => {
+  it("reports actionable field errors for assignment and skill requests", async () => {
     for (const [url, payload, field] of [
-      ["/api/roles", { name: "valid", title: "", description: "ok" }, "title"],
-      [
-        "/api/roles/convert-custom",
-        { groups: [{ name: "valid" }] },
-        "groups.0.title",
-      ],
       [
         "/api/library/skills",
         { scope: "personal", name: "valid", description: "" },
@@ -279,11 +264,11 @@ describe("page API", () => {
     }
     const assignment = await call(
       "PUT",
-      "/api/rooms/1/members/codex/role-pack",
-      {},
+      "/api/rooms/1/members/codex/assignment",
+      { pins: [] },
     );
     expect(assignment.statusCode).toBe(400);
-    expect(assignment.json().message).toContain("role_id");
+    expect(assignment.json().message).toContain("base_revision");
     expect(assignment.json().message).not.toBe("Invalid request");
     const badOwner = await call("POST", "/api/library/sources", {
       owner: "a b",
@@ -292,12 +277,6 @@ describe("page API", () => {
     });
     expect(badOwner.json().message).toContain("Owner");
     expect(badOwner.json().message).toContain("no spaces");
-    const metadata = await call("POST", "/api/roles", {
-      name: "valid",
-      title: "  ",
-      description: "ok",
-    });
-    expect(metadata.json().message).toContain("Title");
   });
 
   it("discovers, previews and assigns a pinned public skill without persisting the search", async () => {
@@ -398,20 +377,19 @@ describe("page API", () => {
         }
       ).count,
     ).toBe(before.count);
-    const stalePublic = await call(
-      "POST",
-      `/api/rooms/${room.id}/members/codex/role-from-public`,
-      {
+    const url = `/api/rooms/${room.id}/members/codex/assignment`;
+    const publicPin = {
+      public: {
         source_id: result.source_id,
         commit,
         path: result.path,
         preview_hash: preview.preview_hash,
-        role_name: "public-sample",
-        title: "Public sample",
-        description: "Invoice workflow",
-        base_revision: 99,
       },
-    );
+    };
+    const stalePublic = await call("PUT", url, {
+      base_revision: 99,
+      pins: [publicPin],
+    });
     expect(stalePublic.statusCode).toBe(409);
     expect(
       (
@@ -423,43 +401,52 @@ describe("page API", () => {
     expect(existsSync(join(attachmentDir, "skills", "public-sample"))).toBe(
       false,
     );
-    const assigned = await call(
-      "POST",
-      `/api/rooms/${room.id}/members/codex/role-from-public`,
-      {
-        source_id: result.source_id,
-        commit,
-        path: result.path,
-        preview_hash: preview.preview_hash,
-        role_name: "public-sample",
-        title: "Public sample",
-        description: "Invoice workflow",
-        base_revision: 0,
-      },
-    );
+    const assigned = await call("PUT", url, {
+      base_revision: 0,
+      pins: [publicPin],
+    });
     expect(assigned.statusCode).toBe(200);
+    expect(assigned.json().skills).toEqual([
+      expect.objectContaining({
+        name: "public-sample",
+        reviewed: true,
+        delivery: "full",
+      }),
+    ]);
+    expect(
+      existsSync(join(attachmentDir, "skills", "public-sample", "SKILL.md")),
+    ).toBe(true);
+    // Adding the same commit again reuses the local copy instead of failing on its name.
+    const again = await call("PUT", url, {
+      base_revision: 1,
+      pins: [publicPin],
+    });
+    expect(again.statusCode).toBe(200);
     expect(
       (
-        await call("GET", `/api/rooms/${room.id}/members/codex/role-preview`)
-      ).json().role.title,
-    ).toBe("Public sample");
+        db.prepare("SELECT COUNT(*) AS count FROM skills").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(before.count + 1);
   });
 
-  it("adds an agent with its app and room role in one step", async () => {
+  it("adds an agent with its app and room skills in one step", async () => {
     const room = service.createRoom("add-agent", "", ["codex"]);
-    const role = (await call("GET", "/api/roles")).json().roles[0] as {
-      id: string;
-      revision_id: string;
-      title: string;
-    };
-    const added = await call("POST", "/api/agents", {
+    const builtin = (await call("GET", "/api/library/builtin")).json()
+      .skills as Array<{ id: string; current_revision_id: string }>;
+    const skill = builtin.find((item) => item.id === "builtin:reviewer")!;
+    const pins = [
+      { skill_id: skill.id, revision_id: skill.current_revision_id },
+    ];
+    const unconfirmed = await call("POST", "/api/agents", {
       id: "reviewer",
       display_name: "Reviewer",
       app_id: "claude",
       room_id: room.id,
-      role: { role_id: role.id, role_revision_id: role.revision_id },
+      assignment: { pins },
     });
-    expect(added.statusCode).toBe(400);
+    expect(unconfirmed.statusCode).toBe(400);
     expect(
       service.overview().agents.some((item) => item.id === "reviewer"),
     ).toBe(false);
@@ -468,33 +455,33 @@ describe("page API", () => {
       display_name: "Reviewer",
       app_id: "claude",
       room_id: room.id,
-      role: {
-        role_id: role.id,
-        role_revision_id: role.revision_id,
-        confirmed: true,
-      },
+      assignment: { pins, confirmed: true },
     });
     expect(confirmed.statusCode).toBe(201);
     const agent = service
       .roomState(room.id)
       .agents.find((item) => item.id === "reviewer");
-    expect(agent?.role_pack_label).toContain(role.title);
+    expect(agent?.assignment.label).toBe("reviewer rev 1");
     expect(
       service.overview().agents.find((item) => item.id === "reviewer")?.app_id,
     ).toBe("claude");
 
-    const badRole = await call("POST", "/api/agents", {
+    const badSkill = await call("POST", "/api/agents", {
       id: "tester",
       display_name: "Tester",
       app_id: "codex",
       room_id: room.id,
-      role: {
-        role_id: role.id,
-        role_revision_id: "00000000-0000-4000-8000-000000000000",
+      assignment: {
+        pins: [
+          {
+            skill_id: skill.id,
+            revision_id: "00000000-0000-4000-8000-000000000000",
+          },
+        ],
         confirmed: true,
       },
     });
-    expect(badRole.statusCode).toBe(404);
+    expect(badSkill.statusCode).toBe(409);
     expect(service.overview().agents.some((item) => item.id === "tester")).toBe(
       false,
     );
@@ -503,11 +490,7 @@ describe("page API", () => {
       id: "tester",
       display_name: "Tester",
       app_id: "codex",
-      role: {
-        role_id: role.id,
-        role_revision_id: role.revision_id,
-        confirmed: true,
-      },
+      assignment: { pins, confirmed: true },
     });
     expect(noRoom.statusCode).toBe(400);
 
@@ -522,92 +505,97 @@ describe("page API", () => {
     ).toBe(false);
   });
 
-  it("assigns a pinned built-in role and serves its preview", async () => {
-    const room = service.createRoom("role-test", "", ["codex"]);
-    const list = (await call("GET", "/api/roles")).json().roles as Array<{
-      id: string;
-      revision_id: string;
-    }>;
-    const role = list[0]!;
-    expect(
-      (
-        await call("PUT", `/api/rooms/${room.id}/members/codex/role-pack`, {
-          role_id: role.id,
-          role_revision_id: role.revision_id,
-          notes: "Example notes",
-        })
-      ).statusCode,
-    ).toBe(200);
-    const preview = await call(
-      "GET",
-      `/api/rooms/${room.id}/members/codex/role-preview`,
-    );
-    expect(preview.json().role).toEqual(
-      expect.objectContaining({
-        notes: "Example notes",
-        revision_id: role.revision_id,
-      }),
-    );
-    expect(
-      (
-        await call("PUT", `/api/rooms/${room.id}/members/codex/role-pack`, {
-          role_id: role.id,
-          role_revision_id: role.revision_id,
-          notes: "stale",
-          base_revision: 4,
-        })
-      ).statusCode,
-    ).toBe(409);
-  });
-
-  it("converts and restores a custom member role through authenticated routes", async () => {
-    const room = service.createRoom("convert-test", "", ["codex"]);
-    service.setMemberRole(room.id, "codex", {
-      role: "Review the work",
-      can_edit: true,
+  it("assigns several skills in order, measures them, and rejects stale or oversized assignments", async () => {
+    const room = service.createRoom("assign-test", "", ["codex"]);
+    const builtin = (await call("GET", "/api/library/builtin")).json()
+      .skills as Array<{ id: string; current_revision_id: string }>;
+    const pin = (id: string, delivery = "full") => {
+      const skill = builtin.find((item) => item.id === id)!;
+      return {
+        skill_id: skill.id,
+        revision_id: skill.current_revision_id,
+        delivery,
+      };
+    };
+    const url = `/api/rooms/${room.id}/members/codex/assignment`;
+    const pins = [pin("builtin:reviewer"), pin("builtin:qa", "summary")];
+    const size = await call("POST", `${url}/size`, {
+      instructions: "Example notes",
+      pins,
     });
-    const preview = await call("GET", "/api/roles/custom-assignments");
-    expect(preview.json().assignments).toEqual([
-      expect.objectContaining({
-        room_id: room.id,
-        agent_id: "codex",
-        text: "Review the work",
-        revision: 1,
-      }),
-    ]);
-    const converted = await call("POST", "/api/roles/convert-custom", {
-      groups: [
-        {
-          name: "review-work",
-          title: "Review work",
-          description: "Review the work",
-          text: "Review the work",
-          assign: true,
-          members: [{ room_id: room.id, agent_id: "codex", revision: 1 }],
-        },
+    expect(size.json().limit).toBe(64 * 1024);
+    expect(size.json().bytes).toBeGreaterThan(100);
+    const assigned = await call("PUT", url, {
+      base_revision: 0,
+      instructions: "Example notes",
+      pins,
+    });
+    expect(assigned.statusCode).toBe(200);
+    expect(assigned.json()).toMatchObject({
+      revision: 1,
+      instructions: "Example notes",
+      skills: [
+        expect.objectContaining({ name: "reviewer", position: 1 }),
+        expect.objectContaining({
+          name: "qa",
+          position: 2,
+          delivery: "summary",
+        }),
       ],
     });
-    expect(converted.statusCode).toBe(200);
-    expect(converted.json().pending).toEqual([]);
     expect(
-      (
-        await call(
-          "POST",
-          `/api/rooms/${room.id}/members/codex/revert-conversion`,
-          { base_revision: 1 },
-        )
-      ).statusCode,
+      (await call("PUT", url, { base_revision: 4, pins: [] })).statusCode,
     ).toBe(409);
-    expect(
-      (
-        await call(
-          "POST",
-          `/api/rooms/${room.id}/members/codex/revert-conversion`,
-          { base_revision: 2 },
-        )
-      ).statusCode,
-    ).toBe(200);
-    expect(service.roomState(room.id).agents[0]?.role).toBe("Review the work");
+    const duplicate = await call("PUT", url, {
+      base_revision: 1,
+      pins: [pin("builtin:qa"), pin("builtin:qa")],
+    });
+    expect(duplicate.statusCode).toBe(400);
+    // A long skill fits only as a summary; the full text would exceed 64 KiB.
+    const library = new SkillLibrary(db);
+    const libraryId = library.registerLibrary(
+      "personal",
+      (() => {
+        const root = join(attachmentDir, "skills");
+        mkdirSync(root, { recursive: true });
+        return root;
+      })(),
+    );
+    const longId = library.create(libraryId, "long-skill", "Long skill");
+    const longDetail = library.detail(longId);
+    library.writeFile(
+      longId,
+      "SKILL.md",
+      Buffer.from(
+        `---\nname: long-skill\ndescription: Long skill\n---\n${"x".repeat(70 * 1024)}`,
+      ),
+      longDetail.current_revision_id,
+      longDetail.draft_hash!,
+    );
+    const longRevision = library.save(
+      longId,
+      longDetail.current_revision_id,
+      library.detail(longId).draft_hash!,
+    );
+    const long = { skill_id: longId, revision_id: longRevision };
+    const oversized = await call("PUT", url, {
+      base_revision: 1,
+      pins: [long],
+      review: [longRevision],
+    });
+    expect(oversized.statusCode).toBe(413);
+    expect(oversized.json().message).toContain("Send summary");
+    expect(service.roomState(room.id).agents[0]?.assignment.revision).toBe(1);
+    const summary = await call("PUT", url, {
+      base_revision: 1,
+      pins: [{ ...long, delivery: "summary" }],
+      review: [longRevision],
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(service.roomState(room.id).agents[0]?.assignment).toMatchObject({
+      label: "long-skill rev 2",
+      revision: 2,
+    });
   });
 
   afterEach(async () => {
@@ -666,8 +654,8 @@ describe("page API", () => {
     expect(response.json().code).toBe("invalid_request");
   });
 
-  it("assigns a reviewed local skill atomically and rejects stale or unreviewed choices", async () => {
-    const room = service.createRoom("picker", "", ["codex"]);
+  it("assigns a local skill only with review, and updates selected members to a new revision", async () => {
+    const room = service.createRoom("picker", "", ["claude", "codex"]);
     const created = await call("POST", "/api/library/skills", {
       scope: "personal",
       name: "review-change",
@@ -676,101 +664,97 @@ describe("page API", () => {
     const skillId = created.json().id as string;
     const detail = (await call("GET", `/api/library/skills/${skillId}`)).json();
     const revision = detail.current_revision_id as string;
-    const url = `/api/rooms/${room.id}/members/codex/role-from-skill`;
-    const payload = {
-      scope: "personal",
-      skill_id: skillId,
-      skill_revision: revision,
-      name: "review-role",
-      title: "Review role",
-      description: "Review changes",
-      instructions: "Review carefully.",
+    const url = (agent: string) =>
+      `/api/rooms/${room.id}/members/${agent}/assignment`;
+    const pins = [{ skill_id: skillId, revision_id: revision }];
+    const unreviewed = await call("PUT", url("codex"), {
       base_revision: 0,
-    };
-    expect((await call("POST", url, payload)).statusCode).toBe(409);
-    expect(
-      (await call("GET", "/api/roles"))
-        .json()
-        .roles.some((role: { title: string }) => role.title === "Review role"),
-    ).toBe(false);
-    const stale = await call("POST", url, {
-      ...payload,
-      review: true,
+      pins,
+    });
+    expect(unreviewed.statusCode).toBe(409);
+    expect(unreviewed.json().message).toContain("Review");
+    const stale = await call("PUT", url("codex"), {
       base_revision: 99,
+      pins,
+      review: [revision],
     });
     expect(stale.statusCode).toBe(409);
     expect(
       (await call("GET", `/api/library/skills/${skillId}`)).json().reviewed_at,
     ).toBeNull();
+    for (const agent of ["claude", "codex"])
+      expect(
+        (
+          await call("PUT", url(agent), {
+            base_revision: 0,
+            pins,
+            review: [revision],
+          })
+        ).statusCode,
+      ).toBe(200);
+    // Save a new revision, then update only one member to it.
+    const library = new SkillLibrary(db);
+    const folder = join(attachmentDir, "skills", "review-change");
+    library.writeFile(
+      skillId,
+      "SKILL.md",
+      Buffer.from("---\nname: review-change\ndescription: Review v2\n---\nv2"),
+      revision,
+      library.detail(skillId).draft_hash!,
+    );
+    const second = library.save(
+      skillId,
+      revision,
+      library.detail(skillId).draft_hash!,
+    );
+    expect(existsSync(folder)).toBe(true);
+    const usages = (
+      await call("GET", `/api/library/skills/${skillId}/usages`)
+    ).json().usages as Array<{ agent_id: string; base_revision: number }>;
+    expect(usages.map((usage) => usage.agent_id).sort()).toEqual([
+      "claude",
+      "codex",
+    ]);
     expect(
-      (await call("GET", "/api/roles"))
-        .json()
-        .roles.some((role: { title: string }) => role.title === "Review role"),
-    ).toBe(false);
-    const preflight = `/api/rooms/${room.id}/members/codex/picker-preflight`;
+      service
+        .roomState(room.id)
+        .agents.every((agent) => agent.assignment.update_available),
+    ).toBe(true);
+    const codex = usages.find((usage) => usage.agent_id === "codex")!;
+    const update = `/api/library/skills/${skillId}/update-assignments`;
     expect(
       (
-        await call("POST", preflight, {
-          scope: "personal",
-          role_name: "review-role",
-          skill_name: "review-change",
+        await call("POST", update, {
+          revision_id: second,
+          targets: [{ room_id: room.id, agent_id: "codex", base_revision: 9 }],
+          review: true,
         })
       ).statusCode,
     ).toBe(409);
-    const assigned = await call("POST", url, { ...payload, review: true });
-    expect(assigned.statusCode).toBe(200);
-    expect(assigned.json().pending).toBe(false);
-    const preview = (
-      await call("GET", `/api/rooms/${room.id}/members/codex/role-preview`)
-    ).json();
-    expect(preview.role.title).toBe("Review role");
-    expect(preview.role.skills).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ skill_revision_id: revision }),
-      ]),
-    );
-  });
-
-  it("customizes and assigns a skill atomically, leaving no copy on stale assignment", async () => {
-    const room = service.createRoom("custom-picker", "", ["codex"]);
-    const created = await call("POST", "/api/library/skills", {
-      scope: "personal",
-      name: "original",
-      description: "Original skill",
+    expect(
+      (
+        await call("POST", update, {
+          revision_id: second,
+          targets: [
+            {
+              room_id: room.id,
+              agent_id: "codex",
+              base_revision: codex.base_revision,
+            },
+          ],
+          review: true,
+        })
+      ).statusCode,
+    ).toBe(200);
+    const agents = service.roomState(room.id).agents;
+    expect(agents.find((a) => a.id === "codex")?.assignment).toMatchObject({
+      label: "review-change rev 2",
+      update_available: false,
     });
-    const id = created.json().id as string;
-    const revision = (await call("GET", `/api/library/skills/${id}`)).json()
-      .current_revision_id;
-    const url = `/api/rooms/${room.id}/members/codex/customize-and-assign`;
-    const payload = {
-      source_scope: "personal",
-      scope: "personal",
-      skill_id: id,
-      skill_revision: revision,
-      copy_name: "original-copy",
-      manifest:
-        "---\nname: original-copy\ndescription: Edited skill\n---\nEdited",
-      role_name: "edited-role",
-      title: "Edited role",
-      description: "Edited skill",
-      instructions: "Follow the skill",
-      base_revision: 9,
-    };
-    expect((await call("POST", url, payload)).statusCode).toBe(409);
-    expect(
-      (await call("GET", "/api/library?scope=personal")).json().skills,
-    ).toHaveLength(1);
-    expect(
-      (await call("GET", "/api/roles"))
-        .json()
-        .roles.some((role: { name: string }) => role.name === "edited-role"),
-    ).toBe(false);
-    const success = await call("POST", url, { ...payload, base_revision: 0 });
-    expect(success.statusCode).toBe(200);
-    expect(success.json().pending).toBe(false);
-    expect(
-      (await call("GET", "/api/library?scope=personal")).json().skills,
-    ).toHaveLength(2);
+    expect(agents.find((a) => a.id === "claude")?.assignment).toMatchObject({
+      label: "review-change rev 1",
+      update_available: true,
+    });
   });
 
   it("creates and lists a local skill through authenticated page routes", async () => {
@@ -1025,32 +1009,27 @@ describe("page API", () => {
     });
   });
 
-  it("updates the room brief and an agent's role", async () => {
+  it("updates the room brief and a member's edit permission", async () => {
     const { id } = service.createRoom("team", "", ["claude", "codex"]);
     const brief = await call("PATCH", `/api/rooms/${id}`, {
       brief: "Ship it",
     });
     expect(brief.json().room.brief).toBe("Ship it");
 
-    const role = await call("PUT", `/api/rooms/${id}/members/codex`, {
-      role: "Implementer",
+    const edit = await call("PUT", `/api/rooms/${id}/members/codex`, {
       can_edit: true,
     });
-    expect(role.statusCode).toBe(200);
-    expect(role.json().agents[1]).toMatchObject({
+    expect(edit.statusCode).toBe(200);
+    expect(edit.json().agents[1]).toMatchObject({
       id: "codex",
-      role: "Implementer",
       can_edit: true,
     });
 
     const missing = await call("PUT", `/api/rooms/${id}/members/ghost`, {
-      role: "",
       can_edit: false,
     });
     expect(missing.statusCode).toBe(403);
-    const invalid = await call("PUT", `/api/rooms/${id}/members/codex`, {
-      role: "x",
-    });
+    const invalid = await call("PUT", `/api/rooms/${id}/members/codex`, {});
     expect(invalid.statusCode).toBe(400);
   });
 

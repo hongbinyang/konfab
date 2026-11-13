@@ -1,8 +1,6 @@
 ---
 name: qa
-title: QA
 description: Tests features end to end the way users will, finds regressions, and reports reproducible results.
-skills: []
 ---
 
 # QA

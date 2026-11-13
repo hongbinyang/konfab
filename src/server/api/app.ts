@@ -12,10 +12,8 @@ import { join, resolve } from "node:path";
 import { z, ZodError } from "zod";
 import { parseDocument } from "yaml";
 import { SkillError } from "../domain/skill-error.js";
-import { skillMetadata } from "../domain/skill-files.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
-import type { RoleLibrary } from "../domain/roles.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 
 const MAX_SERVER_WAIT_SECONDS = 30;
@@ -100,11 +98,6 @@ const memberParams = z.object({
   id: z.coerce.number().int().positive(),
   agentId: z.string().min(1),
 });
-const roleBody = z.object({
-  role: z.string(),
-  can_edit: z.boolean(),
-  base_role_revision: z.number().int().nonnegative().optional(),
-});
 const membersBody = z.object({ members: z.array(z.string()) });
 const pauseBody = z.object({ paused: z.boolean() });
 const userMessageBody = z.object({
@@ -120,7 +113,6 @@ export interface AppOptions {
   service: KonfabService;
   skills?: SkillLibrary;
   sources?: SkillSources;
-  roles?: RoleLibrary;
   skillsHome?: string;
   rolePicker?: boolean;
   port: number;
@@ -338,6 +330,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/agent/history",
     "/agent/decisions/read",
     "/agent/read-role",
+    "/agent/read-assignment",
     "/agent/read-role-file",
     "/agent/read-skill-file",
   ]);
@@ -563,7 +556,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.post("/agent/read-role", async (request) => {
     const agentId = requireAgent(request);
     const body = z.object(session).parse(request.body);
-    return { role: service.readAssignedRole(agentId, body.session_id) };
+    return service.readAssignedRole(agentId, body.session_id);
+  });
+  app.post("/agent/read-assignment", async (request) => {
+    const agentId = requireAgent(request);
+    const body = z.object(session).parse(request.body);
+    return { assignment: service.readAssignment(agentId, body.session_id) };
   });
   app.post("/agent/read-role-file", async (request) => {
     const agentId = requireAgent(request);
@@ -1149,17 +1147,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     });
   });
 
-  const roleService = () => {
-    if (!options.roles)
-      throw new KonfabError("unavailable", 503, "Roles unavailable");
-    return options.roles;
-  };
   app.get("/api/rooms/:id/picker-locations", async (request) => {
     const { id } = idParams.parse(request.params);
     const project = service.roomState(id).room.project_path;
-    const rolesRoot = roleService().personalRoot();
     return {
-      roles: rolesRoot ? resolve(rolesRoot) : null,
       skills: options.skillsHome ? resolve(options.skillsHome, "skills") : null,
       project: project ? join(project, ".konfab", "skills") : null,
       sources: sourceService()
@@ -1169,493 +1160,147 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     };
   });
 
-  app.get("/api/roles", async (request) => {
-    const { trash } = z
-      .object({ trash: z.enum(["true", "false"]).default("false") })
-      .parse(request.query);
-    return { roles: roleService().list(trash === "true") };
+  app.get("/api/library/builtin", async () => {
+    const library = skillService();
+    return library.list("builtin");
   });
-  app.get("/api/roles/custom-assignments", async () => ({
-    assignments: roleService().customAssignments(),
-  }));
-  app.post("/api/roles/convert-custom", async (request) => {
+
+  const pinBody = z.union([
+    z.object({
+      skill_id: z.string().min(1).max(200),
+      revision_id: z.string().uuid(),
+      delivery: z.enum(["full", "summary"]).default("full"),
+    }),
+    z.object({
+      public: z.object({
+        source_id: z.string().uuid(),
+        commit: z.string().regex(/^[a-f0-9]{40}$/),
+        path: z.string().min(1).max(1024),
+        preview_hash: z.string().regex(/^[a-f0-9]{64}$/),
+        scope: z.enum(["personal", "project"]).default("personal"),
+        keep_local: z.boolean().optional(),
+        copy_name: z.string().min(1).max(128).optional(),
+      }),
+      delivery: z.enum(["full", "summary"]).default("full"),
+    }),
+  ]);
+  const assignmentBody = z.object({
+    base_revision: z.number().int().nonnegative(),
+    instructions: z.string().max(6000).default(""),
+    pins: z.array(pinBody).max(50),
+    review: z.array(z.string().uuid()).max(50).default([]),
+  });
+
+  app.get("/api/rooms/:id/members/:agentId/assignment", async (request) => {
+    const params = memberParams.parse(request.params);
+    return service.memberAssignment(params.id, params.agentId);
+  });
+  app.post(
+    "/api/rooms/:id/members/:agentId/assignment/size",
+    async (request) => {
+      memberParams.parse(request.params);
+      const body = z
+        .object({
+          instructions: z.string().max(6000).default(""),
+          pins: z
+            .array(
+              z.object({
+                skill_id: z.string().min(1).max(200),
+                revision_id: z.string().uuid(),
+                delivery: z.enum(["full", "summary"]).default("full"),
+              }),
+            )
+            .max(50),
+        })
+        .parse(request.body);
+      return service.assignmentSize(body.instructions, body.pins);
+    },
+  );
+  app.put("/api/rooms/:id/members/:agentId/assignment", async (request) => {
+    const params = memberParams.parse(request.params);
+    const body = assignmentBody.parse(request.body);
+    // Fetch and verify public skills before the transaction; nothing is stored yet.
+    const packs = await Promise.all(
+      body.pins.map((pin) =>
+        "public" in pin
+          ? sourceService().live.packageFiles(
+              pin.public.source_id,
+              pin.public.commit,
+              pin.public.path,
+              pin.public.preview_hash,
+            )
+          : null,
+      ),
+    );
+    service.setAssignment(
+      params.id,
+      params.agentId,
+      {
+        base_revision: body.base_revision,
+        instructions: body.instructions,
+        pins: [],
+        review: body.review,
+      },
+      () =>
+        body.pins.map((pin, index) => {
+          if (!("public" in pin)) return pin;
+          const { libraryId } = skillScope(pin.public.scope, params.id, true);
+          if (!libraryId)
+            throw new SkillError(
+              "unavailable",
+              404,
+              "Skill library unavailable",
+            );
+          const imported = skillService().importPublicForAssignment(
+            libraryId,
+            packs[index]!,
+            {
+              keep: pin.public.keep_local,
+              name: pin.public.copy_name,
+            },
+          );
+          // Confirming the assignment reviews exactly the revision it adds.
+          body.review.push(imported.revision_id);
+          return {
+            skill_id: imported.skill_id,
+            revision_id: imported.revision_id,
+            delivery: pin.delivery,
+          };
+        }),
+    );
+    skillService().finishWorkspaces();
+    return service.memberAssignment(params.id, params.agentId);
+  });
+
+  app.get("/api/library/skills/:id/usages", async (request) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+    return { usages: service.skillUsages(id) };
+  });
+  app.post("/api/library/skills/:id/update-assignments", async (request) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
     const body = z
       .object({
-        groups: z
+        revision_id: z.string().uuid(),
+        targets: z
           .array(
             z.object({
-              name: z.string().min(1).max(128),
-              title: z.string().min(1).max(100),
-              description: z.string().min(1).max(1024),
-              text: z.string().min(1).max(20000),
-              assign: z.boolean(),
-              members: z
-                .array(
-                  z.object({
-                    room_id: z.number().int().positive(),
-                    agent_id: z.string().min(1),
-                    revision: z.number().int().nonnegative(),
-                  }),
-                )
-                .min(1)
-                .max(100),
+              room_id: z.number().int().positive(),
+              agent_id: z.string().min(1),
+              base_revision: z.number().int().nonnegative(),
             }),
           )
           .min(1)
-          .max(100),
+          .max(200),
+        review: z.literal(true, {
+          message: "Review the new revision and confirm the update.",
+        }),
       })
       .parse(request.body);
-    const result = roleService().convertCustom(body.groups);
-    for (const group of body.groups)
-      if (group.assign)
-        for (const member of group.members)
-          service.rolesChanged(member.room_id, member.agent_id);
-    return result;
-  });
-  app.post(
-    "/api/rooms/:id/members/:agentId/revert-conversion",
-    async (request) => {
-      const params = memberParams.parse(request.params);
-      const { base_revision } = z
-        .object({ base_revision: z.number().int().nonnegative() })
-        .parse(request.body);
-      roleService().revertConversion(params.id, params.agentId, base_revision);
-      service.rolesChanged(params.id, params.agentId);
-      return { ok: true };
-    },
-  );
-  app.post("/api/roles", async (request) => {
-    const body = z
-      .object({
-        name: z.string().min(1).max(128),
-        title: z.string().min(1).max(100),
-        description: z.string().min(1).max(1024),
-      })
-      .parse(request.body);
-    const content = Buffer.from(
-      `---\nname: ${JSON.stringify(body.name)}\ntitle: ${JSON.stringify(body.title)}\ndescription: ${JSON.stringify(body.description)}\nskills: []\n---\n\n# ${body.title}\n`,
-    );
-    return {
-      id: roleService().createPersonal(
-        "personal",
-        body.name,
-        [{ path: "ROLE.md", content, mode: 0o600 }],
-        [],
-      ),
-    };
-  });
-  app.get("/api/roles/:id", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    return roleService().detail(id);
-  });
-  app.post("/api/roles/:id/duplicate", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    const { name } = z
-      .object({ name: z.string().min(1).max(128) })
-      .parse(request.body);
-    return { id: roleService().duplicate(id, name) };
-  });
-  app.get("/api/roles/:id/revisions", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    return roleService().revisions(id);
-  });
-  app.post("/api/roles/:id/revisions/:revisionId/restore", async (request) => {
-    const { id, revisionId } = z
-      .object({ id: z.string().min(1).max(200), revisionId: z.string().uuid() })
-      .parse(request.params);
-    const { base_revision } = z
-      .object({ base_revision: z.string().uuid() })
-      .parse(request.body);
-    return {
-      revision_id: roleService().restoreRevision(id, revisionId, base_revision),
-    };
-  });
-  app.post("/api/roles/:id/trash", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    const { base_revision } = z
-      .object({ base_revision: z.string().uuid() })
-      .parse(request.body);
-    roleService().trash(id, base_revision);
+    service.updateSkillAssignments(id, body.revision_id, body.targets, true);
     return { ok: true };
-  });
-  app.post("/api/roles/:id/restore", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    const { base_revision } = z
-      .object({ base_revision: z.string().uuid() })
-      .parse(request.body);
-    roleService().restore(id, base_revision);
-    return { ok: true };
-  });
-  app.post("/api/roles/:id/save", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    const body = z
-      .object({
-        base_revision: z.string().uuid(),
-        manifest: z
-          .string()
-          .refine((value) => Buffer.byteLength(value) <= 512 * 1024),
-        pins: z
-          .array(
-            z.object({
-              skill_id: z.string().uuid(),
-              revision_id: z.string().uuid(),
-            }),
-          )
-          .max(100),
-      })
-      .parse(request.body);
-    return {
-      revision_id: roleService().saveManifest(
-        id,
-        body.base_revision,
-        body.manifest,
-        body.pins,
-      ),
-    };
-  });
-  app.get("/api/roles/:id/draft", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    return roleService().workingDraft(id);
-  });
-  app.post("/api/roles/:id/draft/save", async (request) => {
-    const { id } = z
-      .object({ id: z.string().min(1).max(200) })
-      .parse(request.params);
-    const body = z
-      .object({
-        base_revision: z.string().uuid(),
-        draft_hash: z.string().regex(/^[a-f0-9]{64}$/),
-        pins: z
-          .array(
-            z.object({
-              skill_id: z.string().uuid(),
-              revision_id: z.string().uuid(),
-            }),
-          )
-          .max(100),
-      })
-      .parse(request.body);
-    return {
-      revision_id: roleService().saveWorkingDraft(
-        id,
-        body.base_revision,
-        body.draft_hash,
-        body.pins,
-      ),
-    };
-  });
-  app.put("/api/rooms/:id/members/:agentId/role-pack", async (request) => {
-    const params = memberParams.parse(request.params);
-    const body = z
-      .object({
-        role_id: z.string().min(1).max(200),
-        role_revision_id: z.string().uuid(),
-        notes: z.string().max(4000).default(""),
-        base_revision: z.number().int().nonnegative().optional(),
-        can_edit: z.boolean().optional(),
-      })
-      .parse(request.body);
-    roleService().assign(
-      params.id,
-      params.agentId,
-      body.role_id,
-      body.role_revision_id,
-      body.notes,
-      body.base_revision,
-      body.can_edit,
-    );
-    service.rolesChanged(params.id, params.agentId);
-    return { ok: true };
-  });
-  app.post(
-    "/api/rooms/:id/members/:agentId/picker-preflight",
-    async (request) => {
-      const params = memberParams.parse(request.params);
-      const body = z
-        .object({
-          scope: z.enum(["personal", "project"]),
-          role_name: z.string().min(1).max(128),
-          skill_name: z.string().min(1).max(128),
-        })
-        .parse(request.body);
-      roleService().checkPersonalName(body.role_name);
-      const { library, libraryId } = skillScope(body.scope, params.id);
-      if (!libraryId)
-        throw new SkillError(
-          "unavailable",
-          404,
-          "Skill library unavailable; create it first.",
-        );
-      const list = library.list(libraryId);
-      if (
-        list.untracked.includes(body.skill_name) ||
-        list.skills.some(
-          (skill) =>
-            (skill as Record<string, unknown>).folder_name === body.skill_name,
-        )
-      )
-        throw new SkillError("name_conflict", 409, "Skill name already exists");
-      return { ok: true };
-    },
-  );
-  app.post(
-    "/api/rooms/:id/members/:agentId/role-from-public",
-    async (request) => {
-      const params = memberParams.parse(request.params);
-      const body = z
-        .object({
-          source_id: z.string().uuid(),
-          scope: z.enum(["personal", "project"]).default("personal"),
-          custom_manifest: z.string().max(512000).optional(),
-          copy_name: z.string().min(1).max(128).optional(),
-          commit: z.string().regex(/^[a-f0-9]{40}$/),
-          path: z.string().min(1).max(1024),
-          preview_hash: z.string().regex(/^[a-f0-9]{64}$/),
-          role_name: z.string().min(1).max(128),
-          title: z.string().min(1).max(100),
-          description: z.string().min(1).max(1024),
-          instructions: z.string().max(20000).optional(),
-          notes: z.string().max(4000).default(""),
-          base_revision: z.number().int().nonnegative().optional(),
-        })
-        .parse(request.body);
-      roleService().checkPersonalName(body.role_name);
-      const { library, libraryId } = skillScope(body.scope, params.id, true);
-      if (!libraryId)
-        throw new SkillError(
-          "unavailable",
-          404,
-          "Personal skill library unavailable",
-        );
-      const pack = await sourceService().live.packageFiles(
-        body.source_id,
-        body.commit,
-        body.path,
-        body.preview_hash,
-      );
-      if (body.custom_manifest !== undefined) {
-        if (!body.copy_name)
-          throw new SkillError(
-            "invalid_skill",
-            400,
-            "Enter a name for the skill copy.",
-          );
-        const manifest = pack.files.find((file) => file.path === "SKILL.md");
-        if (!manifest)
-          throw new SkillError("invalid_skill", 400, "SKILL.md is required");
-        manifest.content = Buffer.from(body.custom_manifest);
-      }
-      const metadata = skillMetadata(pack.files);
-      if (
-        body.custom_manifest !== undefined &&
-        metadata.name !== body.copy_name
-      )
-        throw new SkillError(
-          "invalid_skill",
-          400,
-          "SKILL.md name must match the skill copy name.",
-        );
-      const assigned = library.createReviewedForAssignment(
-        libraryId,
-        pack.files,
-        { ...pack.provenance, customized: body.custom_manifest !== undefined },
-        pack.licence,
-        (skillId, skillRevision) =>
-          roleService().createAndAssignSkill({
-            roomId: params.id,
-            agentId: params.agentId,
-            libraryId,
-            skillId,
-            skillRevision,
-            name: body.role_name,
-            title: body.title,
-            description: body.description,
-            instructions:
-              body.instructions ?? `Follow the ${metadata.name} skill.`,
-            notes: body.notes,
-            baseRevision: body.base_revision,
-            deferMaterialize: true,
-          }),
-      );
-      roleService().finishPendingWorkspaces();
-      service.rolesChanged(params.id, params.agentId);
-      return {
-        ...assigned.value,
-        pending:
-          assigned.pending || roleService().workspacePending(assigned.value.id),
-      };
-    },
-  );
-  app.post(
-    "/api/rooms/:id/members/:agentId/customize-and-assign",
-    async (request) => {
-      const params = memberParams.parse(request.params);
-      const body = z
-        .object({
-          source_scope: z.enum(["personal", "project"]),
-          scope: z.enum(["personal", "project"]),
-          skill_id: z.string().uuid(),
-          skill_revision: z.string().uuid(),
-          copy_name: z.string().min(1).max(128),
-          manifest: z.string().max(512000),
-          role_name: z.string().min(1).max(128),
-          title: z.string().min(1).max(100),
-          description: z.string().min(1).max(1024),
-          instructions: z.string().max(20000),
-          notes: z.string().max(4000).default(""),
-          base_revision: z.number().int().nonnegative().optional(),
-        })
-        .parse(request.body);
-      roleService().checkPersonalName(body.role_name);
-      const source = skillScope(body.source_scope, params.id);
-      if (!source.libraryId)
-        throw new SkillError(
-          "unavailable",
-          404,
-          "Source skill library unavailable",
-        );
-      const target = skillScope(body.scope, params.id, true);
-      if (!target.libraryId)
-        throw new SkillError(
-          "unavailable",
-          404,
-          "Destination skill library unavailable",
-        );
-      const pack = source.library.copyCurrentRevision(
-        body.skill_id,
-        body.skill_revision,
-        source.libraryId,
-      );
-      const manifest = pack.files.find((file) => file.path === "SKILL.md");
-      if (!manifest)
-        throw new SkillError("invalid_skill", 400, "SKILL.md is required");
-      manifest.content = Buffer.from(body.manifest);
-      if (skillMetadata(pack.files).name !== body.copy_name)
-        throw new SkillError(
-          "invalid_skill",
-          400,
-          "SKILL.md name must match the skill copy name.",
-        );
-      const assigned = target.library.createReviewedForAssignment(
-        target.libraryId,
-        pack.files,
-        pack.provenance,
-        pack.licence,
-        (skillId, skillRevision) => {
-          source.library.copyCurrentRevision(
-            body.skill_id,
-            body.skill_revision,
-            source.libraryId!,
-          );
-          return roleService().createAndAssignSkill({
-            roomId: params.id,
-            agentId: params.agentId,
-            libraryId: target.libraryId!,
-            skillId,
-            skillRevision,
-            name: body.role_name,
-            title: body.title,
-            description: body.description,
-            instructions: body.instructions,
-            notes: body.notes,
-            baseRevision: body.base_revision,
-            deferMaterialize: true,
-          });
-        },
-      );
-      roleService().finishPendingWorkspaces();
-      service.rolesChanged(params.id, params.agentId);
-      return {
-        ...assigned.value,
-        pending:
-          assigned.pending || roleService().workspacePending(assigned.value.id),
-      };
-    },
-  );
-  app.post(
-    "/api/rooms/:id/members/:agentId/role-from-skill",
-    async (request) => {
-      const params = memberParams.parse(request.params);
-      const body = z
-        .object({
-          scope: z.enum(["personal", "project"]),
-          skill_id: z.string().uuid(),
-          skill_revision: z.string().uuid(),
-          name: z.string().min(1).max(128),
-          title: z.string().min(1).max(100),
-          description: z.string().min(1).max(1024),
-          instructions: z.string().max(20000),
-          notes: z.string().max(4000).default(""),
-          base_revision: z.number().int().nonnegative().optional(),
-          review: z.boolean().default(false),
-        })
-        .parse(request.body);
-      const { libraryId } = skillScope(body.scope, params.id);
-      if (!libraryId)
-        throw new SkillError("unavailable", 404, "Skill library unavailable");
-      const result = roleService().createAndAssignSkill({
-        roomId: params.id,
-        agentId: params.agentId,
-        libraryId,
-        skillId: body.skill_id,
-        skillRevision: body.skill_revision,
-        name: body.name,
-        title: body.title,
-        description: body.description,
-        instructions: body.instructions,
-        notes: body.notes,
-        baseRevision: body.base_revision,
-        review: body.review,
-      });
-      service.rolesChanged(params.id, params.agentId);
-      return result;
-    },
-  );
-  app.get("/api/rooms/:id/members/:agentId/role-updates", async (request) => {
-    const params = memberParams.parse(request.params);
-    const items = roleService().assignedPublicSources(
-      params.id,
-      params.agentId,
-    );
-    const updates = await Promise.all(
-      items.map(async (item) => {
-        try {
-          const status = await sourceService().publicSkillUpdate(
-            item.source,
-            item.commit,
-            item.path,
-          );
-          return { ...item, status };
-        } catch {
-          return { ...item, status: "unknown" };
-        }
-      }),
-    );
-    return { updates };
-  });
-  app.get("/api/rooms/:id/members/:agentId/role-preview", async (request) => {
-    const params = memberParams.parse(request.params);
-    return {
-      role: roleService().envelope(params.id, params.agentId, false, true),
-      assignment: roleService().assignment(params.id, params.agentId),
-    };
   });
 
-  app.post("/api/rooms/:id/roles/reassign", async (request) => {
+  app.post("/api/rooms/:id/assignments/reassign", async (request) => {
     const body = z
       .object({
         changes: z
@@ -1663,9 +1308,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             z.object({
               agent_id: z.string().min(1),
               from_agent_id: z.string().min(1).optional(),
-              role_id: z.string().min(1).optional(),
-              role_revision_id: z.string().min(1).optional(),
-              notes: z.string().max(4000).optional(),
+              pins: z
+                .array(
+                  z.object({
+                    skill_id: z.string().min(1).max(200),
+                    revision_id: z.string().uuid(),
+                    delivery: z.enum(["full", "summary"]).default("full"),
+                  }),
+                )
+                .max(50)
+                .optional(),
+              instructions: z.string().max(6000).optional(),
               none: z.literal(true).optional(),
               base_revision: z.number().int().nonnegative(),
             }),
@@ -1674,7 +1327,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           .max(100),
       })
       .parse(request.body);
-    service.reassignRoles(idParams.parse(request.params).id, body.changes);
+    service.reassignAssignments(
+      idParams.parse(request.params).id,
+      body.changes,
+    );
     return { ok: true };
   });
 
@@ -1700,32 +1356,39 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         app_id: z.string().min(1),
         room_id: z.number().int().positive().optional(),
         room_name: z.string().max(200).optional(),
-        role: z
+        assignment: z
           .object({
-            role_id: z.string().min(1).max(200),
-            role_revision_id: z.string().uuid(),
+            instructions: z.string().max(6000).default(""),
+            pins: z
+              .array(
+                z.object({
+                  skill_id: z.string().min(1).max(200),
+                  revision_id: z.string().uuid(),
+                  delivery: z.enum(["full", "summary"]).default("full"),
+                }),
+              )
+              .max(50),
+            review: z.array(z.string().uuid()).max(50).default([]),
             confirmed: z.literal(true, {
-              message: "Preview the role and confirm it before assigning.",
+              message: "Preview the skills and confirm them before assigning.",
             }),
           })
           .optional(),
       })
       .parse(request.body);
-    const role = body.role;
+    const assignment = body.assignment;
     service.addAppAgent(
       body.app_id,
       body.id,
       body.display_name,
       body.room_id,
-      role
+      assignment
         ? () =>
-            roleService().assign(
-              body.room_id as number,
-              body.id,
-              role.role_id,
-              role.role_revision_id,
-              "",
-            )
+            service.applyAssignment(body.room_id as number, body.id, {
+              instructions: assignment.instructions,
+              pins: assignment.pins,
+              review: assignment.review,
+            })
         : undefined,
       body.room_name,
     );
@@ -1932,7 +1595,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.put("/api/rooms/:id/members/:agentId", async (request) => {
     const { id, agentId } = memberParams.parse(request.params);
-    service.setMemberRole(id, agentId, roleBody.parse(request.body));
+    service.setMemberEdit(
+      id,
+      agentId,
+      z.object({ can_edit: z.boolean() }).parse(request.body).can_edit,
+    );
     return service.roomState(id);
   });
 

@@ -695,11 +695,7 @@ describe("server and bridge", () => {
   });
 
   it("acquires and releases advisory locks through the bridge", async () => {
-    service.setMemberRole(ROOM, "claude", {
-      role: "",
-      can_edit: true,
-      base_role_revision: 0,
-    });
+    service.setMemberEdit(ROOM, "claude", true);
     const joined = (await callTool("join_room", { room: ROOM })).value;
     const acquired = await callTool("acquire_lock", {
       session_id: joined.session_id,
@@ -731,6 +727,7 @@ describe("server and bridge", () => {
       "pass_turn",
       "post_message",
       "propose_decision",
+      "read_assignment",
       "read_decisions",
       "read_history",
       "read_role",

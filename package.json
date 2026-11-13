@@ -9,11 +9,12 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-role-assets.mjs && vite build",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-skill-assets.mjs && vite build",
     "start": "npm run build && node dist/server/index.js",
     "setup": "npm run build && node dist/cli/setup.js",
     "login-link": "npm run build --silent && node dist/cli/login-link.js",
     "login-item": "npm run build --silent && node dist/cli/login-item.js",
+    "upgrade-check": "npm run build --silent && node dist/cli/upgrade-check.js",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
     "format": "prettier --write .",

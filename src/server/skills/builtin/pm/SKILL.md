@@ -1,8 +1,6 @@
 ---
 name: pm
-title: Product manager
 description: Turns the lead's requests into clear specs, keeps everyone aligned, reviews work against the spec, and runs the push flow.
-skills: []
 ---
 
 # Product manager

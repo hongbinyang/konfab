@@ -213,10 +213,10 @@ describe("structured formats", () => {
       service.ensureAgent("a", "A");
       service.ensureAgent("b", "B");
       const room = service.createRoom("paused", "", ["a", "b"]);
-      service.setMemberRole(room.id, "a", {
-        role: "Custom",
-        can_edit: false,
-        base_role_revision: 0,
+      service.setAssignment(room.id, "a", {
+        base_revision: 0,
+        instructions: "Custom",
+        pins: [],
       });
       const old = service.join("a", "paused").session_id;
       service.startFormat(room.id, {
@@ -230,16 +230,16 @@ describe("structured formats", () => {
       service.postUserMessage(room.id, "@a ordinary");
       const ordinary = turn(service.poll("a", old, true));
       expect(ordinary.format).toBeUndefined();
-      expect(ordinary.role).toEqual(
+      expect(ordinary.assignment).toEqual(
         expect.objectContaining({ notice: expect.any(String) }),
       );
       service.join("a", "paused");
       const queued = db
         .prepare(
-          "SELECT role_envelope_json FROM turns WHERE format_run_id IS NOT NULL AND state='queued'",
+          "SELECT reply_assignment_json FROM turns WHERE format_run_id IS NOT NULL AND state='queued'",
         )
-        .get() as { role_envelope_json: string | null };
-      expect(queued.role_envelope_json).toBeNull();
+        .get() as { reply_assignment_json: string | null };
+      expect(queued.reply_assignment_json).toBeNull();
     } finally {
       db.close();
     }

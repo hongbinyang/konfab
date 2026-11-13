@@ -51,10 +51,18 @@ export class SkillLibrary {
     this.cleanupTempFiles();
   }
 
+  /** Writes working folders for skills whose saved revision is newer than the folder. Safe to repeat. */
+  finishWorkspaces(): void {
+    this.recoverAssignedWorkspaces();
+  }
+
   private recoverAssignedWorkspaces(): void {
     const rows = this.db
       .prepare(
-        `SELECT o.skill_id, o.revision_id, s.folder_name, l.root_path, r.content_hash FROM skill_workspace_operations o JOIN skills s ON s.id=o.skill_id JOIN skill_libraries l ON l.id=s.library_id JOIN skill_revisions r ON r.id=o.revision_id WHERE o.state='pending'`,
+        `SELECT o.skill_id, o.revision_id, s.folder_name, l.root_path, r.content_hash, p.content_hash AS previous_hash
+         FROM skill_workspace_operations o JOIN skills s ON s.id=o.skill_id JOIN skill_libraries l ON l.id=s.library_id
+         JOIN skill_revisions r ON r.id=o.revision_id LEFT JOIN skill_revisions p ON p.id=o.previous_revision_id
+         WHERE o.state='pending'`,
       )
       .all() as Array<{
       skill_id: string;
@@ -62,6 +70,7 @@ export class SkillLibrary {
       folder_name: string;
       root_path: string;
       content_hash: string;
+      previous_hash: string | null;
     }>;
     for (const row of rows) {
       try {
@@ -70,6 +79,21 @@ export class SkillLibrary {
         const folder = join(row.root_path, row.folder_name);
         const staging = join(row.root_path, `.konfab-pending-${row.skill_id}`);
         const marker = join(staging, ".konfab-workspace-owner");
+        const replaced = join(
+          row.root_path,
+          `.konfab-replaced-${row.skill_id}`,
+        );
+        // An unmodified folder at the previous revision is moved aside, then rewritten below.
+        if (existsSync(folder) && row.previous_hash) {
+          const target = lstatSync(folder);
+          if (
+            target.isDirectory() &&
+            !target.isSymbolicLink() &&
+            !existsSync(replaced) &&
+            packageHash(readSkillFiles(folder)) === row.previous_hash
+          )
+            renameSync(folder, replaced);
+        }
         if (existsSync(folder)) {
           const target = lstatSync(folder);
           if (
@@ -82,6 +106,11 @@ export class SkillLibrary {
                 "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
               )
               .run(row.skill_id);
+          if (
+            existsSync(replaced) &&
+            packageHash(readSkillFiles(folder)) === row.content_hash
+          )
+            rmSync(replaced, { recursive: true });
           continue;
         }
         if (existsSync(staging)) {
@@ -139,6 +168,7 @@ export class SkillLibrary {
             "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
           )
           .run(row.skill_id);
+        if (existsSync(replaced)) rmSync(replaced, { recursive: true });
       } catch (error) {
         const code = (error as NodeJS.ErrnoException)?.code;
         if (code === "EEXIST" || code === "ENOTEMPTY") continue;
@@ -407,7 +437,118 @@ export class SkillLibrary {
     return id;
   }
 
+  /** Seeds the read-only built-in skills shipped with Konfab; a changed file adds a reviewed revision. */
+  seedBuiltins(root: string): void {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO skill_libraries(id, kind, root_path, created_at) VALUES ('builtin', 'builtin', ?, ?)",
+      )
+      .run(root, this.now());
+    this.db
+      .prepare("UPDATE skill_libraries SET root_path = ? WHERE id = 'builtin'")
+      .run(root);
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const files = readSkillFiles(join(root, entry.name));
+      const metadata = skillMetadata(files);
+      if (metadata.name !== entry.name)
+        throw new SkillError(
+          "invalid_skill",
+          400,
+          "Built-in skill name must match its folder",
+        );
+      const id = `builtin:${entry.name}`;
+      const hash = packageHash(files);
+      const current = this.db
+        .prepare(
+          "SELECT r.content_hash FROM skills s LEFT JOIN skill_revisions r ON r.id = s.current_revision_id WHERE s.id = ?",
+        )
+        .get(id) as { content_hash: string | null } | undefined;
+      if (current?.content_hash === hash) continue;
+      const revision = randomUUID();
+      this.db.transaction(() => {
+        const number =
+          (
+            this.db
+              .prepare(
+                "SELECT COALESCE(MAX(number), 0) AS n FROM skill_revisions WHERE skill_id = ?",
+              )
+              .get(id) as { n: number }
+          ).n + 1;
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO skills(id, library_id, folder_name, current_revision_id, created_at) VALUES (?, 'builtin', ?, NULL, ?)",
+          )
+          .run(id, entry.name, this.now());
+        this.db
+          .prepare(
+            "INSERT INTO skill_revisions(id, skill_id, number, content_hash, name, description, provenance_json, licence, created_at) VALUES (?, ?, ?, ?, ?, ?, '{\"builtin\":true}', NULL, ?)",
+          )
+          .run(
+            revision,
+            id,
+            number,
+            hash,
+            metadata.name,
+            metadata.description,
+            this.now(),
+          );
+        const blob = this.db.prepare(
+          "INSERT OR IGNORE INTO skill_blobs(hash, content) VALUES (?, ?)",
+        );
+        const ref = this.db.prepare(
+          "INSERT INTO skill_revision_files(revision_id, path, blob_hash, mode) VALUES (?, ?, ?, ?)",
+        );
+        for (const file of files) {
+          const blobHash = createHash("sha256")
+            .update(file.content)
+            .digest("hex");
+          blob.run(blobHash, file.content);
+          ref.run(revision, file.path, blobHash, file.mode);
+        }
+        this.db
+          .prepare(
+            "INSERT INTO skill_reviews(revision_id, reviewed_at) VALUES (?, ?)",
+          )
+          .run(revision, this.now());
+        this.db
+          .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
+          .run(revision, id);
+      })();
+    }
+  }
+
+  /** Built-in skills are read-only; duplicate one to change it. */
+  private assertWritable(id: string): void {
+    const row = this.db
+      .prepare(
+        "SELECT l.kind FROM skills s JOIN skill_libraries l ON l.id = s.library_id WHERE s.id = ?",
+      )
+      .get(id) as { kind: string } | undefined;
+    if (row?.kind === "builtin")
+      throw new SkillError(
+        "read_only",
+        409,
+        "Built-in skills are read-only. Duplicate it to make an editable copy.",
+      );
+  }
+
+  /** Drops usage rows whose assignment or turn no longer holds that revision. */
+  purgeStaleUsages(): void {
+    this.db
+      .prepare(
+        `DELETE FROM skill_usages WHERE
+          (owner_type = 'turn' AND owner_id NOT IN (SELECT CAST(id AS TEXT) FROM turns WHERE state = 'active'))
+          OR (owner_type = 'assignment' AND NOT EXISTS (
+            SELECT 1 FROM room_member_skills p
+            WHERE p.room_id || ':' || p.agent_id = skill_usages.owner_id
+              AND p.skill_id = skill_usages.skill_id AND p.skill_revision_id = skill_usages.revision_id))`,
+      )
+      .run();
+  }
+
   list(libraryId: string, trash = false) {
+    this.purgeStaleUsages();
     const library = this.db
       .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
       .get(libraryId) as { root_path: string } | undefined;
@@ -502,6 +643,7 @@ export class SkillLibrary {
     baseRevision: string,
     baseDraftHash: string,
   ): string {
+    this.assertWritable(id);
     this.recoverRenames(id);
     if (content.length > 512 * 1024)
       throw new SkillError("package_limits", 413, "File exceeds size limit");
@@ -608,6 +750,7 @@ export class SkillLibrary {
     baseRevision: string,
     baseDraftHash: string,
   ): string {
+    this.assertWritable(id);
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -735,6 +878,7 @@ export class SkillLibrary {
   }
 
   restore(id: string, baseRevision: string, baseDraftHash: string): void {
+    this.assertWritable(id);
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -780,6 +924,7 @@ export class SkillLibrary {
   }
 
   trash(id: string, baseRevision: string, baseDraftHash: string): void {
+    this.assertWritable(id);
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -802,6 +947,7 @@ export class SkillLibrary {
         baseDraftHash
     )
       throw new SkillError("draft_conflict", 409, "Draft conflict");
+    this.purgeStaleUsages();
     this.db.transaction(() => {
       const uses = this.db
         .prepare("SELECT label FROM skill_usages WHERE skill_id = ?")
@@ -823,6 +969,7 @@ export class SkillLibrary {
   }
 
   save(id: string, baseRevision: string, baseDraftHash: string): string {
+    this.assertWritable(id);
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -1044,6 +1191,7 @@ export class SkillLibrary {
     baseRevision: string,
     baseDraftHash: string,
   ): string {
+    this.assertWritable(id);
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -1215,6 +1363,7 @@ export class SkillLibrary {
     baseRevision: string,
     baseDraftHash: string,
   ): string {
+    this.assertWritable(id);
     if (!validSkillName(name))
       throw new SkillError("invalid_skill", 400, invalidNameMessage(name));
     this.recoverRenames(id);
@@ -1661,6 +1810,233 @@ export class SkillLibrary {
     );
     this.db.prepare("DELETE FROM skill_import_drafts WHERE id = ?").run(id);
     return skillId;
+  }
+
+  /**
+   * Copies a public skill into a library for an assignment, inside the
+   * caller's transaction. Reuses an identical copy, adds a revision to an
+   * unmodified copy of the same source, and never overwrites local changes.
+   * Working folders are written after the caller commits (finishWorkspaces).
+   */
+  importPublicForAssignment(
+    libraryId: string,
+    pack: {
+      files: SkillFile[];
+      licence: string | null;
+      provenance: Record<string, unknown>;
+    },
+    choice?: { keep?: boolean; name?: string },
+  ): {
+    skill_id: string;
+    revision_id: string;
+    created: "none" | "revision" | "skill";
+  } {
+    const library = this.db
+      .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
+      .get(libraryId) as { root_path: string } | undefined;
+    if (!library)
+      throw new SkillError("unavailable", 404, "Skill library unavailable");
+    const hash = packageHash(pack.files);
+    const sameSource = (json: string) => {
+      try {
+        const value = JSON.parse(json) as Record<string, unknown>;
+        return (
+          JSON.stringify(value.source) ===
+            JSON.stringify(pack.provenance.source) &&
+          value.path === pack.provenance.path
+        );
+      } catch {
+        return false;
+      }
+    };
+    const candidates = this.db
+      .prepare(
+        `SELECT s.id, s.folder_name, s.current_revision_id, r.content_hash, r.provenance_json, r.number
+         FROM skills s JOIN skill_revisions r ON r.id = s.current_revision_id
+         WHERE s.library_id = ? AND s.trashed_at IS NULL`,
+      )
+      .all(libraryId) as Array<{
+      id: string;
+      folder_name: string;
+      current_revision_id: string;
+      content_hash: string;
+      provenance_json: string;
+      number: number;
+    }>;
+    const existing = choice?.name
+      ? undefined
+      : candidates.find(
+          (row) =>
+            sameSource(row.provenance_json) ||
+            this.db
+              .prepare(
+                "SELECT 1 FROM skill_revisions WHERE skill_id = ? AND provenance_json = ? LIMIT 1",
+              )
+              .get(row.id, JSON.stringify(pack.provenance)),
+        );
+    if (existing) {
+      if (existing.content_hash === hash)
+        return {
+          skill_id: existing.id,
+          revision_id: existing.current_revision_id,
+          created: "none",
+        };
+      if (choice?.keep)
+        return {
+          skill_id: existing.id,
+          revision_id: existing.current_revision_id,
+          created: "none",
+        };
+      let draft: boolean;
+      try {
+        draft =
+          packageHash(
+            readSkillFiles(join(library.root_path, existing.folder_name)),
+          ) !== existing.content_hash;
+      } catch {
+        draft = existsSync(join(library.root_path, existing.folder_name));
+      }
+      const provenance = JSON.parse(existing.provenance_json) as Record<
+        string,
+        unknown
+      >;
+      if (
+        draft ||
+        !sameSource(existing.provenance_json) ||
+        provenance.customized
+      )
+        throw new SkillError(
+          "local_changes",
+          409,
+          `${existing.folder_name} has local changes. Keep your version, or add the upstream skill as a separate skill.`,
+        );
+      const metadata = skillMetadata(pack.files);
+      const revision = randomUUID();
+      this.insertRevisionRows(
+        existing.id,
+        revision,
+        existing.number + 1,
+        pack.files,
+        metadata,
+        pack.provenance,
+        pack.licence,
+      );
+      this.db
+        .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
+        .run(revision, existing.id);
+      this.db
+        .prepare(
+          "INSERT OR REPLACE INTO skill_workspace_operations(skill_id, revision_id, state, created_at, previous_revision_id) VALUES (?, ?, 'pending', ?, ?)",
+        )
+        .run(existing.id, revision, this.now(), existing.current_revision_id);
+      return {
+        skill_id: existing.id,
+        revision_id: revision,
+        created: "revision",
+      };
+    }
+    let files = pack.files;
+    if (choice?.name) {
+      if (!validSkillName(choice.name))
+        throw new SkillError(
+          "invalid_skill",
+          400,
+          invalidNameMessage(choice.name),
+        );
+      files = files.map((file) => {
+        if (file.path !== "SKILL.md") return file;
+        const text = file.content.toString("utf8");
+        const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+        if (!match?.[1]) return file;
+        const doc = parseDocument(match[1], {
+          uniqueKeys: true,
+          customTags: [],
+        });
+        doc.set("name", choice.name);
+        return {
+          ...file,
+          content: Buffer.from(
+            `---\n${doc.toString()}---\n${text.slice(match[0].length)}`,
+          ),
+        };
+      });
+    }
+    const metadata = skillMetadata(files);
+    if (
+      existsSync(join(library.root_path, metadata.name)) ||
+      this.db
+        .prepare(
+          "SELECT 1 FROM skills WHERE library_id = ? AND folder_name = ?",
+        )
+        .get(libraryId, metadata.name)
+    )
+      throw new SkillError(
+        "name_conflict",
+        409,
+        `A different skill named ${metadata.name} already exists. Choose another name for this copy.`,
+      );
+    const id = randomUUID();
+    const revision = randomUUID();
+    this.db
+      .prepare(
+        "INSERT INTO skills(id, library_id, folder_name, current_revision_id, created_at) VALUES (?, ?, ?, NULL, ?)",
+      )
+      .run(id, libraryId, metadata.name, this.now());
+    this.insertRevisionRows(
+      id,
+      revision,
+      1,
+      files,
+      metadata,
+      pack.provenance,
+      pack.licence,
+    );
+    this.db
+      .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
+      .run(revision, id);
+    this.db
+      .prepare(
+        "INSERT INTO skill_workspace_operations(skill_id, revision_id, state, created_at) VALUES (?, ?, 'pending', ?)",
+      )
+      .run(id, revision, this.now());
+    return { skill_id: id, revision_id: revision, created: "skill" };
+  }
+
+  private insertRevisionRows(
+    skillId: string,
+    revision: string,
+    number: number,
+    files: SkillFile[],
+    metadata: { name: string; description: string },
+    provenance: Record<string, unknown>,
+    licence: string | null,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO skill_revisions(id, skill_id, number, content_hash, name, description, provenance_json, licence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        revision,
+        skillId,
+        number,
+        packageHash(files),
+        metadata.name,
+        metadata.description,
+        JSON.stringify(provenance),
+        licence,
+        this.now(),
+      );
+    const blob = this.db.prepare(
+      "INSERT OR IGNORE INTO skill_blobs(hash, content) VALUES (?, ?)",
+    );
+    const ref = this.db.prepare(
+      "INSERT INTO skill_revision_files(revision_id, path, blob_hash, mode) VALUES (?, ?, ?, ?)",
+    );
+    for (const file of files) {
+      const blobHash = createHash("sha256").update(file.content).digest("hex");
+      blob.run(blobHash, file.content);
+      ref.run(revision, file.path, blobHash, file.mode);
+    }
   }
 
   adopt(

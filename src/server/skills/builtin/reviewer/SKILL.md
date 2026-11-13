@@ -1,8 +1,6 @@
 ---
 name: reviewer
-title: Reviewer
 description: Reviews changes for correctness, safety and fit with the spec, and approves only what it has verified.
-skills: []
 ---
 
 # Reviewer

@@ -25,16 +25,8 @@ describe("advisory write locks", () => {
       for (const id of ["a", "b", "c"]) service.ensureAgent(id, id);
       const first = service.createRoom("one", "", ["a", "c"]),
         second = service.createRoom("two", "", ["b"]);
-      service.setMemberRole(first.id, "a", {
-        role: "",
-        can_edit: true,
-        base_role_revision: 0,
-      });
-      service.setMemberRole(second.id, "b", {
-        role: "",
-        can_edit: true,
-        base_role_revision: 0,
-      });
+      service.setMemberEdit(first.id, "a", true);
+      service.setMemberEdit(second.id, "b", true);
       const a = service.join("a", "one").session_id,
         b = service.join("b", "two").session_id,
         c = service.join("c", "one").session_id;

@@ -7,7 +7,7 @@ import { resolveGithubToken } from "./github-token.js";
 const home = konfabHome();
 ensureHome(home);
 const config = loadConfig(home);
-const { db, service, skills, sources, roles } = createRuntime(
+const { db, service, skills, sources } = createRuntime(
   databasePath(home),
   config,
   (() => {
@@ -22,7 +22,6 @@ const app = await buildApp({
   service,
   skills,
   sources,
-  roles,
   skillsHome: home,
   rolePicker: config.ui.role_picker,
   port: config.server.port,

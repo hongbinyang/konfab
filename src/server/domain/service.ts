@@ -12,8 +12,19 @@ import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import type { Db } from "../db/index.js";
-import { RoleLibrary } from "./roles.js";
-import { fileChunk } from "./file-chunk.js";
+import {
+  ASSIGNMENT_LIMIT_BYTES,
+  AssignmentStore,
+  assignmentBytes,
+  changeNotice,
+  fullAssignment,
+  REMINDER,
+  skillEntries,
+  type AssignmentEnvelope,
+  type AssignmentReply,
+  type DeliveredIdentity,
+  type Pin,
+} from "./assignments.js";
 import {
   cleanupRoomFiles,
   compactRoomDatabase,
@@ -28,15 +39,8 @@ import {
   type NamedMember,
 } from "./agent-names.js";
 
-export class KonfabError extends Error {
-  constructor(
-    readonly code: string,
-    readonly statusCode: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { KonfabError } from "./errors.js";
+export { KonfabError };
 
 export interface PreApproval {
   recipient: string;
@@ -107,9 +111,9 @@ export type WaitResult = (
         slot: string;
         instruction: string;
       };
-      role?:
-        | ReturnType<RoleLibrary["envelope"]>
-        | { changed: true; notice: string; removed?: true };
+      /** Old-style role reply, kept for conversations connected before roles became skills. */
+      role?: unknown;
+      assignment?: AssignmentEnvelope | null;
       messages: MessageView[];
       truncated: boolean;
       decisions: DecisionView[];
@@ -304,7 +308,14 @@ const WEB_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 const ROOM_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,49}$/;
 const MAX_TOPIC_CHARS = 2000;
 const MAX_BRIEF_CHARS = 4000;
-const MAX_ROLE_CHARS = 2000;
+/** Room instructions; converted role text and notes together fit within this. */
+const MAX_ROLE_CHARS = 6000;
+
+const ROLES_REPLACED =
+  "Roles were replaced by skills. Your room instructions and skills are in the assignment field; re-read them with read_role (or read_assignment if you have it).";
+
+const UPGRADE_NOTICE =
+  "Konfab replaced roles with skills. Your instructions are unchanged and are now in your assignment; read_role still works, and read_assignment returns them in the new form.";
 const LEAD_RULE =
   "The user is the project lead. Follow the lead's instructions and decisions, and if another agent's suggestion conflicts with the lead, follow the lead.";
 const MAX_PASS_REASON_CHARS = 500;
@@ -359,36 +370,39 @@ export function parseMentions(body: string): string[] {
 }
 
 export class KonfabService {
-  private swapSnapshot(
-    roomId: number,
-    agentId: string,
-    sessionId: string,
-  ): { role: ReturnType<RoleLibrary["envelope"]> } | null {
-    const row = this.db
-      .prepare(
-        "SELECT swap_role_snapshot_json FROM turns WHERE room_id=? AND agent_id=? AND session_id=? AND state='active'",
-      )
-      .get(roomId, agentId, sessionId) as
-      { swap_role_snapshot_json: string | null } | undefined;
-    return row?.swap_role_snapshot_json == null
-      ? null
-      : {
-          role: JSON.parse(row.swap_role_snapshot_json) as ReturnType<
-            RoleLibrary["envelope"]
-          >,
-        };
+  private assignments(): AssignmentStore {
+    return new AssignmentStore(this.db, this.now);
   }
-  readAssignedRole(agentId: string, sessionId: string) {
+
+  /** read_role: the old role reply for converted members, otherwise the full assignment. */
+  readAssignedRole(agentId: string, sessionId: string): AssignmentReply {
     const session = this.requireLiveSession(agentId, sessionId);
-    const snapshot = this.swapSnapshot(session.room_id, agentId, sessionId);
+    const store = this.assignments();
+    const snapshot = store.turnSnapshot(session.room_id, agentId, sessionId);
+    if (snapshot)
+      return snapshot.legacy_role
+        ? { role: snapshot.legacy_role, assignment: snapshot.assignment }
+        : {
+            role: { changed: true, notice: ROLES_REPLACED },
+            assignment: snapshot.assignment,
+          };
+    const legacy = store.legacyRole(session.room_id, agentId, true);
+    const assignment = store.full(session.room_id, agentId);
+    if (legacy) return { role: legacy, assignment };
+    return {
+      role: assignment ? { changed: true, notice: ROLES_REPLACED } : null,
+      assignment,
+    };
+  }
+
+  /** read_assignment: the full assignment, from the turn snapshot when there is one. */
+  readAssignment(agentId: string, sessionId: string) {
+    const session = this.requireLiveSession(agentId, sessionId);
+    const store = this.assignments();
+    const snapshot = store.turnSnapshot(session.room_id, agentId, sessionId);
     return snapshot
-      ? snapshot.role
-      : new RoleLibrary(this.db).envelope(
-          session.room_id,
-          agentId,
-          false,
-          true,
-        );
+      ? snapshot.assignment
+      : store.full(session.room_id, agentId);
   }
 
   readAssignedRoleFile(
@@ -400,17 +414,15 @@ export class KonfabService {
     max: number,
   ) {
     const session = this.requireLiveSession(agentId, sessionId);
-    const snapshot = this.swapSnapshot(session.room_id, agentId, sessionId);
-    const assigned = snapshot
-      ? snapshot.role?.revision_id === revisionId
-      : !!this.db
-          .prepare(
-            "SELECT 1 FROM room_member_roles WHERE room_id = ? AND agent_id = ? AND role_revision_id = ?",
-          )
-          .get(session.room_id, agentId, revisionId);
-    if (!assigned)
-      throw new KonfabError("forbidden", 403, "Role revision is not assigned");
-    return new RoleLibrary(this.db).readFile(revisionId, path, offset, max);
+    return this.assignments().readLegacyRoleFile(
+      session.room_id,
+      agentId,
+      sessionId,
+      revisionId,
+      path,
+      offset,
+      max,
+    );
   }
 
   readAssignedSkillFile(
@@ -422,32 +434,314 @@ export class KonfabService {
     max: number,
   ) {
     const session = this.requireLiveSession(agentId, sessionId);
-    const snapshot = this.swapSnapshot(session.room_id, agentId, sessionId);
-    const roleRevision = snapshot
-      ? snapshot.role?.revision_id
-      : (
-          this.db
-            .prepare(
-              "SELECT role_revision_id FROM room_member_roles WHERE room_id=? AND agent_id=?",
-            )
-            .get(session.room_id, agentId) as
-            { role_revision_id: string } | undefined
-        )?.role_revision_id;
-    if (!roleRevision)
-      throw new KonfabError("forbidden", 403, "Skill file is not assigned");
+    return this.assignments().readSkillFile(
+      session.room_id,
+      agentId,
+      sessionId,
+      skillRevisionId,
+      path,
+      offset,
+      max,
+    );
+  }
+
+  /** The member's current assignment for the page. */
+  memberAssignment(ref: RoomRef, agentId: string) {
+    const room = this.room(ref);
+    this.requireMember(room.id, agentId);
+    const store = this.assignments();
+    const current = store.current(room.id, agentId);
+    const skills = skillEntries(this.db, current.pins).map((entry) => ({
+      ...entry,
+      latest: this.latestRevision(entry.skill_id),
+    }));
+    return {
+      revision: current.revision,
+      instructions: current.instructions,
+      skills,
+      bytes: assignmentBytes(this.db, current.instructions, current.pins),
+      limit: ASSIGNMENT_LIMIT_BYTES,
+    };
+  }
+
+  private latestRevision(skillId: string) {
+    return (
+      (this.db
+        .prepare(
+          `SELECT r.id, r.number, CASE WHEN v.revision_id IS NULL THEN 0 ELSE 1 END AS reviewed
+           FROM skills s JOIN skill_revisions r ON r.id = s.current_revision_id
+           LEFT JOIN skill_reviews v ON v.revision_id = r.id WHERE s.id = ?`,
+        )
+        .get(skillId) as
+        { id: string; number: number; reviewed: number } | undefined) ?? null
+    );
+  }
+
+  /** Size of a draft assignment, for the page's meter. */
+  assignmentSize(instructions: string, pins: Pin[]) {
+    return {
+      bytes: assignmentBytes(this.db, instructions, pins),
+      limit: ASSIGNMENT_LIMIT_BYTES,
+    };
+  }
+
+  /** Replaces a member's skills and room instructions. Applies from its next turn. */
+  setAssignment(
+    ref: RoomRef,
+    agentId: string,
+    input: {
+      base_revision: number;
+      instructions: string;
+      pins: Pin[];
+      review?: string[];
+    },
+    beforeWrite?: () => Pin[] | void,
+  ): void {
+    const room = this.room(ref);
+    if (room.archived_at !== null)
+      throw new KonfabError("room_archived", 409, "This room is archived");
+    this.requireMember(room.id, agentId);
+    this.validateLength(
+      input.instructions,
+      MAX_ROLE_CHARS,
+      "Room instructions",
+    );
+    this.db.transaction(() => {
+      const store = this.assignments();
+      if (store.current(room.id, agentId).revision !== input.base_revision)
+        throw new KonfabError(
+          "assignment_conflict",
+          409,
+          "This assignment changed since you opened it. Refresh and try again.",
+        );
+      const pins = beforeWrite?.() ?? input.pins;
+      store.write(
+        room.id,
+        agentId,
+        { instructions: input.instructions, pins, review: input.review },
+        this.assignmentLabel(room.id, agentId),
+      );
+    })();
+    this.assignmentChanged(room.id, agentId);
+  }
+
+  /** Writes an assignment inside the caller's transaction (used when adding an agent). */
+  applyAssignment(
+    roomId: number,
+    agentId: string,
+    input: { instructions: string; pins: Pin[]; review?: string[] },
+  ): void {
+    this.validateLength(
+      input.instructions,
+      MAX_ROLE_CHARS,
+      "Room instructions",
+    );
+    this.assignments().write(
+      roomId,
+      agentId,
+      input,
+      this.assignmentLabel(roomId, agentId),
+    );
+  }
+
+  /** Moves selected members' pins to a newer revision of one skill, across rooms. */
+  updateSkillAssignments(
+    skillId: string,
+    revisionId: string,
+    targets: Array<{
+      room_id: number;
+      agent_id: string;
+      base_revision: number;
+    }>,
+    review: boolean,
+  ): void {
+    const changed: Array<{ room_id: number; agent_id: string }> = [];
+    this.db.transaction(() => {
+      const store = this.assignments();
+      for (const target of targets) {
+        const current = store.current(target.room_id, target.agent_id);
+        if (current.revision !== target.base_revision)
+          throw new KonfabError(
+            "assignment_conflict",
+            409,
+            "An assignment changed since you opened this list. Refresh and try again.",
+          );
+        if (!current.pins.some((pin) => pin.skill_id === skillId))
+          throw new KonfabError(
+            "invalid_assignment",
+            400,
+            "A selected member no longer uses this skill.",
+          );
+        store.write(
+          target.room_id,
+          target.agent_id,
+          {
+            instructions: current.instructions,
+            pins: current.pins.map((pin) =>
+              pin.skill_id === skillId
+                ? { ...pin, revision_id: revisionId }
+                : pin,
+            ),
+            review: review ? [revisionId] : [],
+          },
+          this.assignmentLabel(target.room_id, target.agent_id),
+        );
+        changed.push(target);
+      }
+    })();
+    for (const target of changed)
+      this.logEvent("assignment_changed", target.room_id, target.agent_id, {
+        kind: "update",
+      });
+    this.notify();
+  }
+
+  /** Members across rooms whose assignment pins this skill. */
+  skillUsages(skillId: string) {
+    return this.db
+      .prepare(
+        `SELECT p.room_id, r.name AS room_name, p.agent_id, a.display_name,
+           COALESCE(n.name, a.display_name) AS member_name, p.skill_revision_id AS revision_id,
+           sr.number, m.assignment_revision AS base_revision, r.archived_at IS NOT NULL AS archived
+         FROM room_member_skills p JOIN rooms r ON r.id = p.room_id
+         JOIN agents a ON a.id = p.agent_id
+         JOIN room_members m ON m.room_id = p.room_id AND m.agent_id = p.agent_id
+         JOIN skill_revisions sr ON sr.id = p.skill_revision_id
+         LEFT JOIN room_agent_names n ON n.room_id = p.room_id AND n.agent_id = p.agent_id
+         WHERE p.skill_id = ? ORDER BY r.name, member_name`,
+      )
+      .all(skillId);
+  }
+
+  private assignmentLabel(roomId: number, agentId: string): string {
     const row = this.db
       .prepare(
-        `SELECT b.content FROM role_revision_skills p JOIN skill_revision_files f ON f.revision_id=p.skill_revision_id JOIN skill_blobs b ON b.hash=f.blob_hash WHERE p.role_revision_id=? AND p.skill_revision_id=? AND f.path=?`,
+        `SELECT r.name AS room, COALESCE(n.name, a.display_name) AS member FROM rooms r
+         JOIN agents a ON a.id = ?
+         LEFT JOIN room_agent_names n ON n.room_id = r.id AND n.agent_id = a.id WHERE r.id = ?`,
       )
-      .get(roleRevision, skillRevisionId, path) as
-      { content: Buffer } | undefined;
-    if (!row)
-      throw new KonfabError("forbidden", 403, "Skill file is not assigned");
-    return fileChunk(row.content, offset, max);
+      .get(agentId, roomId) as { room: string; member: string };
+    return `Room ${row.room} · ${row.member}`;
   }
-  rolesChanged(roomId: number, agentId: string): void {
-    this.logEvent("role_changed", roomId, agentId, { kind: "role_pack" });
+
+  assignmentChanged(roomId: number, agentId: string): void {
+    this.logEvent("assignment_changed", roomId, agentId, {});
     this.notify();
+  }
+
+  /** Assignment fields for join_room: always the full form; not marked delivered. */
+  private joinAssignment(roomId: number, agentId: string): AssignmentReply {
+    const store = this.assignments();
+    const legacy = store.legacyRole(roomId, agentId, true);
+    const assignment = store.full(roomId, agentId);
+    if (legacy) return { role: legacy, assignment };
+    return {
+      role: assignment ? { changed: true, notice: ROLES_REPLACED } : null,
+      assignment,
+    };
+  }
+
+  /**
+   * Assignment fields for a turn. The first build is stored on the turn so
+   * replays are identical; it marks what the member has now received.
+   */
+  private turnAssignment(roomId: number, turn: TurnRow): AssignmentReply {
+    const saved = this.db
+      .prepare("SELECT reply_assignment_json FROM turns WHERE id = ?")
+      .get(turn.id) as { reply_assignment_json: string | null };
+    if (saved.reply_assignment_json !== null)
+      return JSON.parse(saved.reply_assignment_json) as AssignmentReply;
+    return this.db.transaction(() => {
+      const store = this.assignments();
+      const agentId = turn.agent_id;
+      const current = store.current(roomId, agentId);
+      const member = this.db
+        .prepare(
+          "SELECT delivered_assignment_json, upgrade_notice FROM room_members WHERE room_id = ? AND agent_id = ?",
+        )
+        .get(roomId, agentId) as {
+        delivered_assignment_json: string;
+        upgrade_notice: number;
+      };
+      const before = JSON.parse(
+        member.delivered_assignment_json,
+      ) as DeliveredIdentity;
+      const after = store.identity(current.instructions, current.pins);
+      const change = changeNotice(before, after);
+      const notice =
+        [change, member.upgrade_notice ? UPGRADE_NOTICE : null]
+          .filter(Boolean)
+          .join(" ") || undefined;
+      const full = change !== null || member.upgrade_notice === 1;
+      const empty = !current.pins.length && !current.instructions.trim();
+      const reply: AssignmentReply = {};
+      if (current.legacy_role_revision_id) {
+        const legacy = store.legacyRole(roomId, agentId, full);
+        reply.role = legacy && notice ? { ...legacy, notice } : legacy;
+      } else if (change !== null)
+        reply.role = {
+          changed: true,
+          notice: empty ? (change ?? ROLES_REPLACED) : ROLES_REPLACED,
+          ...(empty ? { removed: true } : {}),
+        };
+      if (empty && !full) reply.assignment = null;
+      else
+        reply.assignment = full
+          ? fullAssignment(
+              this.db,
+              current.revision,
+              current.instructions,
+              current.pins,
+              notice,
+            )
+          : { revision: current.revision, changed: false, reminder: REMINDER };
+      this.db
+        .prepare(
+          "UPDATE room_members SET delivered_assignment_json = ?, upgrade_notice = 0 WHERE room_id = ? AND agent_id = ?",
+        )
+        .run(JSON.stringify(after), roomId, agentId);
+      this.db
+        .prepare("UPDATE turns SET reply_assignment_json = ? WHERE id = ?")
+        .run(JSON.stringify(reply), turn.id);
+      return reply;
+    })();
+  }
+
+  /**
+   * When a turn that delivered a change notice is abandoned and requeued, the
+   * requeued turn repeats it, unless the assignment has changed again since.
+   */
+  private carryAssignmentNotice(
+    turn: TurnRow,
+    where: string,
+    params: unknown[],
+  ): void {
+    const prior = this.db
+      .prepare("SELECT reply_assignment_json FROM turns WHERE id = ?")
+      .get(turn.id) as { reply_assignment_json: string | null };
+    if (!prior.reply_assignment_json) return;
+    const reply = JSON.parse(prior.reply_assignment_json) as {
+      assignment?: { notice?: string } | null;
+      role?: { notice?: string } | null;
+    };
+    if (!reply.assignment?.notice && !reply.role?.notice) return;
+    const member = this.db
+      .prepare(
+        "SELECT delivered_assignment_json FROM room_members WHERE room_id = ? AND agent_id = ?",
+      )
+      .get(turn.room_id, turn.agent_id) as
+      { delivered_assignment_json: string } | undefined;
+    if (!member) return;
+    const store = this.assignments();
+    const current = store.current(turn.room_id, turn.agent_id);
+    if (
+      member.delivered_assignment_json !==
+      JSON.stringify(store.identity(current.instructions, current.pins))
+    )
+      return;
+    this.db
+      .prepare(`UPDATE turns SET reply_assignment_json = ? WHERE ${where}`)
+      .run(prior.reply_assignment_json, ...params);
   }
   private readonly changes = new EventEmitter();
   private readonly now: () => number;
@@ -603,7 +897,7 @@ export class KonfabService {
       throw new KonfabError(
         "invalid_agent",
         400,
-        "A role can only be assigned when the agent joins a room.",
+        "Skills can only be assigned when the agent joins a room.",
       );
     if (
       !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(id) ||
@@ -651,7 +945,7 @@ export class KonfabService {
       afterAdd?.();
     })();
     if (afterAdd && roomId !== undefined)
-      this.logEvent("role_changed", roomId, id, { kind: "role_pack" });
+      this.logEvent("assignment_changed", roomId, id, {});
     this.notify();
   }
 
@@ -1110,51 +1404,33 @@ export class KonfabService {
     this.notify();
   }
 
-  /** Sets an agent's role in one room. It applies from the agent's next turn. */
-  setMemberRole(
-    ref: RoomRef,
-    agentId: string,
-    settings: { role: string; can_edit: boolean; base_role_revision?: number },
-  ): void {
+  /** Sets whether a member may edit files in one room. */
+  setMemberEdit(ref: RoomRef, agentId: string, canEdit: boolean): void {
     const room = this.room(ref);
     this.requireMember(room.id, agentId);
-    this.validateLength(settings.role, MAX_ROLE_CHARS, "Roles");
-    this.db.transaction(() => {
-      const current = this.db
-        .prepare(
-          "SELECT role_assignment_revision FROM room_members WHERE room_id = ? AND agent_id = ?",
-        )
-        .get(room.id, agentId) as { role_assignment_revision: number };
-      if (
-        current.role_assignment_revision !== (settings.base_role_revision ?? 0)
+    this.db
+      .prepare(
+        "UPDATE room_members SET can_edit = ? WHERE room_id = ? AND agent_id = ?",
       )
-        throw new KonfabError("role_conflict", 409, "Role assignment changed");
-      new RoleLibrary(this.db).snapshotActiveTurn(room.id, agentId);
-      this.db
-        .prepare(
-          "DELETE FROM room_member_roles WHERE room_id = ? AND agent_id = ?",
-        )
-        .run(room.id, agentId);
-      this.db
-        .prepare(
-          "UPDATE room_members SET role = ?, can_edit = ?, role_assignment_revision = role_assignment_revision + 1 WHERE room_id = ? AND agent_id = ?",
-        )
-        .run(settings.role.trim(), settings.can_edit ? 1 : 0, room.id, agentId);
-    })();
-    this.logEvent("role_changed", room.id, agentId, {
-      can_edit: settings.can_edit,
+      .run(canEdit ? 1 : 0, room.id, agentId);
+    this.logEvent("member_access_changed", room.id, agentId, {
+      can_edit: canEdit,
     });
     this.notify();
   }
 
-  reassignRoles(
+  /**
+   * Swaps, rotates, assigns or removes complete skill bundles (skills and room
+   * instructions) across members in one transaction. Names, identity, session
+   * and edit permission stay with each member.
+   */
+  reassignAssignments(
     ref: RoomRef,
     changes: Array<{
       agent_id: string;
       from_agent_id?: string;
-      role_id?: string;
-      role_revision_id?: string;
-      notes?: string;
+      pins?: Pin[];
+      instructions?: string;
       none?: boolean;
       base_revision: number;
     }>,
@@ -1166,57 +1442,51 @@ export class KonfabService {
       changes.some((change) => {
         const kinds =
           Number(!!change.from_agent_id) +
-          Number(!!change.role_id || !!change.role_revision_id) +
+          Number(change.pins !== undefined) +
           Number(change.none === true);
         return (
           kinds !== 1 ||
-          !!change.role_id !== !!change.role_revision_id ||
           (!!change.from_agent_id && !ids.includes(change.from_agent_id)) ||
-          (change.notes?.length ?? 0) > 4000
+          (change.instructions?.length ?? 0) > MAX_ROLE_CHARS
         );
       })
     )
-      throw new KonfabError("invalid_swap", 400, "Invalid role reassignment.");
+      throw new KonfabError("invalid_swap", 400, "Invalid reassignment.");
     const room = this.room(ref);
     if (room.archived_at !== null)
       throw new KonfabError("room_archived", 409, "This room is archived");
     this.db.transaction(() => {
-      type Row = {
-        agent_id: string;
-        role: string;
-        can_edit: number;
-        role_assignment_revision: number;
-        display_name: string;
-        role_id: string | null;
-        role_revision_id: string | null;
-        notes: string | null;
-        title: string | null;
-      };
-      const read = (id: string) =>
-        this.db
-          .prepare(
-            `SELECT m.agent_id,m.role,m.can_edit,m.role_assignment_revision,a.display_name,p.role_id,p.role_revision_id,p.notes,r.title FROM room_members m JOIN agents a ON a.id=m.agent_id LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id LEFT JOIN role_revisions r ON r.id=p.role_revision_id WHERE m.room_id=? AND m.agent_id=?`,
-          )
-          .get(room.id, id) as Row | undefined;
-      const members = changes.map((change) => read(change.agent_id));
-      if (members.some((member) => !member))
-        throw new KonfabError(
-          "invalid_swap",
-          404,
-          "All members must belong to this room.",
-        );
-      const rows = members as Row[];
-      const conflict = rows.find(
-        (member, index) =>
-          member.role_assignment_revision !== changes[index]!.base_revision,
+      const store = this.assignments();
+      const names = new Map<string, string>();
+      const before = new Map(
+        changes.map((change) => {
+          const member = this.db
+            .prepare(
+              `SELECT COALESCE(n.name, a.display_name) AS name FROM room_members m JOIN agents a ON a.id = m.agent_id
+               LEFT JOIN room_agent_names n ON n.room_id = m.room_id AND n.agent_id = m.agent_id
+               WHERE m.room_id = ? AND m.agent_id = ?`,
+            )
+            .get(room.id, change.agent_id) as { name: string } | undefined;
+          if (!member)
+            throw new KonfabError(
+              "invalid_swap",
+              404,
+              "All members must belong to this room.",
+            );
+          names.set(change.agent_id, member.name);
+          return [change.agent_id, store.current(room.id, change.agent_id)];
+        }),
+      );
+      const conflict = changes.find(
+        (change) =>
+          before.get(change.agent_id)!.revision !== change.base_revision,
       );
       if (conflict)
         throw new KonfabError(
-          "role_conflict",
+          "assignment_conflict",
           409,
-          `${conflict.display_name}'s role changed since the preview. Refresh and try again.`,
+          `${names.get(conflict.agent_id)}'s assignment changed since the preview. Refresh and try again.`,
         );
-      const byId = new Map(rows.map((member) => [member.agent_id, member]));
       const effective = changes.filter(
         (change) => change.from_agent_id !== change.agent_id,
       );
@@ -1226,121 +1496,47 @@ export class KonfabService {
           400,
           "Choose at least one change.",
         );
-      const incoming = effective.map((change) => {
-        if (change.from_agent_id) return byId.get(change.from_agent_id)!;
-        const recipient = byId.get(change.agent_id)!;
-        if (change.none)
-          return {
-            ...recipient,
-            role: "",
-            role_id: null,
-            role_revision_id: null,
-            notes: null,
-            title: null,
-          };
-        const role = this.db
-          .prepare("SELECT title FROM role_revisions WHERE id=? AND role_id=?")
-          .get(change.role_revision_id, change.role_id) as
-          { title: string } | undefined;
-        if (!role)
-          throw new KonfabError("invalid_swap", 409, "Role unavailable.");
-        return {
-          ...recipient,
-          role: "",
-          role_id: change.role_id!,
-          role_revision_id: change.role_revision_id!,
-          notes: change.notes ?? "",
-          title: role.title,
-        };
-      });
-      for (const member of incoming) {
-        if (member.role_revision_id) {
-          const valid = this.db
-            .prepare(
-              `SELECT 1 FROM role_revisions r JOIN roles o ON o.id=r.role_id WHERE r.id=? AND r.role_id=? AND o.trashed_at IS NULL`,
-            )
-            .get(member.role_revision_id, member.role_id);
-          const unreviewed = this.db
-            .prepare(
-              `SELECT 1 FROM role_revision_skills p LEFT JOIN skill_reviews v ON v.revision_id=p.skill_revision_id WHERE p.role_revision_id=? AND v.revision_id IS NULL LIMIT 1`,
-            )
-            .get(member.role_revision_id);
-          if (!valid || unreviewed)
-            throw new KonfabError(
-              "invalid_swap",
-              409,
-              "A role or reviewed skill is unavailable; refresh the preview.",
-            );
-        }
-      }
+      const describe = (pins: Pin[], instructions: string) =>
+        pins.length
+          ? skillEntries(this.db, pins)
+              .map((entry) => `${entry.name} rev ${entry.number}`)
+              .join(", ")
+          : instructions.trim()
+            ? "room instructions only"
+            : "no skills";
+      const summary: string[] = [];
       for (const change of effective) {
-        const member = byId.get(change.agent_id)!;
-        const active = this.db
-          .prepare(
-            "SELECT id, swap_role_snapshot_json FROM turns WHERE room_id=? AND agent_id=? AND state='active'",
-          )
-          .get(room.id, member.agent_id) as
-          { id: number; swap_role_snapshot_json: string | null } | undefined;
-        if (active && active.swap_role_snapshot_json === null) {
-          const snapshot = JSON.stringify(
-            new RoleLibrary(this.db).envelope(
-              room.id,
-              member.agent_id,
-              false,
-              true,
-            ),
-          );
-          this.db
-            .prepare(
-              "UPDATE turns SET swap_role_snapshot_json=?, swap_role_text_snapshot=?, role_envelope_json=COALESCE(role_envelope_json, ?) WHERE id=?",
-            )
-            .run(snapshot, member.role, snapshot, active.id);
-        }
+        const old = before.get(change.agent_id)!;
+        const source = change.from_agent_id
+          ? before.get(change.from_agent_id)!
+          : null;
+        const incoming = source
+          ? { pins: source.pins, instructions: source.instructions }
+          : change.none
+            ? { pins: [], instructions: "" }
+            : {
+                pins: change.pins!,
+                instructions: change.instructions ?? old.instructions,
+              };
+        store.write(
+          room.id,
+          change.agent_id,
+          incoming,
+          this.assignmentLabel(room.id, change.agent_id),
+        );
+        summary.push(
+          `${names.get(change.agent_id)}: ${describe(old.pins, old.instructions)} → ${describe(incoming.pins, incoming.instructions)}${change.from_agent_id ? ` (from ${names.get(change.from_agent_id)})` : ""}`,
+        );
       }
-      const remove = this.db.prepare(
-        "DELETE FROM room_member_roles WHERE room_id=? AND agent_id=?",
-      );
-      for (const change of effective) remove.run(room.id, change.agent_id);
-      const apply = (recipient: Row, incoming: Row) => {
-        this.db
-          .prepare(
-            "UPDATE room_members SET role=?, role_assignment_revision=role_assignment_revision+1 WHERE room_id=? AND agent_id=?",
-          )
-          .run(incoming.role, room.id, recipient.agent_id);
-        if (incoming.role_id && incoming.role_revision_id)
-          this.db
-            .prepare(
-              `INSERT INTO room_member_roles(room_id,agent_id,role_id,role_revision_id,notes,revision,generation,delivered_generation,assigned_at) VALUES (?, ?, ?, ?, ?, 0, 1, 0, ?)`,
-            )
-            .run(
-              room.id,
-              recipient.agent_id,
-              incoming.role_id,
-              incoming.role_revision_id,
-              incoming.notes ?? "",
-              this.now(),
-            );
-      };
-      effective.forEach((change, index) =>
-        apply(byId.get(change.agent_id)!, incoming[index]!),
-      );
-      const label = (member: Row) =>
-        member.title || (member.role ? "custom role" : "no role");
-      const summary = effective
-        .map(
-          (change, index) =>
-            `${byId.get(change.agent_id)!.display_name}: ${label(byId.get(change.agent_id)!)} → ${label(incoming[index]!)}${change.from_agent_id ? ` (from ${byId.get(change.from_agent_id)!.display_name})` : ""}`,
-        )
-        .join("; ");
       this.insertMessage(
         room.id,
         "user",
         "system",
-        `Roles reassigned by lead: ${summary}. Each agent: read your role and hand over open work, branches, reviews and next steps. The new role applies on your next turn.`,
+        `Skills reassigned by lead: ${summary.join("; ")}. Each agent: read your assignment and hand over open work, branches, reviews and next steps. The new assignment applies on your next turn.`,
         [],
       );
       for (const change of effective)
-        this.logEvent("role_changed", room.id, change.agent_id, {
+        this.logEvent("assignment_changed", room.id, change.agent_id, {
           kind: "swap",
         });
     })();
@@ -1968,16 +2164,17 @@ export class KonfabService {
     const room = this.room(ref);
     const agents = this.db
       .prepare(
-        `SELECT a.id, a.display_name, a.bridge_protocol, m.role, m.can_edit,
-         n.name AS room_name,
+        `SELECT a.id, a.display_name, a.bridge_protocol, m.instructions, m.can_edit,
+         m.assignment_revision, n.name AS room_name,
          EXISTS(SELECT 1 FROM sessions s WHERE s.room_id=m.room_id AND s.agent_id=m.agent_id) AS name_fixed,
-         rr.title AS role_title, rr.number AS role_number,
-         EXISTS(SELECT 1 FROM converted_role_history h WHERE h.room_id=m.room_id AND h.agent_id=m.agent_id AND h.role_id=mr.role_id AND h.assignment_revision=m.role_assignment_revision AND h.reverted_at IS NULL) AS role_can_revert
+         (SELECT r.name || ' rev ' || r.number FROM room_member_skills p JOIN skill_revisions r ON r.id = p.skill_revision_id
+            WHERE p.room_id = m.room_id AND p.agent_id = m.agent_id ORDER BY p.position LIMIT 1) AS first_skill,
+         (SELECT count(*) FROM room_member_skills p WHERE p.room_id = m.room_id AND p.agent_id = m.agent_id) AS skill_count,
+         EXISTS(SELECT 1 FROM room_member_skills p JOIN skills k ON k.id = p.skill_id
+            WHERE p.room_id = m.room_id AND p.agent_id = m.agent_id AND k.current_revision_id <> p.skill_revision_id) AS update_available
          FROM room_members m
          JOIN agents a ON a.id = m.agent_id
          LEFT JOIN room_agent_names n ON n.room_id = m.room_id AND n.agent_id = m.agent_id
-         LEFT JOIN room_member_roles mr ON mr.room_id = m.room_id AND mr.agent_id = m.agent_id
-         LEFT JOIN role_revisions rr ON rr.id = mr.role_revision_id
          WHERE m.room_id = ? ORDER BY m.position`,
       )
       .all(room.id) as {
@@ -1985,12 +2182,13 @@ export class KonfabService {
       display_name: string;
       room_name: string | null;
       name_fixed: number;
-      role: string;
+      instructions: string;
       can_edit: number;
+      assignment_revision: number;
       bridge_protocol: number | null;
-      role_title: string | null;
-      role_number: number | null;
-      role_can_revert: number;
+      first_skill: string | null;
+      skill_count: number;
+      update_available: number;
     }[];
     const queued = this.db
       .prepare(
@@ -2040,13 +2238,19 @@ export class KonfabService {
           display_name: agent.display_name,
           room_name: agent.room_name,
           name_fixed: agent.name_fixed === 1,
-          role: agent.role_title
-            ? `${agent.role_title} · rev ${agent.role_number}`
-            : agent.role,
-          role_pack_label: agent.role_title
-            ? `${agent.role_title} rev ${agent.role_number}`
-            : null,
-          role_can_revert: agent.role_can_revert === 1,
+          assignment: {
+            label: agent.first_skill
+              ? agent.skill_count > 1
+                ? `${agent.first_skill} + ${agent.skill_count - 1} skill${agent.skill_count > 2 ? "s" : ""}`
+                : agent.first_skill
+              : agent.instructions.trim()
+                ? "Room instructions only"
+                : "No skills",
+            skill_count: agent.skill_count,
+            instructions: agent.instructions,
+            revision: agent.assignment_revision,
+            update_available: agent.update_available === 1,
+          },
           can_edit: agent.can_edit === 1,
           state: this.agentState(room.id, agent.id),
           turn_quiet_since: this.turnQuietSince(room.id, session),
@@ -2216,7 +2420,7 @@ export class KonfabService {
       room: room.name,
       topic: room.topic,
       rules: this.instructionsFor(room.id, agentId),
-      role: new RoleLibrary(this.db).envelope(room.id, agentId, false, true),
+      ...this.joinAssignment(room.id, agentId),
       members: this.memberIds(room.id),
       member_names: this.memberNames(room.id),
       recent_messages: this.withAttachments(
@@ -4217,23 +4421,21 @@ export class KonfabService {
   // Internals
 
   /** Builds an agent's instructions, with the core rules always last. */
-  private instructionsFor(
-    roomId: number,
-    agentId: string,
-    roleOverride?: string,
-  ): string {
+  private instructionsFor(roomId: number, agentId: string): string {
     const room = this.roomById(roomId);
     const members = this.db
       .prepare(
-        `SELECT m.agent_id, m.role, m.can_edit, a.display_name FROM room_members m
+        `SELECT m.agent_id, m.can_edit, a.display_name,
+           length(trim(m.instructions)) > 0 OR EXISTS(SELECT 1 FROM room_member_skills p WHERE p.room_id = m.room_id AND p.agent_id = m.agent_id) AS assigned
+         FROM room_members m
          JOIN agents a ON a.id = m.agent_id
          WHERE m.room_id = ? ORDER BY m.position`,
       )
       .all(roomId) as {
       agent_id: string;
-      role: string;
       can_edit: number;
       display_name: string;
+      assigned: number;
     }[];
     const self = members.find((member) => member.agent_id === agentId);
     const editors = members.filter((member) => member.can_edit === 1);
@@ -4241,8 +4443,10 @@ export class KonfabService {
     const parts = [LEAD_RULE];
     if (room.brief.trim())
       parts.push(`Room brief from the lead: ${room.brief}`);
-    const currentRole = roleOverride ?? self?.role;
-    if (currentRole) parts.push(`Your role in this room: ${currentRole}`);
+    if (self?.assigned)
+      parts.push(
+        "Follow your assignment in this room: your room instructions and skills. Re-read it with read_role (or read_assignment).",
+      );
     if (self?.can_edit === 1) {
       parts.push("You may edit files and repos for this room's work.");
     } else if (editors.length > 0) {
@@ -4790,82 +4994,7 @@ export class KonfabService {
   }
 
   private buildTurn(room: RoomRow, turn: TurnRow): WaitResult {
-    const savedRole = this.db
-      .prepare("SELECT role_envelope_json FROM turns WHERE id = ?")
-      .get(turn.id) as { role_envelope_json: string | null };
-    let roleEnvelope:
-      | ReturnType<RoleLibrary["envelope"]>
-      | { changed: true; notice: string; removed?: true };
-    if (savedRole.role_envelope_json !== null) {
-      roleEnvelope = JSON.parse(
-        savedRole.role_envelope_json,
-      ) as typeof roleEnvelope;
-    } else {
-      roleEnvelope = this.db.transaction(() => {
-        const current = this.db
-          .prepare(
-            `SELECT m.delivered_role_identity, m.delivered_role_label,
-          json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS identity,
-          COALESCE(r.title,CASE WHEN length(trim(m.role))>0 THEN 'custom role' ELSE 'no role' END) AS label
-          FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id
-          LEFT JOIN role_revisions r ON r.id=p.role_revision_id WHERE m.room_id=? AND m.agent_id=?`,
-          )
-          .get(room.id, turn.agent_id) as {
-          delivered_role_identity: string;
-          delivered_role_label: string;
-          identity: string;
-          label: string;
-        };
-        type Identity = {
-          role: string;
-          role_id: string | null;
-          revision: string | null;
-          notes: string | null;
-        };
-        const before = JSON.parse(current.delivered_role_identity) as Identity;
-        const after = JSON.parse(current.identity) as Identity;
-        const changed = current.identity !== current.delivered_role_identity;
-        const role = new RoleLibrary(this.db).envelope(
-          room.id,
-          turn.agent_id,
-          true,
-          changed,
-        );
-        let delivered: typeof roleEnvelope = role;
-        if (changed) {
-          const first = !before.role_id && !before.role;
-          const removed = !after.role_id && !after.role;
-          const notesOnly =
-            !!after.role_id &&
-            before.role_id === after.role_id &&
-            before.revision === after.revision &&
-            before.role === after.role;
-          const notice = notesOnly
-            ? `Your room notes for ${current.label} changed: ${after.notes || "(none)"}. Your role and duties remain the same.`
-            : first
-              ? `You have been assigned the role ${current.label}. Read it before continuing.`
-              : removed
-                ? `Your role ${current.delivered_role_label} was removed. Stop its duties and hand over open work, branches, reviews and pending pushes.`
-                : `Your role changed from ${current.delivered_role_label} to ${current.label}. Stop your previous role's duties, read your new role, and hand over open work, branches, reviews and pending pushes.`;
-          delivered = role
-            ? { ...role, notice }
-            : {
-                changed: true,
-                notice,
-                ...(removed ? { removed: true as const } : {}),
-              };
-          this.db
-            .prepare(
-              "UPDATE room_members SET delivered_role_identity=?, delivered_role_label=? WHERE room_id=? AND agent_id=?",
-            )
-            .run(current.identity, current.label, room.id, turn.agent_id);
-        }
-        this.db
-          .prepare("UPDATE turns SET role_envelope_json = ? WHERE id = ?")
-          .run(JSON.stringify(delivered), turn.id);
-        return delivered;
-      })();
-    }
+    const reply = this.turnAssignment(room.id, turn);
     const member = this.db
       .prepare(
         "SELECT agent_id, last_seen_message_id, decision_seen_event_id FROM room_members WHERE room_id = ? AND agent_id = ?",
@@ -4997,16 +5126,8 @@ export class KonfabService {
               : {};
           })()
         : {}),
-      rules: this.instructionsFor(
-        room.id,
-        turn.agent_id,
-        (
-          this.db
-            .prepare("SELECT swap_role_text_snapshot FROM turns WHERE id=?")
-            .get(turn.id) as { swap_role_text_snapshot: string | null }
-        ).swap_role_text_snapshot ?? undefined,
-      ),
-      role: roleEnvelope,
+      rules: this.instructionsFor(room.id, turn.agent_id),
+      ...reply,
       member_names: this.memberNames(room.id),
       messages: this.withAttachments(room.id, messages),
       truncated,
@@ -5066,32 +5187,11 @@ export class KonfabService {
           this.now(),
           turn.parallel_source_message_id,
         );
-      const prior = this.db
-        .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
-        .get(turn.id) as { role_envelope_json: string | null };
-      const identity = this.db
-        .prepare(
-          `SELECT m.delivered_role_identity, json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS current_identity FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
-        )
-        .get(turn.room_id, turn.agent_id) as
-        | { delivered_role_identity: string; current_identity: string }
-        | undefined;
-      if (
-        prior.role_envelope_json &&
-        identity?.delivered_role_identity === identity?.current_identity &&
-        (JSON.parse(prior.role_envelope_json) as { notice?: string } | null)
-          ?.notice
-      )
-        this.db
-          .prepare(
-            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND parallel_source_message_id=? AND state='queued'",
-          )
-          .run(
-            prior.role_envelope_json,
-            turn.room_id,
-            turn.agent_id,
-            turn.parallel_source_message_id,
-          );
+      this.carryAssignmentNotice(
+        turn,
+        "room_id=? AND agent_id=? AND parallel_source_message_id=? AND state='queued'",
+        [turn.room_id, turn.agent_id, turn.parallel_source_message_id],
+      );
       this.logEvent("turn_abandoned", turn.room_id, turn.agent_id, {
         turn_id: turn.id,
       });
@@ -5120,58 +5220,20 @@ export class KonfabService {
             turn.format_run_id,
             turn.format_step_index,
           );
-        const prior = this.db
-          .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
-          .get(turn.id) as { role_envelope_json: string | null };
-        const identity = this.db
-          .prepare(
-            `SELECT m.delivered_role_identity, json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS current_identity FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
-          )
-          .get(turn.room_id, turn.agent_id) as
-          | { delivered_role_identity: string; current_identity: string }
-          | undefined;
-        if (
-          prior.role_envelope_json &&
-          identity?.delivered_role_identity === identity?.current_identity &&
-          (JSON.parse(prior.role_envelope_json) as { notice?: string } | null)
-            ?.notice
-        )
-          this.db
-            .prepare(
-              "UPDATE turns SET role_envelope_json=? WHERE format_run_id=? AND format_step_index=? AND state='queued'",
-            )
-            .run(
-              prior.role_envelope_json,
-              turn.format_run_id,
-              turn.format_step_index,
-            );
+        this.carryAssignmentNotice(
+          turn,
+          "format_run_id=? AND format_step_index=? AND state='queued'",
+          [turn.format_run_id, turn.format_step_index],
+        );
         return;
       }
     }
     this.enqueue(turn.room_id, turn.agent_id, turn.reason);
-    const prior = this.db
-      .prepare("SELECT role_envelope_json FROM turns WHERE id=?")
-      .get(turn.id) as { role_envelope_json: string | null };
-    const identity = this.db
-      .prepare(
-        `SELECT m.delivered_role_identity, json_object('role',m.role,'role_id',p.role_id,'revision',p.role_revision_id,'notes',p.notes) AS current_identity FROM room_members m LEFT JOIN room_member_roles p ON p.room_id=m.room_id AND p.agent_id=m.agent_id WHERE m.room_id=? AND m.agent_id=?`,
-      )
-      .get(turn.room_id, turn.agent_id) as
-      { delivered_role_identity: string; current_identity: string } | undefined;
-    if (
-      prior.role_envelope_json &&
-      identity?.delivered_role_identity === identity?.current_identity
-    ) {
-      const role = JSON.parse(prior.role_envelope_json) as {
-        notice?: string;
-      } | null;
-      if (role?.notice)
-        this.db
-          .prepare(
-            "UPDATE turns SET role_envelope_json=? WHERE room_id=? AND agent_id=? AND state='queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL AND role_envelope_json IS NULL",
-          )
-          .run(prior.role_envelope_json, turn.room_id, turn.agent_id);
-    }
+    this.carryAssignmentNotice(
+      turn,
+      "room_id=? AND agent_id=? AND state='queued' AND format_run_id IS NULL AND parallel_source_message_id IS NULL AND reply_assignment_json IS NULL",
+      [turn.room_id, turn.agent_id],
+    );
     this.db
       .prepare(
         `UPDATE turns SET timeout_retry_count = MAX(timeout_retry_count, ?),
