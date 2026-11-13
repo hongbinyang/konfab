@@ -55,6 +55,30 @@ describe("contact notice on agent cards", () => {
     expect(screen.getByText(`Working · no update since ${time}`)).toBeTruthy();
   });
 
+  it("warns about a quiet active turn without saying it stopped", () => {
+    render(
+      <ContactNotice
+        agent={agent({ state: "working", turn_quiet_since: at })}
+      />,
+    );
+    expect(screen.getByText(`Working · no contact since ${time}`)).toBeTruthy();
+    expect(
+      screen.getByText(/A long command may still be running/),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Copy rejoin prompt" }),
+    ).toBeTruthy();
+  });
+
+  it("shows nothing for a working agent that is checking in", () => {
+    const { container } = render(
+      <ContactNotice
+        agent={agent({ state: "working", turn_quiet_since: null })}
+      />,
+    );
+    expect(container.textContent).toBe("");
+  });
+
   it("copies the rejoin prompt", async () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });

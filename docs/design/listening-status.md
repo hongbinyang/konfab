@@ -33,22 +33,20 @@ The agent's last `wait_for_turn` was at about 17:00:00. The lead posted `@all` a
 
 ### One contact rule (server)
 
-`contactStale(session)` is true when **all** of these hold:
+All contact checks measure from `lastContact = max(last_call_at, server_started_at)`, so a restart starts a fresh grace period everywhere.
 
-- the session is active, the run window is active, the room isn't on break, and the agent has **no active turn**;
-- `now - max(last_call_at, server_started_at) > limit`, where `limit` is:
-  - **waiting** agents: `wait_timeout + 60 s` (110 s by default, same as today's event);
-  - agents with a **working status**: `2 × check-in interval + 60 s` (5 min by default), so a 2-minute reporter is never flagged between reports.
-
-`agentState()` and the tick both use it. `isLive()` (90 s) is left as is for turn routing (who to skip, handoffs, automatic continuations); changing routing is a separate decision. The restart grace comes from `server_started_at`, kept in memory and set at boot.
+- **Waiting agents** (no active turn, no working status): reachable while `now - lastContact <= live window` (90 s). This is `isLive()`, which routing already used (turn skipping, handoffs, automatic continuations, `eligible_agents`). The card's **No contact** and the `contact_lost` event now use the same rule, so the page never shows an agent as waiting while routing skips it. The only change to routing is the restart grace.
+- **Agents working outside a turn** (working status set): **No contact** only after two missed check-ins plus a minute (`2 x check-in + 60 s`, 5 min by default). Routing still treats them as busy (`routing.working`) and skips them, which matches the card saying **Working**.
+- **Agents in an active turn:** a long command can keep a client quiet, so Konfab never logs `contact_lost`, requeues or replaces the turn. After two missed check-ins the card adds a warning (`turn_quiet_since`): **Working · no contact since 5:00 PM** with "A long command may still be running" and **Copy rejoin prompt**. The warning clears on the next call, such as `report_status`.
 
 ### Card wording (page)
 
-| State                    | Card                                                                                                                                              |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stale while waiting      | **No contact · last 5:00 PM** (amber), then "Its conversation may have stopped. Paste the rejoin prompt in that app." with **Copy rejoin prompt** |
-| Stale while working      | **Working · no update since 5:00 PM** (amber), then the same hint and button                                                                      |
-| Mention queued and stale | Adds "Your mention from 5:01 PM is waiting"                                                                                                       |
+| State                    | Card                                                                                                                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stale while waiting      | **No contact · last 5:00 PM** (amber), then "Its conversation may have stopped. Paste the rejoin prompt in that app." with **Copy rejoin prompt**                                      |
+| Stale while working      | **Working · no update since 5:00 PM** (amber), then the same hint and button                                                                                                           |
+| Quiet active turn        | **Working · no contact since 5:00 PM** (amber), "A long command may still be running. If its app shows it has stopped, paste the rejoin prompt into that app.", **Copy rejoin prompt** |
+| Mention queued and stale | Adds "Your mention from 5:01 PM is waiting"                                                                                                                                            |
 
 The wording describes **last contact**, not "quit" or "out of allowance", because Konfab can't know why a conversation stopped. Allowance stays a separate state, set only when the agent reports `low_allowance` or `out_of_allowance`. **Copy rejoin prompt** reuses the existing join prompt.
 
@@ -58,7 +56,7 @@ The wording describes **last contact**, not "quit" or "out of allowance", becaus
 
 ### Prevention (bridge)
 
-The idle reply gains `next: "Call wait_for_turn again now. Keep this conversation in the loop until the status is closed or replaced, or the lead says stop."` The join prompt gets the same sentence. This is text only; the tool behaves the same.
+The idle reply gains `next: "Call wait_for_turn again now. Keep this conversation in the loop until the status is closed or replaced, or the lead says stop."` The join prompt says to call `wait_for_turn` again after every post or pass and to keep the loop going when the room is quiet, stopping only on closed, replaced or the lead's explicit stop. It does not tell agents to avoid replying to the lead. This is text only; the tool behaves the same.
 
 ## Out of scope
 

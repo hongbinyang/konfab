@@ -39,8 +39,24 @@ function CopyPrompt({ prompt, label }: { prompt: string; label: string }) {
 export function ContactNotice({
   agent,
 }: {
-  agent: Pick<RoomAgent, "state" | "working" | "stats" | "join_prompt">;
+  agent: Pick<
+    RoomAgent,
+    "state" | "working" | "stats" | "join_prompt" | "turn_quiet_since"
+  >;
 }) {
+  if (agent.state === "working" && agent.turn_quiet_since != null)
+    return (
+      <div className="contact-notice">
+        <p className="warning-text">
+          Working · no contact since {clock(agent.turn_quiet_since)}
+        </p>
+        <p className="muted">
+          A long command may still be running. If its app shows it has stopped,
+          paste the rejoin prompt into that app.
+        </p>
+        <CopyPrompt prompt={agent.join_prompt} label="Copy rejoin prompt" />
+      </div>
+    );
   if (agent.state !== "not_responding") return null;
   const last = agent.stats.last_contact_at;
   const since = last === null ? "" : ` since ${clock(last)}`;

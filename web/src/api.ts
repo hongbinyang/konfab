@@ -106,6 +106,7 @@ export interface RoomAgent {
   id: string;
   display_name: string;
   state: AgentState;
+  turn_quiet_since?: number | null;
   bridge_outdated?: boolean;
   pending_mention_since?: number | null;
   working?: {

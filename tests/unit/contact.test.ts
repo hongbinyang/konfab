@@ -3,7 +3,7 @@ import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 
 const ROOM = "contact";
-const WAIT_LIMIT_MS = 50_000 + 60_000;
+const WAIT_LIMIT_MS = 90_000; // the live window routing uses
 
 describe("contact status", () => {
   let db: Db;
@@ -154,8 +154,114 @@ describe("contact status", () => {
   it("tells agents to stay in the loop in the join prompt", () => {
     const prompt = service.joinPrompt(ROOM);
     expect(prompt).toContain("Stop only if the status is closed or replaced");
+    expect(prompt).toContain("or the lead tells you to stop");
     expect(prompt).toContain(
-      "Never end your reply to me while the room is open",
+      "After every post or pass, call wait_for_turn again",
     );
+    expect(prompt).not.toContain("Never end your reply");
+  });
+
+  describe("agreement with routing", () => {
+    const eligible = () => service.roomState(ROOM).routing.eligible_agents;
+
+    it("shows a waiting agent as no contact exactly when routing skips it", () => {
+      service.poll("claude", claude, true);
+      now += WAIT_LIMIT_MS;
+      expect(state()).toBe("waiting");
+      expect(eligible()).toContain("claude");
+      now += 1;
+      expect(state()).toBe("not_responding");
+      expect(eligible()).not.toContain("claude");
+      service.tick();
+      expect(events()).toContain("contact_lost");
+    });
+
+    it("refuses a handoff to an agent with no contact, and allows it once it is back", () => {
+      const codex = service.join("codex", ROOM).session_id;
+      service.postUserMessage(ROOM, "@claude start");
+      const turn = service.poll("claude", claude, true);
+      if (turn.status !== "turn") throw new Error("expected a turn");
+      const posted = service.postAgentMessage(
+        "claude",
+        claude,
+        turn.turn_id,
+        "@lead and @claude: ready for review",
+      );
+      now += WAIT_LIMIT_MS + 1;
+      service.poll("claude", claude, true);
+      expect(state("codex")).toBe("not_responding");
+      expect(() =>
+        service.handOff("claude", claude, posted.message_id, "codex"),
+      ).toThrow();
+      service.poll("codex", codex, true);
+      expect(state("codex")).not.toBe("not_responding");
+      expect(
+        service.handOff("claude", claude, posted.message_id, "codex").turn_id,
+      ).toBeGreaterThan(0);
+    });
+
+    it("keeps routing and the card in step after a restart", () => {
+      service.poll("claude", claude, true);
+      now += 30 * 60_000;
+      service = createService();
+      expect(state()).toBe("waiting");
+      expect(eligible()).toContain("claude");
+      now += WAIT_LIMIT_MS + 1;
+      expect(state()).toBe("not_responding");
+      expect(eligible()).not.toContain("claude");
+    });
+
+    it("treats an agent working outside a turn as busy, not lost", () => {
+      service.reportStatus("claude", claude, "working", "Long build");
+      now += 3 * 60_000;
+      expect(state()).not.toBe("not_responding");
+      expect(eligible()).not.toContain("claude");
+      expect(service.roomState(ROOM).routing.working).toContain("claude");
+    });
+  });
+
+  describe("quiet active turns", () => {
+    const card = () =>
+      service.roomState(ROOM).agents.find((item) => item.id === "claude");
+    const startTurn = () => {
+      service.postUserMessage(ROOM, "@claude long task");
+      const turn = service.poll("claude", claude, true);
+      if (turn.status !== "turn") throw new Error("expected a turn");
+      return turn.turn_id;
+    };
+
+    it("warns after two missed check-ins without stopping the turn", () => {
+      const turnId = startTurn();
+      const started = now;
+      now += 2 * 2 * 60_000 + 60_000;
+      expect(card()?.turn_quiet_since).toBeNull();
+      now += 1;
+      service.tick();
+      expect(card()?.state).toBe("working");
+      expect(card()?.turn_quiet_since).toBe(started);
+      expect(events()).not.toContain("contact_lost");
+      expect(
+        db.prepare("SELECT state FROM turns WHERE id = ?").get(turnId),
+      ).toEqual({ state: "active" });
+    });
+
+    it("clears the warning when a long operation reports progress", () => {
+      startTurn();
+      now += 6 * 60_000;
+      expect(card()?.turn_quiet_since).not.toBeNull();
+      service.reportStatus("claude", claude, "working", "Still building");
+      expect(card()?.turn_quiet_since).toBeNull();
+      now += 4 * 60_000;
+      expect(card()?.turn_quiet_since).toBeNull();
+    });
+
+    it("lets a recovered agent finish its turn normally", () => {
+      const turnId = startTurn();
+      now += 10 * 60_000;
+      expect(card()?.turn_quiet_since).not.toBeNull();
+      service.postAgentMessage("claude", claude, turnId, "Done");
+      expect(card()?.state).not.toBe("working");
+      expect(card()?.turn_quiet_since).toBeNull();
+    });
   });
 });
