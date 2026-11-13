@@ -16,6 +16,8 @@ Existing connector configuration and default-agent prompts continue to work unch
 
 ## Interface
 
+> Superseded by [agents first](agent-first.md): agents are now added from one form that picks the app and an optional room role, and cards show App and Role chips instead of app groups.
+
 Group agents under their app in the management UI, with Add agent, an editable display name, a visible app badge and copyable per-agent join prompts on room cards. Leave existing room member selection, role assignment, team roles and per-agent status usable with the new agents. Show limit and removal errors clearly; keep a room's existing selected members unchanged when creating an agent. Removing an active agent is blocked with a clear explanation. The guide explains separate conversations, shared account allowance, permissions and the shared-credential trust model.
 
 ## Validation
