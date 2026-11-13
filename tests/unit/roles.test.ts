@@ -455,6 +455,14 @@ describe("role assignment", () => {
       expect(() =>
         roles.assign(room.id, "worker", role, roleRevision, ""),
       ).toThrow("Review before assignment");
+      expect(() =>
+        service.addAppAgent("worker", "worker-two", "Worker two", room.id, () =>
+          roles.assign(room.id, "worker-two", role, roleRevision, ""),
+        ),
+      ).toThrow("Review before assignment");
+      expect(
+        service.overview().agents.some((agent) => agent.id === "worker-two"),
+      ).toBe(false);
       skills.markReviewed(skill, revision);
       roles.assign(room.id, "worker", role, roleRevision, "");
       expect(() => roles.trash(role, roleRevision)).toThrow("Role in use");

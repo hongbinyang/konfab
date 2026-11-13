@@ -401,7 +401,22 @@ describe("page API", () => {
       room_id: room.id,
       role: { role_id: role.id, role_revision_id: role.revision_id },
     });
-    expect(added.statusCode).toBe(201);
+    expect(added.statusCode).toBe(400);
+    expect(
+      service.overview().agents.some((item) => item.id === "reviewer"),
+    ).toBe(false);
+    const confirmed = await call("POST", "/api/agents", {
+      id: "reviewer",
+      display_name: "Reviewer",
+      app_id: "claude",
+      room_id: room.id,
+      role: {
+        role_id: role.id,
+        role_revision_id: role.revision_id,
+        confirmed: true,
+      },
+    });
+    expect(confirmed.statusCode).toBe(201);
     const agent = service
       .roomState(room.id)
       .agents.find((item) => item.id === "reviewer");
@@ -418,6 +433,7 @@ describe("page API", () => {
       role: {
         role_id: role.id,
         role_revision_id: "00000000-0000-4000-8000-000000000000",
+        confirmed: true,
       },
     });
     expect(badRole.statusCode).toBe(404);
@@ -429,7 +445,11 @@ describe("page API", () => {
       id: "tester",
       display_name: "Tester",
       app_id: "codex",
-      role: { role_id: role.id, role_revision_id: role.revision_id },
+      role: {
+        role_id: role.id,
+        role_revision_id: role.revision_id,
+        confirmed: true,
+      },
     });
     expect(noRoom.statusCode).toBe(400);
 

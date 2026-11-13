@@ -1703,6 +1703,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           .object({
             role_id: z.string().min(1).max(200),
             role_revision_id: z.string().uuid(),
+            confirmed: z.literal(true, {
+              message: "Preview the role and confirm it before assigning.",
+            }),
           })
           .optional(),
       })

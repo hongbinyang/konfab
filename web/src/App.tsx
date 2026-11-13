@@ -2649,6 +2649,15 @@ function DecisionCard({
   );
 }
 
+type RolePreview = {
+  id: string;
+  revision_id: string;
+  number: number;
+  title: string;
+  role_md: string;
+  skills: Array<{ name: string; reviewed: number }>;
+};
+
 type RoleOption = {
   id: string;
   revision_id: string;
@@ -2674,6 +2683,8 @@ function Agents({
   const [idEdited, setIdEdited] = useState(false);
   const [newRole, setNewRole] = useState("");
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [rolePreview, setRolePreview] = useState<RolePreview | null>(null);
+  const [roleConfirmed, setRoleConfirmed] = useState(false);
   const [addToRoom, setAddToRoom] = useState(true);
   const [agentError, setAgentError] = useState("");
   const appCount = (appId: string) =>
@@ -2700,6 +2711,8 @@ function Agents({
     setNewId("");
     setIdEdited(false);
     setNewRole("");
+    setRolePreview(null);
+    setRoleConfirmed(false);
     setAddToRoom(true);
     setAgentError("");
     setAdding(true);
@@ -2707,9 +2720,27 @@ function Agents({
       .then((result) => setRoles(result.roles))
       .catch(() => setRoles([]));
   };
+  const pickRole = (id: string) => {
+    setNewRole(id);
+    setRolePreview(null);
+    setRoleConfirmed(false);
+    if (id)
+      request<RolePreview>(`/api/roles/${encodeURIComponent(id)}`)
+        .then((detail) => setRolePreview(detail))
+        .catch((error) => setAgentError(errorMessage(error)));
+  };
+  const roleUnreviewed =
+    rolePreview?.skills.filter((skill) => !skill.reviewed) ?? [];
+  const roleReady =
+    !addToRoom ||
+    !newRole ||
+    (rolePreview?.id === newRole &&
+      roleUnreviewed.length === 0 &&
+      roleConfirmed);
   const addAgent = async (event: FormEvent) => {
     event.preventDefault();
-    const role = roles.find((item) => item.id === newRole);
+    if (!roleReady) return;
+    const role = addToRoom && newRole ? rolePreview : null;
     try {
       await request("/api/agents", {
         method: "POST",
@@ -2718,11 +2749,12 @@ function Agents({
           display_name: newName,
           app_id: newApp,
           ...(addToRoom ? { room_id: room.room.id } : {}),
-          ...(addToRoom && role
+          ...(role
             ? {
                 role: {
                   role_id: role.id,
                   role_revision_id: role.revision_id,
+                  confirmed: true,
                 },
               }
             : {}),
@@ -2826,7 +2858,7 @@ function Agents({
               Role in this room
               <select
                 value={newRole}
-                onChange={(event) => setNewRole(event.target.value)}
+                onChange={(event) => pickRole(event.target.value)}
               >
                 <option value="">No role</option>
                 {roles.map((role) => (
@@ -2840,13 +2872,58 @@ function Agents({
               </small>
             </label>
           )}
+          {addToRoom && newRole && (
+            <section className="role-preview">
+              {rolePreview?.id !== newRole ? (
+                <p className="muted">Loading role preview…</p>
+              ) : (
+                <>
+                  <h4>
+                    Preview: {rolePreview.title} · rev {rolePreview.number}
+                  </h4>
+                  <pre>{rolePreview.role_md}</pre>
+                  <p className="muted">
+                    Skills:{" "}
+                    {rolePreview.skills.length === 0
+                      ? "none"
+                      : rolePreview.skills
+                          .map(
+                            (skill) =>
+                              `${skill.name} (${skill.reviewed ? "reviewed" : "not reviewed"})`,
+                          )
+                          .join(", ")}
+                  </p>
+                  {roleUnreviewed.length > 0 ? (
+                    <p className="warning-text">
+                      Review{" "}
+                      {roleUnreviewed.map((skill) => skill.name).join(", ")} in
+                      Manage library before assigning this role, or add the
+                      agent with no role.
+                    </p>
+                  ) : (
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={roleConfirmed}
+                        onChange={(event) =>
+                          setRoleConfirmed(event.target.checked)
+                        }
+                      />{" "}
+                      I reviewed this role (rev {rolePreview.number}) and want
+                      to assign it
+                    </label>
+                  )}
+                </>
+              )}
+            </section>
+          )}
           {agentError && (
             <p role="alert" className="warning-text">
               {agentError}
             </p>
           )}
           <div className="row">
-            <button type="submit" disabled={!newApp}>
+            <button type="submit" disabled={!newApp || !roleReady}>
               Add agent
             </button>
             <button type="button" onClick={() => setAdding(false)}>
