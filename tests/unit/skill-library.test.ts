@@ -6,6 +6,7 @@ import {
   existsSync,
   renameSync,
   cpSync,
+  readFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -274,6 +275,120 @@ describe("skill library adoption", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+  it("saves import drafts left by an earlier version as untracked folders, across a restart", () => {
+    const home = mkdtempSync(join(tmpdir(), "konfab-drafts-"));
+    const root = join(home, "skills");
+    mkdirSync(root);
+    const path = join(home, "konfab.db");
+    try {
+      let db = openDatabase(path);
+      const libraryId = new SkillLibrary(db).registerLibrary("personal", root);
+      // A folder already uses the second draft's name; it must not be overwritten.
+      mkdirSync(join(root, "taken"));
+      writeFileSync(join(root, "taken", "mine.txt"), "keep");
+      const draft = (
+        id: string,
+        name: string,
+        files: Array<[string, string]>,
+      ) => {
+        db.prepare(
+          "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, licence, diagnostic, revision, created_at, updated_at) VALUES (?, ?, ?, '{}', NULL, 'invalid', 1, 0, 0)",
+        ).run(id, libraryId, name);
+        for (const [file, content] of files)
+          db.prepare(
+            "INSERT INTO skill_import_draft_files(draft_id, path, content, mode) VALUES (?, ?, ?, 384)",
+          ).run(id, file, Buffer.from(content));
+      };
+      draft("d1", "half-done", [
+        ["SKILL.md", "---\nname: half-done\n---\nmy unsaved edits"],
+        ["notes/a.md", "supporting"],
+      ]);
+      draft("d2", "taken", [["SKILL.md", "---\nname: taken\n---\nother"]]);
+      // A crash left a partial staging folder for the first draft.
+      mkdirSync(join(root, ".konfab-draft-d1"));
+      writeFileSync(join(root, ".konfab-draft-d1", "partial"), "x");
+      db.close();
+
+      db = openDatabase(path);
+      const library = new SkillLibrary(db);
+      expect(readFileSync(join(root, "half-done", "SKILL.md"), "utf8")).toBe(
+        "---\nname: half-done\n---\nmy unsaved edits",
+      );
+      expect(
+        readFileSync(join(root, "half-done", "notes", "a.md"), "utf8"),
+      ).toBe("supporting");
+      expect(existsSync(join(root, "half-done", "partial"))).toBe(false);
+      expect(existsSync(join(root, ".konfab-draft-d1"))).toBe(false);
+      expect(readFileSync(join(root, "taken", "mine.txt"), "utf8")).toBe(
+        "keep",
+      );
+      expect(
+        readFileSync(join(root, "taken-draft", "SKILL.md"), "utf8"),
+      ).toContain("other");
+      expect(
+        db.prepare("SELECT count(*) AS n FROM skill_import_drafts").get(),
+      ).toEqual({ n: 0 });
+      expect(
+        db
+          .prepare(
+            "SELECT count(*) AS n FROM upgrade_log WHERE kind = 'recovered_draft'",
+          )
+          .get(),
+      ).toEqual({ n: 2 });
+      const listed = library.list(libraryId);
+      expect(listed.untracked).toEqual(
+        expect.arrayContaining(["half-done", "taken-draft"]),
+      );
+      db.close();
+      // Another restart changes nothing.
+      db = openDatabase(path);
+      new SkillLibrary(db);
+      expect(
+        readFileSync(join(root, "half-done", "SKILL.md"), "utf8"),
+      ).toContain("my unsaved edits");
+      db.close();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a draft when its library folder is unavailable, and saves it once the folder is back", () => {
+    const home = mkdtempSync(join(tmpdir(), "konfab-drafts-"));
+    const root = join(home, "skills");
+    mkdirSync(root);
+    const path = join(home, "konfab.db");
+    try {
+      let db = openDatabase(path);
+      const libraryId = new SkillLibrary(db).registerLibrary("personal", root);
+      db.prepare(
+        "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, revision, created_at, updated_at) VALUES ('d3', ?, 'later', '{}', 1, 0, 0)",
+      ).run(libraryId);
+      db.prepare(
+        "INSERT INTO skill_import_draft_files(draft_id, path, content, mode) VALUES ('d3', 'SKILL.md', ?, 384)",
+      ).run(Buffer.from("---\nname: later\n---\nbody"));
+      db.close();
+      renameSync(root, `${root}-away`);
+      db = openDatabase(path);
+      new SkillLibrary(db);
+      expect(
+        db.prepare("SELECT count(*) AS n FROM skill_import_drafts").get(),
+      ).toEqual({ n: 1 });
+      db.close();
+      renameSync(`${root}-away`, root);
+      db = openDatabase(path);
+      new SkillLibrary(db);
+      expect(readFileSync(join(root, "later", "SKILL.md"), "utf8")).toContain(
+        "body",
+      );
+      expect(
+        db.prepare("SELECT count(*) AS n FROM skill_import_drafts").get(),
+      ).toEqual({ n: 0 });
+      db.close();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("finishes a renamed import journal after reopening", () => {
     const root = mkdtempSync(join(tmpdir(), "konfab-import-recover-"));
     const dbPath = join(root, "state.db");

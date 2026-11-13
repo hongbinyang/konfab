@@ -54,7 +54,7 @@ Everything lives in `~/.konfab/` (or `KONFAB_HOME`), folder `0700`, files `0600`
 | `backups/`              | Database copies written before a major migration (`konfab-pre-skills-…`)    |
 | `app-setup.md`          | Connector setup notes written by `npm run setup`                            |
 
-Main `defaults` keys (all optional): `run_hours` (5), `run_warnings_minutes` ([30, 10, 5]), `max_consecutive_agent_messages` (50), `parallel_lead_mentions` (false), `max_parallel_lead_turns` (3), `checkin_minutes` (2), `wait_timeout_seconds` (50), `turn_timeout_minutes` (30), `auto_continue_delay_seconds` (180), `max_message_chars` (20000), `max_decision_chars` (4000), `max_attachment_mb` (10), `source_cache_mb` (500). See `src/server/config.ts`.
+Main `defaults` keys (all optional): `run_hours` (5), `run_warnings_minutes` ([30, 10, 5]), `max_consecutive_agent_messages` (50), `parallel_lead_mentions` (false), `max_parallel_lead_turns` (3), `checkin_minutes` (2), `wait_timeout_seconds` (50), `turn_timeout_minutes` (30), `auto_continue_delay_seconds` (180), `max_message_chars` (20000), `max_decision_chars` (4000), `max_attachment_mb` (10). Settings removed in later versions (`ui.role_picker`, `source_cache_mb`) are ignored if an old file still has them. See `src/server/config.ts`.
 
 ## 4. Data model
 

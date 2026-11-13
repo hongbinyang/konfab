@@ -17,7 +17,6 @@ const DEFAULTS = [
 const PART = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/;
 
 export type SourceOptions = {
-  cacheBytes?: number;
   fetch?: typeof fetch;
   now?: () => number;
   token?: string;
@@ -29,7 +28,6 @@ export class SkillSources {
   private readonly github: GitHubClient;
   readonly live: LiveSources;
   private readonly now: () => number;
-  private readonly cacheBytes: number;
   private readonly token: string | undefined;
   private readonly tokenSource: TokenSource;
   private readonly notify: () => void;
@@ -42,7 +40,6 @@ export class SkillSources {
       options.now ?? Date.now,
     );
     this.now = options.now ?? Date.now;
-    this.cacheBytes = options.cacheBytes ?? 500 * 1024 * 1024;
     this.token = options.token;
     this.tokenSource =
       options.tokenSource ?? (options.token ? "environment" : "unavailable");

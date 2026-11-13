@@ -56,7 +56,112 @@ export class SkillLibrary {
     } catch {
       /* Retry inaccessible workspaces later. */
     }
+    try {
+      this.recoverImportDrafts();
+    } catch {
+      /* Keep drafts for a later start. */
+    }
     this.cleanupTempFiles();
+  }
+
+  /**
+   * Earlier versions could keep an imported skill as an unsaved draft in the
+   * database. Drafts can no longer be opened, so each one is written out,
+   * byte for byte, as an ordinary folder in its library: it then appears as
+   * Untracked, with a diagnostic if it is still invalid, and the lead can fix
+   * and adopt it. A draft row is deleted only after its folder is in place;
+   * an existing folder is never overwritten.
+   */
+  private recoverImportDrafts(): void {
+    const drafts = this.db
+      .prepare(
+        `SELECT d.id, d.library_id, d.folder_name, l.root_path FROM skill_import_drafts d
+         JOIN skill_libraries l ON l.id = d.library_id ORDER BY d.created_at`,
+      )
+      .all() as Array<{
+      id: string;
+      library_id: string;
+      folder_name: string;
+      root_path: string;
+    }>;
+    for (const draft of drafts) {
+      try {
+        const root = lstatSync(draft.root_path);
+        if (!root.isDirectory() || root.isSymbolicLink()) continue;
+        const files = this.db
+          .prepare(
+            "SELECT path, content, mode FROM skill_import_draft_files WHERE draft_id = ? ORDER BY path",
+          )
+          .all(draft.id) as SkillFile[];
+        if (
+          files.some(
+            (file) =>
+              !file.path ||
+              file.path.startsWith("/") ||
+              /[\\\0]/.test(file.path) ||
+              file.path
+                .split("/")
+                .some((part) => !part || part === "." || part === ".."),
+          )
+        )
+          continue;
+        const hash = packageHash(files);
+        const base =
+          draft.folder_name.replace(/[^\p{L}\p{N}-]+/gu, "-") || "draft";
+        const taken = (name: string) =>
+          !!this.db
+            .prepare(
+              "SELECT 1 FROM skills WHERE library_id = ? AND folder_name = ?",
+            )
+            .get(draft.library_id, name) ||
+          existsSync(join(draft.root_path, name));
+        // A folder already holding exactly this draft means an earlier start got this far.
+        const candidates = [base, `${base}-draft`];
+        for (let n = 2; n < 100; n += 1) candidates.push(`${base}-draft-${n}`);
+        const done = candidates.find((name) => {
+          const folder = join(draft.root_path, name);
+          if (!existsSync(folder)) return false;
+          try {
+            return packageHash(readSkillFiles(folder)) === hash;
+          } catch {
+            return false;
+          }
+        });
+        let target = done;
+        if (!target) {
+          target = candidates.find((name) => !taken(name));
+          if (!target) continue;
+          const staging = join(draft.root_path, `.konfab-draft-${draft.id}`);
+          if (existsSync(staging)) rmSync(staging, { recursive: true });
+          mkdirSync(staging, { mode: 0o700 });
+          for (const file of files) {
+            const destination = join(staging, file.path);
+            mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+            writeFileSync(destination, file.content, {
+              flag: "wx",
+              mode: file.mode & 0o777,
+            });
+          }
+          if (existsSync(join(draft.root_path, target))) continue;
+          renameSync(staging, join(draft.root_path, target));
+        }
+        this.db.transaction(() => {
+          this.db
+            .prepare("DELETE FROM skill_import_drafts WHERE id = ?")
+            .run(draft.id);
+          this.db
+            .prepare(
+              "INSERT INTO upgrade_log(kind, detail, created_at) VALUES ('recovered_draft', ?, ?)",
+            )
+            .run(
+              `Import draft ${draft.folder_name} was saved as the untracked folder ${target}; fix it if needed and adopt it in Manage library`,
+              this.now(),
+            );
+        })();
+      } catch {
+        /* Leave this draft for a later start. */
+      }
+    }
   }
 
   /** Writes working folders for skills whose saved revision is newer than the folder. Safe to repeat. */

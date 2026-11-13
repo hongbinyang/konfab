@@ -67,7 +67,6 @@ export function createRuntime(
     service,
     skills,
     sources: new SkillSources(db, {
-      cacheBytes: config.defaults.source_cache_mb * 1024 * 1024,
       token: process.env.KONFAB_GITHUB_TOKEN,
       ...sourceOptions,
     }),

@@ -8,6 +8,15 @@ it("accepts small and fractional run warning thresholds", () => {
   ).toEqual([5, 3, 0.5]);
 });
 
+it("still loads config files that set settings removed in later versions", () => {
+  const config = parseConfig(
+    "ui:\n  role_picker: false\ndefaults:\n  source_cache_mb: 900\n  run_hours: 3\n",
+  );
+  expect(config.defaults.run_hours).toBe(3);
+  expect("source_cache_mb" in config.defaults).toBe(false);
+  expect("ui" in config).toBe(false);
+});
+
 describe("parseConfig", () => {
   it("validates the default working check-in interval", () => {
     expect(parseConfig("").defaults.checkin_minutes).toBe(2);
