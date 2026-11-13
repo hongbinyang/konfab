@@ -2,6 +2,7 @@ import { SkillError } from "./skill-error.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   readdirSync,
+  linkSync,
   realpathSync,
   statSync,
   lstatSync,
@@ -26,6 +27,56 @@ import {
   invalidNameMessage,
   type SkillFile,
 } from "./skill-files.js";
+
+const DRAFT_OWNER = ".konfab-draft-owner";
+const RECOVERED_DRAFTS = ".konfab-recovered-drafts";
+
+/**
+ * Folder claims made by draft recovery: one `<draft id>.json` per draft in a
+ * real (not symlinked) `.konfab-recovered-drafts` directory. Returns null when
+ * that path exists but is not a real directory, or cannot be created.
+ */
+function recoveredDraftClaims(
+  root: string,
+  create: boolean,
+): Array<{ draft: string; folder: string; path: string }> | null {
+  const directory = join(root, RECOVERED_DRAFTS);
+  try {
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+  } catch {
+    if (!create) return [];
+    try {
+      mkdirSync(directory, { mode: 0o700 });
+    } catch {
+      return null;
+    }
+  }
+  const claims: Array<{ draft: string; folder: string; path: string }> = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const path = join(directory, entry.name);
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as {
+        recovered_from_draft?: unknown;
+        folder?: unknown;
+      };
+      if (
+        typeof value.recovered_from_draft === "string" &&
+        typeof value.folder === "string" &&
+        entry.name === `${value.recovered_from_draft}.json`
+      )
+        claims.push({
+          draft: value.recovered_from_draft,
+          folder: value.folder,
+          path,
+        });
+    } catch {
+      /* Not a claim. */
+    }
+  }
+  return claims;
+}
 
 /** A stable UUID for a built-in skill, so library routes accept it and reseeding finds it. */
 export function builtinSkillId(name: string): string {
@@ -69,12 +120,16 @@ export class SkillLibrary {
    * database. Drafts can no longer be opened, so each one is written out,
    * byte for byte, as an ordinary folder in its library: it then appears as
    * Untracked, with a diagnostic if it is still invalid, and the lead can fix
-   * and adopt it. The draft's metadata (provenance, licence, diagnostic and
-   * dates) is kept beside it in `.konfab-recovered-drafts/<folder>.json`, and
-   * adopting the folder applies its provenance and licence. A draft row is
-   * deleted only after both are in place. Existing folders are never
-   * overwritten, and only staging folders marked as this recovery's own are
-   * ever removed.
+   * and adopt it.
+   *
+   * Each draft first claims a free folder name by creating
+   * `.konfab-recovered-drafts/<draft id>.json` (never replacing an existing
+   * file); the claim holds its metadata (provenance, licence, diagnostic and
+   * dates), and adopting the folder applies its provenance and licence. Files
+   * are written to a staging folder marked with the draft id, renamed into the
+   * claimed name, and only then unmarked. The draft row is deleted last. A
+   * restart resumes from whichever step was reached; folders and sidecars that
+   * this recovery did not create are never changed or removed.
    */
   private recoverImportDrafts(): void {
     const drafts = this.db
@@ -95,9 +150,9 @@ export class SkillLibrary {
       updated_at: number;
       root_path: string;
     }>;
-    const OWNER = ".konfab-draft-owner";
     for (const draft of drafts) {
       try {
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(draft.id)) continue;
         const root = lstatSync(draft.root_path);
         if (!root.isDirectory() || root.isSymbolicLink()) continue;
         const files = this.db
@@ -105,11 +160,12 @@ export class SkillLibrary {
             "SELECT path, content, mode FROM skill_import_draft_files WHERE draft_id = ? ORDER BY path",
           )
           .all(draft.id) as SkillFile[];
+        for (const file of files) file.mode &= 0o777;
         if (
           files.some(
             (file) =>
               !file.path ||
-              file.path === OWNER ||
+              file.path === DRAFT_OWNER ||
               file.path.startsWith("/") ||
               /[\\\0]/.test(file.path) ||
               file.path
@@ -118,41 +174,46 @@ export class SkillLibrary {
           )
         )
           continue;
-        // Remove partial staging folders from an earlier attempt, but only ones this recovery marked as its own.
-        for (const entry of readdirSync(draft.root_path, {
-          withFileTypes: true,
-        })) {
-          if (
-            !entry.isDirectory() ||
-            !entry.name.startsWith(`.konfab-draft-${draft.id}-`)
-          )
-            continue;
-          const marker = join(draft.root_path, entry.name, OWNER);
-          if (
-            existsSync(marker) &&
-            !lstatSync(marker).isSymbolicLink() &&
-            readFileSync(marker, "utf8") === draft.id
-          )
-            rmSync(join(draft.root_path, entry.name), { recursive: true });
-        }
         const hash = packageHash(files);
-        const base =
-          draft.folder_name.replace(/[^\p{L}\p{N}-]+/gu, "-") || "draft";
-        const candidates = [base, `${base}-draft`];
-        for (let n = 2; n < 100; n += 1) candidates.push(`${base}-draft-${n}`);
-        // A folder already holding exactly this draft means an earlier start got this far.
-        let target = candidates.find((name) => {
-          const folder = join(draft.root_path, name);
-          if (!existsSync(folder)) return false;
+        const claims = recoveredDraftClaims(draft.root_path, true);
+        if (!claims) continue;
+        const marked = (folder: string) => {
+          const marker = join(folder, DRAFT_OWNER);
           try {
-            return packageHash(readSkillFiles(folder)) === hash;
+            return (
+              lstatSync(marker).isFile() &&
+              readFileSync(marker, "utf8") === draft.id
+            );
           } catch {
             return false;
           }
-        });
-        if (!target) {
-          target = candidates.find(
+        };
+        const contentHash = (folder: string) =>
+          packageHash(
+            readSkillFiles(folder).filter((file) => file.path !== DRAFT_OWNER),
+          );
+        // Remove partial staging folders from an earlier attempt, but only ones this recovery marked as its own.
+        for (const entry of readdirSync(draft.root_path, {
+          withFileTypes: true,
+        }))
+          if (
+            entry.isDirectory() &&
+            entry.name.startsWith(`.konfab-draft-${draft.id}-`) &&
+            marked(join(draft.root_path, entry.name))
+          )
+            rmSync(join(draft.root_path, entry.name), { recursive: true });
+
+        // 1. Claim a folder name, or resume the claim an earlier start made.
+        let claim = claims.find((item) => item.draft === draft.id);
+        if (!claim) {
+          const base =
+            draft.folder_name.replace(/[^\p{L}\p{N}-]+/gu, "-") || "draft";
+          const candidates = [base, `${base}-draft`];
+          for (let n = 2; n < 100; n += 1)
+            candidates.push(`${base}-draft-${n}`);
+          const folder = candidates.find(
             (name) =>
+              !claims.some((item) => item.folder === name) &&
               !this.db
                 .prepare(
                   "SELECT 1 FROM skills WHERE library_id = ? AND folder_name = ?",
@@ -160,13 +221,46 @@ export class SkillLibrary {
                 .get(draft.library_id, name) &&
               !existsSync(join(draft.root_path, name)),
           );
-          if (!target) continue;
+          if (!folder) continue;
+          const metadata = {
+            recovered_from_draft: draft.id,
+            original_name: draft.folder_name,
+            folder,
+            provenance: JSON.parse(draft.provenance_json) as unknown,
+            licence: draft.licence,
+            diagnostic: draft.diagnostic,
+            revision: draft.revision,
+            created_at: draft.created_at,
+            updated_at: draft.updated_at,
+            recovered_at: this.now(),
+          };
+          const sidecar = join(
+            draft.root_path,
+            RECOVERED_DRAFTS,
+            `${draft.id}.json`,
+          );
+          const temporary = `${sidecar}.${randomUUID()}.partial`;
+          writeFileSync(temporary, `${JSON.stringify(metadata, null, 2)}\n`, {
+            flag: "wx",
+            mode: 0o600,
+          });
+          try {
+            linkSync(temporary, sidecar); // fails if a file is already there
+          } finally {
+            unlinkSync(temporary);
+          }
+          claim = { draft: draft.id, folder, path: sidecar };
+        }
+        const target = join(draft.root_path, claim.folder);
+
+        // 2. Write and promote the folder, unless an earlier start already did.
+        if (!existsSync(target)) {
           const staging = join(
             draft.root_path,
             `.konfab-draft-${draft.id}-${randomUUID()}`,
           );
           mkdirSync(staging, { mode: 0o700 });
-          writeFileSync(join(staging, OWNER), draft.id, {
+          writeFileSync(join(staging, DRAFT_OWNER), draft.id, {
             flag: "wx",
             mode: 0o600,
           });
@@ -175,38 +269,25 @@ export class SkillLibrary {
             mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
             writeFileSync(destination, file.content, {
               flag: "wx",
-              mode: file.mode & 0o777,
+              mode: file.mode,
             });
+            chmodSync(destination, file.mode); // not narrowed by the umask
           }
-          unlinkSync(join(staging, OWNER));
+          if (contentHash(staging) !== hash || existsSync(target)) continue;
+          renameSync(staging, target);
+        } else {
+          const stat = lstatSync(target);
+          // The claimed name is ours only if it holds exactly this draft.
           if (
-            packageHash(readSkillFiles(staging)) !== hash ||
-            existsSync(join(draft.root_path, target))
+            !stat.isDirectory() ||
+            stat.isSymbolicLink() ||
+            contentHash(target) !== hash
           )
             continue;
-          renameSync(staging, join(draft.root_path, target));
         }
-        const sidecars = join(draft.root_path, ".konfab-recovered-drafts");
-        if (!existsSync(sidecars)) mkdirSync(sidecars, { mode: 0o700 });
-        const sidecar = join(sidecars, `${target}.json`);
-        const metadata = {
-          recovered_from_draft: draft.id,
-          original_name: draft.folder_name,
-          folder: target,
-          provenance: JSON.parse(draft.provenance_json) as unknown,
-          licence: draft.licence,
-          diagnostic: draft.diagnostic,
-          revision: draft.revision,
-          created_at: draft.created_at,
-          updated_at: draft.updated_at,
-          recovered_at: this.now(),
-        };
-        const temporary = `${sidecar}.${randomUUID()}.partial`;
-        writeFileSync(temporary, `${JSON.stringify(metadata, null, 2)}\n`, {
-          flag: "wx",
-          mode: 0o600,
-        });
-        renameSync(temporary, sidecar);
+        // 3. Unmark it, then forget the draft.
+        if (marked(target)) unlinkSync(join(target, DRAFT_OWNER));
+        if (existsSync(join(target, DRAFT_OWNER))) continue;
         this.db.transaction(() => {
           this.db
             .prepare("DELETE FROM skill_import_drafts WHERE id = ?")
@@ -216,7 +297,7 @@ export class SkillLibrary {
               "INSERT INTO upgrade_log(kind, detail, created_at) VALUES ('recovered_draft', ?, ?)",
             )
             .run(
-              `Import draft ${draft.folder_name} was saved as the untracked folder ${target}, with its details in ${sidecar}; fix it if needed and adopt it in Manage library`,
+              `Import draft ${draft.folder_name} was saved as the untracked folder ${claim.folder}, with its details in ${claim.path}; fix it if needed and adopt it in Manage library`,
               this.now(),
             );
         })();
@@ -231,19 +312,19 @@ export class SkillLibrary {
     root: string,
     folder: string,
   ): { provenance: string; licence: string | null } | null {
-    const path = join(root, ".konfab-recovered-drafts", `${folder}.json`);
+    const claims = (recoveredDraftClaims(root, false) ?? []).filter(
+      (item) => item.folder === folder,
+    );
+    if (claims.length !== 1 || !claims[0]) return null;
     try {
-      if (!existsSync(path) || lstatSync(path).isSymbolicLink()) return null;
-      const value = JSON.parse(readFileSync(path, "utf8")) as {
-        recovered_from_draft?: string;
+      const value = JSON.parse(readFileSync(claims[0].path, "utf8")) as {
         provenance?: Record<string, unknown>;
         licence?: string | null;
       };
-      if (!value.recovered_from_draft) return null;
       return {
         provenance: JSON.stringify({
           ...(value.provenance ?? {}),
-          recovered_from_draft: value.recovered_from_draft,
+          recovered_from_draft: claims[0].draft,
         }),
         licence: value.licence ?? null,
       };

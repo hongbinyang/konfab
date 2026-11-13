@@ -7,6 +7,8 @@ import {
   renameSync,
   cpSync,
   readFileSync,
+  symlinkSync,
+  readdirSync,
 } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -349,10 +351,7 @@ describe("skill library adoption", () => {
       );
       // The draft's metadata is kept beside the folder, outside the skill files.
       const sidecar = JSON.parse(
-        readFileSync(
-          join(root, ".konfab-recovered-drafts", "half-done.json"),
-          "utf8",
-        ),
+        readFileSync(join(root, ".konfab-recovered-drafts", "d1.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(sidecar).toMatchObject({
         recovered_from_draft: "d1",
@@ -396,6 +395,147 @@ describe("skill library adoption", () => {
       expect(
         readFileSync(join(root, "half-done", "SKILL.md"), "utf8"),
       ).toContain("my unsaved edits");
+      db.close();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps each recovered draft's metadata apart and never replaces files it did not create", () => {
+    const home = mkdtempSync(join(tmpdir(), "konfab-drafts-"));
+    const root = join(home, "skills");
+    mkdirSync(root);
+    const sidecars = join(root, ".konfab-recovered-drafts");
+    const path = join(home, "konfab.db");
+    const twin = "---\nname: twin\ndescription: Same files\n---\nbody";
+    try {
+      let db = openDatabase(path);
+      const libraryId = new SkillLibrary(db).registerLibrary("personal", root);
+      const draft = (
+        id: string,
+        name: string,
+        content: string,
+        repository: string,
+        licence: string,
+      ) => {
+        db.prepare(
+          "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, licence, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0)",
+        ).run(
+          id,
+          libraryId,
+          name,
+          JSON.stringify({ source: { owner: "example", repository } }),
+          licence,
+          Number(id.slice(1)),
+        );
+        db.prepare(
+          "INSERT INTO skill_import_draft_files(draft_id, path, content, mode) VALUES (?, 'SKILL.md', ?, 384)",
+        ).run(id, Buffer.from(content));
+      };
+      // Two drafts with identical files but different sources and licences.
+      draft("d4", "twin", twin, "first", "MIT");
+      draft("d5", "twin", twin, "second", "Apache-2.0");
+      // Something unrelated already uses d6's metadata file name.
+      draft("d6", "blocked", "---\nname: blocked\n---\nx", "third", "MIT");
+      mkdirSync(sidecars);
+      writeFileSync(join(sidecars, "d6.json"), "not mine");
+      // An earlier start crashed after promoting d7's folder but before unmarking it.
+      const resumed = "---\nname: resumed\n---\ny";
+      draft("d7", "resumed", resumed, "fourth", "MIT");
+      writeFileSync(
+        join(sidecars, "d7.json"),
+        JSON.stringify({ recovered_from_draft: "d7", folder: "resumed" }),
+      );
+      mkdirSync(join(root, "resumed"));
+      writeFileSync(join(root, "resumed", "SKILL.md"), resumed, {
+        mode: 0o600,
+      });
+      writeFileSync(join(root, "resumed", ".konfab-draft-owner"), "d7");
+      // d8 claimed a folder that someone has since replaced with other files.
+      draft("d8", "changed", "---\nname: changed\n---\nz", "fifth", "MIT");
+      writeFileSync(
+        join(sidecars, "d8.json"),
+        JSON.stringify({ recovered_from_draft: "d8", folder: "changed" }),
+      );
+      mkdirSync(join(root, "changed"));
+      writeFileSync(join(root, "changed", "SKILL.md"), "theirs");
+      db.close();
+
+      db = openDatabase(path);
+      const library = new SkillLibrary(db);
+      const read = (name: string) =>
+        JSON.parse(readFileSync(join(sidecars, name), "utf8")) as Record<
+          string,
+          unknown
+        >;
+      expect(read("d4.json")).toMatchObject({
+        folder: "twin",
+        provenance: { source: { repository: "first" } },
+        licence: "MIT",
+      });
+      expect(read("d5.json")).toMatchObject({
+        folder: "twin-draft",
+        provenance: { source: { repository: "second" } },
+        licence: "Apache-2.0",
+      });
+      expect(readFileSync(join(root, "twin-draft", "SKILL.md"), "utf8")).toBe(
+        twin,
+      );
+      expect(readFileSync(join(sidecars, "d6.json"), "utf8")).toBe("not mine");
+      expect(existsSync(join(root, "blocked"))).toBe(false);
+      expect(existsSync(join(root, "resumed", ".konfab-draft-owner"))).toBe(
+        false,
+      );
+      expect(readFileSync(join(root, "resumed", "SKILL.md"), "utf8")).toBe(
+        resumed,
+      );
+      expect(readFileSync(join(root, "changed", "SKILL.md"), "utf8")).toBe(
+        "theirs",
+      );
+      expect(
+        db
+          .prepare("SELECT id FROM skill_import_drafts ORDER BY id")
+          .all()
+          .map((row) => (row as { id: string }).id),
+      ).toEqual(["d6", "d8"]);
+      // Adopting a folder applies the metadata of the draft that created it.
+      const adopted = library.detail(library.adopt(libraryId, "twin"));
+      expect(JSON.parse(adopted.provenance_json)).toEqual({
+        source: { owner: "example", repository: "first" },
+        recovered_from_draft: "d4",
+      });
+      expect(adopted.licence).toBe("MIT");
+      db.close();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps drafts when the metadata folder is a symbolic link", () => {
+    const home = mkdtempSync(join(tmpdir(), "konfab-drafts-"));
+    const root = join(home, "skills");
+    const elsewhere = join(home, "elsewhere");
+    mkdirSync(root);
+    mkdirSync(elsewhere);
+    symlinkSync(elsewhere, join(root, ".konfab-recovered-drafts"));
+    const path = join(home, "konfab.db");
+    try {
+      let db = openDatabase(path);
+      const libraryId = new SkillLibrary(db).registerLibrary("personal", root);
+      db.prepare(
+        "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, revision, created_at, updated_at) VALUES ('d9', ?, 'linked', '{}', 1, 0, 0)",
+      ).run(libraryId);
+      db.prepare(
+        "INSERT INTO skill_import_draft_files(draft_id, path, content, mode) VALUES ('d9', 'SKILL.md', ?, 384)",
+      ).run(Buffer.from("---\nname: linked\n---\nbody"));
+      db.close();
+      db = openDatabase(path);
+      new SkillLibrary(db);
+      expect(existsSync(join(root, "linked"))).toBe(false);
+      expect(readdirSync(elsewhere)).toEqual([]);
+      expect(
+        db.prepare("SELECT count(*) AS n FROM skill_import_drafts").get(),
+      ).toEqual({ n: 1 });
       db.close();
     } finally {
       rmSync(home, { recursive: true, force: true });

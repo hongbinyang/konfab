@@ -88,9 +88,7 @@ describe("import drafts from an earlier version", () => {
         readFileSync(join(home, "skills", "web-check", "SKILL.md"), "utf8"),
       ).toContain("My edited steps");
       expect(
-        existsSync(
-          join(home, "skills", ".konfab-recovered-drafts", "web-check.json"),
-        ),
+        existsSync(join(home, "skills", ".konfab-recovered-drafts", "dd.json")),
       ).toBe(true);
       const adopted = await call("POST", "/api/library/adopt", {
         scope: "personal",
