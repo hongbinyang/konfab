@@ -98,6 +98,11 @@ export function stubSkillApi(overrides: Record<string, Handler> = {}) {
         limit: 64 * 1024,
       });
     }
+    // A test can replace file reads, for example to fail or delay one revision.
+    if (url.includes("/files?") && routes.files) {
+      const result = await routes.files(url, init);
+      if (result instanceof Response) return result;
+    }
     if (url.startsWith("/api/library/skills/") && url.includes("/files?")) {
       const revision = url.split("/revisions/")[1]!.split("/")[0]!;
       return json(200, {

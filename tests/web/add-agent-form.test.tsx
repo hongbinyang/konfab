@@ -225,6 +225,87 @@ describe("Add agent form", () => {
     });
   });
 
+  it("cannot use or add the selection until my saved version has loaded", async () => {
+    agentResponse = () =>
+      posts().length === 1
+        ? json(409, {
+            code: "local_changes",
+            message: "web-testing has local changes.",
+            pin: 0,
+            local: {
+              skill_id: "s-web",
+              revision_id: "11111111-1111-4111-8111-0000000000c2",
+              name: "web-testing",
+              number: 2,
+              reviewed: true,
+              draft: false,
+            },
+          })
+        : json(201, { ok: true });
+    let attempts = 0;
+    let release: () => void = () => undefined;
+    api.routes.files = (url) => {
+      if (!url.includes("11111111-1111-4111-8111-0000000000c2"))
+        return undefined;
+      attempts += 1;
+      if (attempts === 1) return json(500, { message: "Disk unavailable" });
+      return new Promise((resolve) => {
+        release = () => resolve(undefined);
+      });
+    };
+    const { user, onAdded } = setup();
+    await choosePublic(user);
+    const choice = await screen.findByRole("alertdialog");
+    const use = () =>
+      screen.getByRole("button", {
+        name: "Use these 1 skill",
+      }) as HTMLButtonElement;
+    await user.click(
+      within(choice).getByRole("button", { name: "Keep my version" }),
+    );
+    expect((await within(choice).findByRole("alert")).textContent).toContain(
+      "Disk unavailable",
+    );
+    expect(use().disabled).toBe(true);
+    await user.click(within(choice).getByRole("button", { name: "Try again" }));
+    expect(
+      await within(choice).findByText("Loading your saved version…"),
+    ).toBeTruthy();
+    expect(use().disabled).toBe(true);
+    release();
+    await screen.findByLabelText("web-testing rev 2");
+    expect(use().disabled).toBe(false);
+    await user.click(use());
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+    expect(posts()).toHaveLength(2);
+  });
+
+  it("keeps Add agent disabled when the picker is closed without a choice", async () => {
+    agentResponse = () =>
+      json(409, {
+        code: "name_conflict",
+        message: "A different skill named web-testing already exists.",
+        pin: 0,
+      });
+    const { user, onAdded } = setup();
+    await choosePublic(user);
+    await screen.findByRole("alertdialog");
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "needs a choice",
+    );
+    expect(
+      (screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(onAdded).not.toHaveBeenCalled();
+  });
+
   it("offers only a separate copy when a different skill has the name, then adds the agent", async () => {
     agentResponse = () =>
       posts().length === 1

@@ -227,6 +227,81 @@ describe("Assign skills dialog", () => {
     });
   });
 
+  it("keeps confirmation disabled while my saved version loads or fails, and offers retry or a copy", async () => {
+    putResponses.push(() =>
+      json(409, {
+        code: "local_changes",
+        message: "web-testing has local changes.",
+        pin: 1,
+        local: {
+          skill_id: "s-web",
+          revision_id: "11111111-1111-4111-8111-0000000000c2",
+          name: "web-testing",
+          number: 2,
+          reviewed: true,
+          draft: false,
+        },
+      }),
+    );
+    let attempts = 0;
+    let release: () => void = () => undefined;
+    api.routes.files = (url) => {
+      if (!url.includes("11111111-1111-4111-8111-0000000000c2"))
+        return undefined;
+      attempts += 1;
+      if (attempts === 1) return json(500, { message: "Disk unavailable" });
+      // The second attempt is slow.
+      return new Promise((resolve) => {
+        release = () => resolve(undefined);
+      });
+    };
+    const { user, onAssigned } = setup();
+    await user.click(
+      await screen.findByRole("button", { name: /web-testing/ }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Add to selection" }),
+    );
+    const assign = () =>
+      screen.getByRole("button", {
+        name: "Assign 2 skills to Claude",
+      }) as HTMLButtonElement;
+    await user.click(assign());
+    const choice = await screen.findByRole("alertdialog");
+    await user.click(
+      within(choice).getByRole("button", { name: "Keep my version" }),
+    );
+    // Failed: the choice stays, with the reason and a retry; nothing can be assigned.
+    expect((await within(choice).findByRole("alert")).textContent).toContain(
+      "Disk unavailable",
+    );
+    expect(assign().disabled).toBe(true);
+    expect(
+      within(choice).getByRole("button", { name: "Add as web-testing-2" }),
+    ).toBeTruthy();
+    // Delayed: still disabled while loading.
+    await user.click(within(choice).getByRole("button", { name: "Try again" }));
+    expect(
+      await within(choice).findByText("Loading your saved version…"),
+    ).toBeTruthy();
+    expect(assign().disabled).toBe(true);
+    expect(
+      (
+        within(choice).getByRole("button", {
+          name: "Add as web-testing-2",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    release();
+    expect(
+      (await selectedList().findByLabelText("web-testing rev 2")).textContent,
+    ).toContain("line from c2");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(assign().disabled).toBe(false);
+    await user.click(assign());
+    await waitFor(() => expect(onAssigned).toHaveBeenCalled());
+  });
+
   it("adds a separate copy when a different skill has the name", async () => {
     putResponses.push(() =>
       json(409, {

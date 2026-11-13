@@ -59,7 +59,7 @@ export type Pick =
       latest: { id: string; number: number } | null;
       bytes: number | null;
       /** Shown for review when the lead kept their own saved version of a public skill. */
-      kept?: { content: string | null; draft: boolean };
+      kept?: { content: string; draft: boolean };
     }
   | {
       kind: "public";
@@ -163,11 +163,15 @@ export function PublicChoice({
   code,
   message,
   name,
+  loading = false,
+  error = "",
   onChoose,
 }: {
   code: PublicConflict["code"];
   message: string;
   name: string;
+  loading?: boolean;
+  error?: string;
   onChoose: (choice: { keep: true } | { copy_name: string }) => void;
 }) {
   const copy = suggestName(`${name}-2`);
@@ -178,13 +182,23 @@ export function PublicChoice({
       aria-label={`${name} needs a choice`}
     >
       <p>{message}</p>
+      {loading && <p aria-live="polite">Loading your saved version…</p>}
+      {error && <p role="alert">{error}</p>}
       <div className="row">
         {code === "local_changes" && (
-          <button type="button" onClick={() => onChoose({ keep: true })}>
-            Keep my version
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onChoose({ keep: true })}
+          >
+            {error ? "Try again" : "Keep my version"}
           </button>
         )}
-        <button type="button" onClick={() => onChoose({ copy_name: copy })}>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => onChoose({ copy_name: copy })}
+        >
           Add as {copy}
         </button>
       </div>
@@ -277,6 +291,8 @@ export function AssignSkills({
   const [conflict, setConflict] = useState<null | PublicConflict>(
     initialConflict ?? null,
   );
+  const [keeping, setKeeping] = useState(false);
+  const [keepError, setKeepError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -629,15 +645,18 @@ export function AssignSkills({
     found: PublicConflict,
     choice: { keep: true } | { copy_name: string },
   ) => {
-    setConflict(null);
+    setKeepError("");
     if ("copy_name" in choice) {
       update(found.index, { copy_name: choice.copy_name });
+      setConflict(null);
       return;
     }
     const local = found.local;
     if (!local) return;
-    const pin = pins[found.index];
-    let content: string | null = null;
+    // The choice stays open, and confirming stays disabled, until the exact
+    // revision has loaded and is shown.
+    setKeeping(true);
+    let content: string;
     try {
       content = decode(
         (
@@ -646,8 +665,13 @@ export function AssignSkills({
           )
         ).content_base64,
       );
-    } catch {
-      content = null;
+    } catch (e) {
+      setKeepError(
+        `Couldn't load your saved version (${e instanceof Error ? e.message : "unknown error"}). Try again, or add the upstream skill as a separate copy.`,
+      );
+      return;
+    } finally {
+      setKeeping(false);
     }
     setPins((current) =>
       current.map((item, i) =>
@@ -658,7 +682,7 @@ export function AssignSkills({
               revision_id: local.revision_id,
               name: local.name,
               number: local.number,
-              delivery: pin?.delivery ?? "full",
+              delivery: item.delivery,
               reviewed: local.reviewed,
               source: "Your saved version",
               latest: null,
@@ -668,6 +692,7 @@ export function AssignSkills({
           : item,
       ),
     );
+    setConflict(null);
   };
 
   const items: Result[] = [
@@ -986,7 +1011,7 @@ export function AssignSkills({
                           .
                         </p>
                         <pre aria-label={`${pin.name} rev ${pin.number}`}>
-                          {pin.kept.content ?? "Unable to load this revision."}
+                          {pin.kept.content}
                         </pre>
                       </div>
                     )}
@@ -1071,6 +1096,8 @@ export function AssignSkills({
           code={conflict.code}
           message={conflict.message}
           name={conflictPin.name}
+          loading={keeping}
+          error={keepError}
           onChoose={(choice) => void resolve(conflict, choice)}
         />
       )}
