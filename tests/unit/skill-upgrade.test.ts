@@ -24,7 +24,7 @@ import { KonfabService } from "../../src/server/domain/service.js";
 import { SkillLibrary } from "../../src/server/domain/skills.js";
 import { packageHash } from "../../src/server/domain/skill-files.js";
 import { checkUpgrade } from "../../src/server/db/upgrade-check.js";
-import { buildOldDatabase, OLD_VERSION } from "../fixtures/old-database.js";
+import { buildOldDatabase, ID, OLD_VERSION } from "../fixtures/old-database.js";
 
 const NOW = 1_700_000_000_000;
 
@@ -79,13 +79,13 @@ describe("upgrading roles to skills", () => {
         {
           agent_id: "claude",
           instructions: "Room notes",
-          legacy_role_revision_id: "dev-2",
+          legacy_role_revision_id: ID["dev-2"],
           upgrade_notice: 1,
         },
         {
           agent_id: "codex",
           instructions: "",
-          legacy_role_revision_id: "rev-1",
+          legacy_role_revision_id: ID["rev-1"],
           upgrade_notice: 1,
         },
         {
@@ -192,12 +192,12 @@ describe("upgrading roles to skills", () => {
       });
       // Files of the turn's own (older) revision stay readable; the new pins do not, yet.
       const role = service.readAssignedRole("claude", "s-claude");
-      expect(role.role).toMatchObject({ revision_id: "dev-1" });
+      expect(role.role).toMatchObject({ revision_id: ID["dev-1"] });
       expect(
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-1",
+          ID["dev-1"],
           "ROLE.md",
           0,
           4096,
@@ -207,7 +207,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-1",
+          ID["dev-1"],
           "checklist.md",
           0,
           4096,
@@ -217,7 +217,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-2",
+          ID["dev-2"],
           "ROLE.md",
           0,
           4096,
@@ -227,7 +227,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedSkillFile(
           "claude",
           "s-claude",
-          "helper-1",
+          ID["helper-1"],
           "notes.md",
           0,
           4096,
@@ -237,7 +237,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedSkillFile(
           "claude",
           "s-claude",
-          "helper-2",
+          ID["helper-2"],
           "notes.md",
           0,
           4096,
@@ -251,16 +251,20 @@ describe("upgrading roles to skills", () => {
       if (next.status !== "turn") throw new Error("expected a turn");
       expect(next.role).toMatchObject({
         id: "role-dev",
-        revision_id: "dev-2",
+        revision_id: ID["dev-2"],
         changed: true,
         title: "Konfab developer",
         notes: "Room notes",
         role_md: expect.stringContaining("Develop v2"),
-        skills: [expect.objectContaining({ skill_revision_id: "helper-2" })],
+        skills: [
+          expect.objectContaining({ skill_revision_id: ID["helper-2"] }),
+        ],
         notice: expect.stringContaining("Konfab replaced roles with skills"),
       });
+      // The old role field carries the content; the new field doesn't repeat it.
       expect(next.assignment).toMatchObject({
-        changed: true,
+        changed: false,
+        reminder: expect.stringContaining("read_assignment"),
         notice: expect.stringContaining("Konfab replaced roles with skills"),
       });
       expect(next.rules).toContain("Follow your assignment");
@@ -268,7 +272,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-2",
+          ID["dev-2"],
           "ROLE.md",
           0,
           4096,
@@ -306,7 +310,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-2",
+          ID["dev-2"],
           "ROLE.md",
           0,
           4096,
@@ -316,7 +320,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedSkillFile(
           "claude",
           "s-claude",
-          "helper-2",
+          ID["helper-2"],
           "notes.md",
           0,
           4096,
@@ -346,7 +350,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-1",
+          ID["dev-1"],
           "ROLE.md",
           0,
           4096,
@@ -357,7 +361,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedSkillFile(
           "claude",
           "s-claude",
-          "helper-1",
+          ID["helper-1"],
           "notes.md",
           0,
           4096,
@@ -370,7 +374,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-2",
+          ID["dev-2"],
           "checklist.md",
           0,
           4096,
@@ -381,7 +385,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedSkillFile(
           "claude",
           "s-claude",
-          "helper-2",
+          ID["helper-2"],
           "notes.md",
           0,
           4096,
@@ -520,7 +524,9 @@ describe("upgrading roles to skills", () => {
       const dev1 = (
         db
           .prepare(
-            "SELECT skill_revision_id FROM legacy_role_revisions WHERE role_revision_id = 'dev-1'",
+            "SELECT skill_revision_id FROM legacy_role_revisions WHERE role_revision_id = '" +
+              ID["dev-1"] +
+              "'",
           )
           .get() as { skill_revision_id: string }
       ).skill_revision_id;
@@ -528,7 +534,7 @@ describe("upgrading roles to skills", () => {
         service.readAssignedRoleFile(
           "claude",
           "s-claude",
-          "dev-1",
+          ID["dev-1"],
           "SKILL.md",
           0,
           4096,

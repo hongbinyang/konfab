@@ -17,6 +17,7 @@ import {
   AssignmentStore,
   assignmentBytes,
   changeNotice,
+  clipNotice,
   fullAssignment,
   REMINDER,
   skillEntries,
@@ -679,10 +680,10 @@ export class KonfabService {
       ) as DeliveredIdentity;
       const after = store.identity(current.instructions, current.pins);
       const change = changeNotice(before, after);
-      const notice =
-        [change, member.upgrade_notice ? UPGRADE_NOTICE : null]
-          .filter(Boolean)
-          .join(" ") || undefined;
+      const joined = [change, member.upgrade_notice ? UPGRADE_NOTICE : null]
+        .filter(Boolean)
+        .join(" ");
+      const notice = joined ? clipNotice(joined) : undefined;
       const full = change !== null || member.upgrade_notice === 1;
       const empty = !current.pins.length && !current.instructions.trim();
       const reply: AssignmentReply = {};
@@ -696,6 +697,15 @@ export class KonfabService {
           ...(empty ? { removed: true } : {}),
         };
       if (empty && !full) reply.assignment = null;
+      else if (current.legacy_role_revision_id)
+        // The old role field already carries the same content; don't send it twice.
+        reply.assignment = {
+          revision: current.revision,
+          changed: false,
+          reminder:
+            "Your assignment has the same content as your role; read_assignment returns it in the new form.",
+          ...(notice ? { notice } : {}),
+        };
       else
         reply.assignment = full
           ? fullAssignment(

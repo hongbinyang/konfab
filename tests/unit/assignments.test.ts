@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 import { SkillLibrary } from "../../src/server/domain/skills.js";
-import { PRECEDENCE } from "../../src/server/domain/assignments.js";
+import {
+  ASSIGNMENT_LIMIT_BYTES,
+  NOTICE_LIMIT_BYTES,
+  PRECEDENCE,
+  assignmentBytes,
+  clipNotice,
+  envelopeBytes,
+} from "../../src/server/domain/assignments.js";
 
 type Delivery = "full" | "summary";
 
@@ -144,7 +151,7 @@ describe("skill assignments", () => {
     assign("claude", [builtin("reviewer")]);
     expect(next()).toContain("You have been given an assignment");
     assign("claude", [builtin("reviewer")], "New notes");
-    expect(next()).toContain("Your room instructions changed: New notes");
+    expect(next()).toContain("Your room instructions changed");
     assign("claude", [builtin("reviewer"), builtin("qa")], "New notes");
     expect(next()).toContain("added qa rev 1");
     assign("claude", [builtin("qa"), builtin("reviewer")], "New notes");
@@ -159,6 +166,62 @@ describe("skill assignments", () => {
     expect(removed.assignment).toMatchObject({
       notice: expect.stringContaining("was removed"),
     });
+  });
+
+  it("keeps a delivered assignment within the limit, whatever the change notice says", () => {
+    const deliver = () => {
+      service.postUserMessage("room", "@claude go");
+      const result = turn("claude");
+      service.passTurn("claude", claude, result.turn_id);
+      return result.assignment as { notice?: string };
+    };
+    // A skill sized so the assignment, with 6,000 characters of instructions, sits just under 64 KiB.
+    const probe = localSkill("edge-a", 1);
+    const base = assignmentBytes(db, "a".repeat(6000), [probe]);
+    const edge = localSkill("edge-b", ASSIGNMENT_LIMIT_BYTES - base - 32);
+    assign("claude", [edge], "a".repeat(6000), [edge.revision_id]);
+    expect(assignmentBytes(db, "a".repeat(6000), [edge])).toBeLessThanOrEqual(
+      ASSIGNMENT_LIMIT_BYTES,
+    );
+    expect(assignmentBytes(db, "a".repeat(6000), [edge])).toBeGreaterThan(
+      ASSIGNMENT_LIMIT_BYTES - 128,
+    );
+    deliver();
+    // An instruction-only change with the longest instructions.
+    assign("claude", [edge], "b".repeat(6000));
+    const changed = deliver();
+    expect(changed.notice).toContain("room instructions changed");
+    expect(envelopeBytes(changed)).toBeLessThanOrEqual(ASSIGNMENT_LIMIT_BYTES);
+    // Many skills with long names replaced at once.
+    const many = (prefix: string) =>
+      Array.from({ length: 12 }, (_, index) =>
+        localSkill(`${prefix}-${index}-${"n".repeat(50)}`.slice(0, 64), 10),
+      );
+    const first = many("first");
+    assign(
+      "claude",
+      first,
+      "i".repeat(6000),
+      first.map((p) => p.revision_id),
+    );
+    deliver();
+    const second = many("second");
+    assign(
+      "claude",
+      second,
+      "j".repeat(6000),
+      second.map((p) => p.revision_id),
+    );
+    const replaced = deliver();
+    expect(replaced.notice).toContain("and 7 more");
+    expect(envelopeBytes(replaced.notice)).toBeLessThanOrEqual(
+      NOTICE_LIMIT_BYTES,
+    );
+    expect(envelopeBytes(replaced)).toBeLessThanOrEqual(ASSIGNMENT_LIMIT_BYTES);
+    expect(clipNotice("é".repeat(5000)).endsWith("…")).toBe(true);
+    expect(envelopeBytes(clipNotice("é\n".repeat(5000)))).toBeLessThanOrEqual(
+      NOTICE_LIMIT_BYTES,
+    );
   });
 
   it("keeps an active turn on its assignment until the next turn", () => {

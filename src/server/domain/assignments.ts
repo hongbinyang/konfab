@@ -167,7 +167,24 @@ export function assignmentBytes(
   );
 }
 
-const NOTICE_ROOM = "x".repeat(2048);
+/** Largest notice, as JSON, that a reply can carry; size checks reserve this much. */
+export const NOTICE_LIMIT_BYTES = 2048;
+const NOTICE_ROOM = "x".repeat(NOTICE_LIMIT_BYTES - 2);
+
+/** Shortens a notice so that, as JSON, it never exceeds NOTICE_LIMIT_BYTES. */
+export function clipNotice(text: string): string {
+  if (envelopeBytes(text) <= NOTICE_LIMIT_BYTES) return text;
+  let chars = [...text];
+  while (
+    chars.length &&
+    envelopeBytes(`${chars.join("")}…`) > NOTICE_LIMIT_BYTES
+  )
+    chars = chars.slice(
+      0,
+      Math.max(0, chars.length - Math.max(1, chars.length >> 4)),
+    );
+  return `${chars.join("")}…`;
+}
 
 export function checkSize(db: Db, instructions: string, pins: Pin[]): void {
   const bytes = assignmentBytes(db, instructions, pins);
@@ -190,9 +207,16 @@ export function changeNotice(
   if (!hasAny)
     return "Your assignment was removed. Stop its duties and hand over open work, branches, reviews and pending pushes.";
   if (skillsSame)
-    return `Your room instructions changed: ${after.instructions.trim() || "(none)"}. Your skills remain the same.`;
+    return after.instructions.trim()
+      ? "Your room instructions changed; read them in your assignment. Your skills remain the same."
+      : "Your room instructions were removed. Your skills remain the same.";
   const label = (p: { name: string; number: number }) =>
     `${p.name} rev ${p.number}`;
+  // Name at most a few skills per kind of change; the assignment lists them all.
+  const names = <T>(items: T[], format: (item: T) => string) =>
+    items.length > 5
+      ? `${items.slice(0, 5).map(format).join(", ")} and ${items.length - 5} more`
+      : items.map(format).join(", ");
   const beforeBySkill = new Map(before.pins.map((p) => [p.skill_id, p]));
   const afterBySkill = new Map(after.pins.map((p) => [p.skill_id, p]));
   const parts: string[] = [];
@@ -202,16 +226,15 @@ export function changeNotice(
     const old = beforeBySkill.get(p.skill_id);
     return old && old.revision_id !== p.revision_id;
   });
-  if (added.length) parts.push(`added ${added.map(label).join(", ")}`);
-  if (removed.length) parts.push(`removed ${removed.map(label).join(", ")}`);
+  if (added.length) parts.push(`added ${names(added, label)}`);
+  if (removed.length) parts.push(`removed ${names(removed, label)}`);
   if (updated.length)
     parts.push(
-      `updated ${updated
-        .map(
-          (p) =>
-            `${p.name} rev ${beforeBySkill.get(p.skill_id)!.number} → rev ${p.number}`,
-        )
-        .join(", ")}`,
+      `updated ${names(
+        updated,
+        (p) =>
+          `${p.name} rev ${beforeBySkill.get(p.skill_id)!.number} → rev ${p.number}`,
+      )}`,
     );
   const order = (pins: DeliveredIdentity["pins"]) =>
     pins
@@ -224,7 +247,9 @@ export function changeNotice(
   if (!parts.length) parts.push("changed how skills are delivered");
   if (before.instructions !== after.instructions)
     parts.push("room instructions changed");
-  return `Your skills changed: ${parts.join("; ")}. Stop duties you no longer have, read your assignment, and hand over open work if your responsibilities moved.`;
+  return clipNotice(
+    `Your skills changed: ${parts.join("; ")}. Stop duties you no longer have, read your assignment, and hand over open work if your responsibilities moved.`,
+  );
 }
 
 export interface MemberAssignment {
