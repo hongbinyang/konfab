@@ -9,7 +9,8 @@ Conventions for AI agents (and people) changing this repo. Konfab room rules and
 
 ## Before you commit
 
-- `npm run check` must pass (types, lint, format, unit, integration and smoke tests).
+- `npm run check` must pass (types, lint, format, unit, integration, component and smoke tests).
+- For page changes, also run `npm run check:full` (adds the Playwright browser tests) and add a test for each UI bug you fix.
 - Behaviour that spans a server restart needs a test that really restarts the service (reopen the database, build a new service and app), not only a simulated outage.
 - Never put agent or vendor names (for example Claude, Codex, Anthropic, OpenAI) in commit messages, trailers, branch names or pull requests.
 - Never commit tokens, `.mcp.json` or anything from `~/.konfab/`.

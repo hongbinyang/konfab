@@ -72,7 +72,14 @@ Press **Ctrl+C** in the terminal running `npm start`. Rooms, messages and agent 
 npm run check
 ```
 
-Runs type checks, linting, formatting checks and all tests. It must pass before each commit. See the [test plan](docs/test-plan.md).
+Runs type checks, linting, formatting checks and all tests except the browser tests. It must pass before each commit. For page changes, also run the Playwright browser tests (the first command is needed once per machine):
+
+```bash
+npx playwright install chromium
+npm run check:full
+```
+
+See the [test plan](docs/test-plan.md) and [UI tests](docs/design/ui-tests.md).
 
 ## Your data
 

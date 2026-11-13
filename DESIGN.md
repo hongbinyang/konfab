@@ -85,6 +85,7 @@ npm ci
 | Page | `react`, `vite` | 19.3, 8.3 |
 | Language | `typescript` | 6.0, the version npm resolved alongside the linting tools |
 | Tests | `vitest` | 5.1 |
+| UI tests | `jsdom`, `@testing-library/react`, `@testing-library/user-event`, `@playwright/test` | 29.1, 16.3, 14.6, 1.65 |
 | Message display | `react-markdown` | Added for safe Markdown |
 
 The exact versions are fixed by the lockfile when the project is set up.
@@ -94,7 +95,7 @@ The exact versions are fixed by the lockfile when the project is set up.
 - **Version control:** git from the first commit. `.gitignore` excludes `node_modules/`, build output, and local data.
 - **Type checks:** TypeScript in strict mode, with `zod` validating all external input.
 - **Formatting and linting:** ESLint and Prettier.
-- **Tests:** a single `npm run check` runs types, lint, and tests. It must pass before each commit.
+- **Tests:** a single `npm run check` runs types, lint, unit, integration, component and smoke tests. It must pass before each commit. `npm run check:full` also runs the Playwright browser tests; run it for UI changes. Every UI bug fix ships with a test that fails without the fix.
 - **Database changes:** ordered SQL migrations in `src/server/db/index.ts`, applied at startup in transactions.
 - **Secrets:** tokens are never committed or logged.
 - **Docs:** README covers setup, and the user guide covers app configuration and backups.
@@ -407,7 +408,8 @@ Agent routes sit under `/agent/*` and are only for the bridge. Server-Sent Event
 | Integration | Vitest with temporary SQLite | API, auth, migrations, restart recovery, no lost or duplicate messages |
 | Bridge | Vitest with an MCP client | Each tool over real stdio, including long waits |
 | Smoke | Vitest with real processes | Main paths through the built setup command, server, and bridge |
-| Browser | Manual, then Playwright | Page behavior and safe message display |
+| Component | Vitest with jsdom and Testing Library | Page components and form state, such as Add agent and Team roles (`tests/web`) |
+| Browser | Playwright (Chromium, light and dark) | Main page flows against a built server in a throwaway `KONFAB_HOME` (`tests/e2e`) |
 | End to end | Real apps | Connection and long-session behavior, which automated tests cannot prove. Deferred. |
 
 Tests use a fake clock for run windows and timeouts, and a scripted agent in place of a real model. The full approach, rules, and results are in the [test plan](docs/test-plan.md).

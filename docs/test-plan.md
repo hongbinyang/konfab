@@ -12,26 +12,28 @@
 
 ## 2. How we test along the way
 
-| When                        | What to run                                    | Rule                                                                         |
-| --------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
-| While coding                | `npm run test:watch`                           | Add or update tests with each behavior change                                |
-| Before each commit          | `npm run check`                                | Must pass. Runs types, lint, formatting, unit, integration, and smoke tests. |
-| When fixing a bug           | A new test first                               | The test must fail before the fix and pass after it                          |
-| After changing dependencies | `npm audit --omit=dev` and `npm run check`     | No known vulnerabilities in runtime packages                                 |
-| Before a release            | All automated tests, then the end-to-end tests | All exit criteria in section 6 must be met                                   |
-| After an app update         | The end-to-end connection checks               | App behavior can change without notice                                       |
+| When                        | What to run                                    | Rule                                                                           |
+| --------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| While coding                | `npm run test:watch`                           | Add or update tests with each behavior change                                  |
+| Before each commit          | `npm run check`                                | Must pass. Runs types, lint, formatting, unit, integration, and smoke tests.   |
+| When fixing a bug           | A new test first                               | The test must fail before the fix and pass after it                            |
+| When changing the page      | `npm run check:full`                           | Adds the Playwright browser tests; first run `npx playwright install chromium` |
+| After changing dependencies | `npm audit --omit=dev` and `npm run check`     | No known vulnerabilities in runtime packages                                   |
+| Before a release            | All automated tests, then the end-to-end tests | All exit criteria in section 6 must be met                                     |
+| After an app update         | The end-to-end connection checks               | App behavior can change without notice                                         |
 
 Run all commands inside the `konfab` conda environment.
 
 ## 3. Test levels
 
-| Level           | Location                           | What it proves                                                                                    | Status                                                  |
-| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                                                |
-| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                   | In place                                                |
-| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart             | In place                                                |
-| **Browser**     | Manual for now, then Playwright    | Page behavior, safe message display, and layout                                                   | Checked by hand, automation deferred                    |
-| **End to end**  | [User guide](user-guide.md) checks | Real desktop apps: connection, wait limits, allowance use, and agent behavior                     | Partial; repeat for affected clients and record results |
+| Level           | Location                           | What it proves                                                                                    | Status                                                               |
+| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                                                             |
+| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                   | In place                                                             |
+| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart             | In place                                                             |
+| **Component**   | `tests/web/`                       | Page components and form state with jsdom and Testing Library                                     | In place; grow with each UI change                                   |
+| **Browser**     | `tests/e2e/` (Playwright)          | Main page flows in Chromium, light and dark, against a built server in a throwaway home           | In place for the Add agent flow; visual layout still checked by hand |
+| **End to end**  | [User guide](user-guide.md) checks | Real desktop apps: connection, wait limits, allowance use, and agent behavior                     | Partial; repeat for affected clients and record results              |
 
 Automated tests use scripted agents instead of real models. They prove that Konfab behaves correctly, but not how real apps or models behave.
 

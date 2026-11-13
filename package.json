@@ -22,7 +22,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:smoke": "npm run build && vitest run --config vitest.smoke.config.ts",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run test:smoke"
+    "test:e2e": "npm run build && playwright test",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run test:smoke",
+    "check:full": "npm run check && playwright test"
   },
   "dependencies": {
     "@decimalturn/toml-patch": "3.3.2",
@@ -39,6 +41,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.65.0",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.10",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
@@ -46,6 +52,7 @@
     "@vitejs/plugin-react": "^6.2.1",
     "@vitest/coverage-v8": "^5.1.0",
     "eslint": "^10.14.0",
+    "jsdom": "29.1.1",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
