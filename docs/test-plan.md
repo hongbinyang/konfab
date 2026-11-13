@@ -60,7 +60,8 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 | Agent rules                                              | A12, P1           | Unit                               | Pass                                                        |
 | Daily hours and breaks                                   | M1 to M3, M5      | Unit, integration, smoke           | Pass, not yet confirmed with real apps                      |
 | Allowance warnings                                       | W1 to W3          | Unit, integration                  | Pass                                                        |
-| Lead, room brief, roles, and editing                     | R12, R13, F3      | Unit, integration, manual browser  | Pass, relies on agents following them                       |
+| Lead, room brief, skills, and editing                    | R12, R13, F3      | Unit, integration, manual browser  | Pass, relies on agents following them                       |
+| Skill assignments and the upgrade from roles             | SA1 to SA9        | Unit, integration, browser, real   | Pass; real upgrade with both desktop connectors, 2026-11-13 |
 | Permission flow and pre-approvals                        | P2 to P6          | Unit, integration, smoke           | Pass, relies on agents following it                         |
 | No outside assets                                        | P7                | Smoke                              | Pass                                                        |
 | Loopback, auth, and request protection                   | S1 to S3          | Integration, smoke                 | Pass                                                        |
