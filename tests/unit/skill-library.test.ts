@@ -292,8 +292,17 @@ describe("skill library adoption", () => {
         files: Array<[string, string]>,
       ) => {
         db.prepare(
-          "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, licence, diagnostic, revision, created_at, updated_at) VALUES (?, ?, ?, '{}', NULL, 'invalid', 1, 0, 0)",
-        ).run(id, libraryId, name);
+          "INSERT INTO skill_import_drafts(id, library_id, folder_name, provenance_json, licence, diagnostic, revision, created_at, updated_at) VALUES (?, ?, ?, ?, 'MIT', 'Description: enter 1–1,024 characters.', 3, 111, 222)",
+        ).run(
+          id,
+          libraryId,
+          name,
+          JSON.stringify({
+            source: { owner: "example", repository: "skills" },
+            commit: "c".repeat(40),
+            path: `skills/${name}`,
+          }),
+        );
         for (const [file, content] of files)
           db.prepare(
             "INSERT INTO skill_import_draft_files(draft_id, path, content, mode) VALUES (?, ?, ?, 384)",
@@ -304,9 +313,18 @@ describe("skill library adoption", () => {
         ["notes/a.md", "supporting"],
       ]);
       draft("d2", "taken", [["SKILL.md", "---\nname: taken\n---\nother"]]);
-      // A crash left a partial staging folder for the first draft.
+      // A crash left a partial staging folder that this recovery owns, and something
+      // else uses a similar name without the owner marker.
+      mkdirSync(join(root, ".konfab-draft-d1-crashed"));
+      writeFileSync(
+        join(root, ".konfab-draft-d1-crashed", ".konfab-draft-owner"),
+        "d1",
+      );
+      writeFileSync(join(root, ".konfab-draft-d1-crashed", "partial"), "x");
+      mkdirSync(join(root, ".konfab-draft-d1-foreign"));
+      writeFileSync(join(root, ".konfab-draft-d1-foreign", "theirs"), "keep");
       mkdirSync(join(root, ".konfab-draft-d1"));
-      writeFileSync(join(root, ".konfab-draft-d1", "partial"), "x");
+      writeFileSync(join(root, ".konfab-draft-d1", "old"), "keep");
       db.close();
 
       db = openDatabase(path);
@@ -318,7 +336,39 @@ describe("skill library adoption", () => {
         readFileSync(join(root, "half-done", "notes", "a.md"), "utf8"),
       ).toBe("supporting");
       expect(existsSync(join(root, "half-done", "partial"))).toBe(false);
-      expect(existsSync(join(root, ".konfab-draft-d1"))).toBe(false);
+      expect(existsSync(join(root, "half-done", ".konfab-draft-owner"))).toBe(
+        false,
+      );
+      // Owned partial removed; unowned folders left alone.
+      expect(existsSync(join(root, ".konfab-draft-d1-crashed"))).toBe(false);
+      expect(
+        readFileSync(join(root, ".konfab-draft-d1-foreign", "theirs"), "utf8"),
+      ).toBe("keep");
+      expect(readFileSync(join(root, ".konfab-draft-d1", "old"), "utf8")).toBe(
+        "keep",
+      );
+      // The draft's metadata is kept beside the folder, outside the skill files.
+      const sidecar = JSON.parse(
+        readFileSync(
+          join(root, ".konfab-recovered-drafts", "half-done.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      expect(sidecar).toMatchObject({
+        recovered_from_draft: "d1",
+        original_name: "half-done",
+        folder: "half-done",
+        provenance: {
+          source: { owner: "example", repository: "skills" },
+          commit: "c".repeat(40),
+          path: "skills/half-done",
+        },
+        licence: "MIT",
+        diagnostic: "Description: enter 1–1,024 characters.",
+        revision: 3,
+        created_at: 111,
+        updated_at: 222,
+      });
       expect(readFileSync(join(root, "taken", "mine.txt"), "utf8")).toBe(
         "keep",
       );
