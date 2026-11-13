@@ -1144,3 +1144,17 @@ dd {
 .unreachable-notice p {
   margin: 0 0 4px;
 }
+
+.room-name {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.room-name input {
+  width: 12em;
+}
+
+form.room-name .row {
+  align-items: center;
+  margin-top: 4px;
+}

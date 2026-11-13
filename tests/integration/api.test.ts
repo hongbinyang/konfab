@@ -30,7 +30,7 @@ describe("page API", () => {
   let cookie: string;
   let attachmentDir: string;
 
-  type Method = "GET" | "POST" | "PATCH" | "PUT";
+  type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   const call = (method: Method, url: string, payload?: object) =>
     app.inject({
       method,
@@ -197,6 +197,64 @@ describe("page API", () => {
       (await call("PATCH", path, { checkin_minutes: null })).json().room
         .checkin_minutes,
     ).toBeNull();
+  });
+
+  it("sets, validates and clears a member's room name", async () => {
+    const created = await call("POST", "/api/rooms", {
+      name: "names",
+      members: ["claude", "codex"],
+    });
+    const id = (created.json() as { id: number }).id;
+    const name = (agent: string, body?: object) =>
+      call(
+        body ? "PUT" : "DELETE",
+        `/api/rooms/${id}/members/${agent}/name`,
+        body,
+      );
+    expect((await name("claude", { name: "A" })).statusCode).toBe(200);
+    const conflict = await name("codex", { name: "a" });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({ code: "name_conflict" });
+    expect((await name("codex", { name: "lead" })).json()).toMatchObject({
+      code: "name_reserved",
+    });
+    expect((await name("codex", { name: "two words" })).statusCode).toBe(400);
+    expect((await name("codex", {})).statusCode).toBe(400);
+    expect((await name("nobody", { name: "N" })).statusCode).toBe(404);
+    const state = (await call("GET", `/api/rooms/${id}`)).json() as {
+      agents: { id: string; room_name: string | null; name_fixed: boolean }[];
+      room_names: Record<string, string>;
+    };
+    expect(state.room_names).toEqual({ claude: "A" });
+    expect(state.agents[0]).toMatchObject({
+      id: "claude",
+      room_name: "A",
+      name_fixed: false,
+    });
+    expect((await name("claude")).statusCode).toBe(200);
+    service.join("codex", "names");
+    expect((await name("codex", { name: "B" })).json()).toMatchObject({
+      code: "name_fixed",
+    });
+    const added = await call("POST", "/api/agents", {
+      id: "claude-two",
+      display_name: "Second",
+      app_id: "claude",
+      room_id: id,
+      room_name: "Codex",
+    });
+    expect(added.json()).toMatchObject({ code: "name_conflict" });
+    expect(
+      (
+        await call("POST", "/api/agents", {
+          id: "claude-two",
+          display_name: "Second",
+          app_id: "claude",
+          room_id: id,
+          room_name: "C",
+        })
+      ).statusCode,
+    ).toBe(201);
   });
 
   it("reports actionable field errors for role and skill requests", async () => {

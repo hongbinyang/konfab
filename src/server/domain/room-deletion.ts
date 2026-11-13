@@ -130,6 +130,7 @@ export function deleteRoomRows(
       "decisions",
       "write_locks",
       "room_member_roles",
+      "room_agent_names",
       "converted_role_history",
       "agent_reports",
       "permission_requests",

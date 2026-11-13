@@ -21,6 +21,12 @@ import {
   recoverRoomCleanup,
   roomDeletionCounts,
 } from "./room-deletion.js";
+import {
+  mentionConflict,
+  normalizeMentionTokens,
+  roomNameProblem,
+  type NamedMember,
+} from "./agent-names.js";
 
 export class KonfabError extends Error {
   constructor(
@@ -90,6 +96,8 @@ export type WaitResult = (
       room: string;
       topic: string;
       rules: string;
+      /** Each member and the name it is mentioned by. */
+      member_names?: { id: string; name: string }[];
       parallel?: { source_message_id: number; notice: string };
       format?: {
         kind: "review" | "debate";
@@ -583,7 +591,14 @@ export class KonfabService {
     displayName: string,
     roomId?: number,
     afterAdd?: () => void,
+    roomName?: string,
   ): void {
+    if (roomName?.trim() && roomId === undefined)
+      throw new KonfabError(
+        "invalid_agent",
+        400,
+        "A room name can only be given when the agent joins a room.",
+      );
     if (afterAdd && roomId === undefined)
       throw new KonfabError(
         "invalid_agent",
@@ -631,6 +646,7 @@ export class KonfabService {
         if (room.archived_at !== null)
           throw new KonfabError("room_archived", 409, "This room is archived.");
         this.replaceMembers(roomId, [...this.memberIds(roomId), id]);
+        if (roomName?.trim()) this.writeRoomName(room, id, roomName);
       }
       afterAdd?.();
     })();
@@ -1953,10 +1969,13 @@ export class KonfabService {
     const agents = this.db
       .prepare(
         `SELECT a.id, a.display_name, a.bridge_protocol, m.role, m.can_edit,
+         n.name AS room_name,
+         EXISTS(SELECT 1 FROM sessions s WHERE s.room_id=m.room_id AND s.agent_id=m.agent_id) AS name_fixed,
          rr.title AS role_title, rr.number AS role_number,
          EXISTS(SELECT 1 FROM converted_role_history h WHERE h.room_id=m.room_id AND h.agent_id=m.agent_id AND h.role_id=mr.role_id AND h.assignment_revision=m.role_assignment_revision AND h.reverted_at IS NULL) AS role_can_revert
          FROM room_members m
          JOIN agents a ON a.id = m.agent_id
+         LEFT JOIN room_agent_names n ON n.room_id = m.room_id AND n.agent_id = m.agent_id
          LEFT JOIN room_member_roles mr ON mr.room_id = m.room_id AND mr.agent_id = m.agent_id
          LEFT JOIN role_revisions rr ON rr.id = mr.role_revision_id
          WHERE m.room_id = ? ORDER BY m.position`,
@@ -1964,6 +1983,8 @@ export class KonfabService {
       .all(room.id) as {
       id: string;
       display_name: string;
+      room_name: string | null;
+      name_fixed: number;
       role: string;
       can_edit: number;
       bridge_protocol: number | null;
@@ -1994,6 +2015,16 @@ export class KonfabService {
         agent_streak: room.agent_streak,
         streak_limit: this.options.maxConsecutiveAgentMessages ?? 50,
       },
+      /** Room names by agent ID, including former members, for old messages. */
+      room_names: Object.fromEntries(
+        (
+          this.db
+            .prepare(
+              "SELECT agent_id, name FROM room_agent_names WHERE room_id = ?",
+            )
+            .all(room.id) as { agent_id: string; name: string }[]
+        ).map((row) => [row.agent_id, row.name]),
+      ) as Record<string, string>,
       agents: agents.map((agent) => {
         const session = this.activeSession(room.id, agent.id);
         const pending = room.parallel_lead_mentions
@@ -2007,6 +2038,8 @@ export class KonfabService {
           pending_mention_since: pending.since,
           id: agent.id,
           display_name: agent.display_name,
+          room_name: agent.room_name,
+          name_fixed: agent.name_fixed === 1,
           role: agent.role_title
             ? `${agent.role_title} · rev ${agent.role_number}`
             : agent.role,
@@ -2185,6 +2218,7 @@ export class KonfabService {
       rules: this.instructionsFor(room.id, agentId),
       role: new RoleLibrary(this.db).envelope(room.id, agentId, false, true),
       members: this.memberIds(room.id),
+      member_names: this.memberNames(room.id),
       recent_messages: this.withAttachments(
         room.id,
         this.recentMessages(room.id, 20),
@@ -2335,11 +2369,19 @@ export class KonfabService {
         const session = this.requireLiveSession(agentId, sessionId);
         this.requireActive(turn, session.id);
 
-        const mentions = this.resolveMentions(
+        const explicitMentions = this.normalizeMentions(
           turn.room_id,
           parseMentions(body),
         );
+        const mentions = this.resolveMentions(turn.room_id, explicitMentions);
         const members = this.memberIds(turn.room_id);
+        if (next?.kind === "agent")
+          next = {
+            kind: "agent",
+            agent_id:
+              this.normalizeMentions(turn.room_id, [next.agent_id])[0] ??
+              next.agent_id,
+          };
         if (
           next?.kind === "agent" &&
           (!members.includes(next.agent_id) || next.agent_id === agentId)
@@ -2364,6 +2406,7 @@ export class KonfabService {
           agentId,
           body,
           mentions,
+          explicitMentions,
         );
         if (next)
           this.db
@@ -2491,9 +2534,10 @@ export class KonfabService {
     agentId: string,
     sessionId: string,
     sourceMessageId: number,
-    to: string,
+    target: string,
   ) {
     const session = this.requireLiveSession(agentId, sessionId);
+    const to = this.normalizeMentions(session.room_id, [target])[0] ?? target;
     const source = this.db
       .prepare(
         "SELECT id, sender_type, sender_id, created_at FROM messages WHERE room_id = ? AND id = ?",
@@ -2817,6 +2861,15 @@ export class KonfabService {
       .all(roomId, ...ids) as (Omit<AttachmentView, "path"> & {
       message_id: number;
     })[];
+    const explicit = new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT id, mentioned FROM messages WHERE id IN (${ids.map(() => "?").join(",")}) AND mentioned IS NOT NULL`,
+          )
+          .all(...ids) as { id: number; mentioned: string }[]
+      ).map((row) => [row.id, JSON.parse(row.mentioned) as string[]]),
+    );
     const byMessage = new Map<number, AttachmentView[]>();
     for (const { message_id, ...row } of rows) {
       const list = byMessage.get(message_id) ?? [];
@@ -2833,7 +2886,7 @@ export class KonfabService {
           ? "system"
           : message.sender_type,
       attachments: byMessage.get(message.id) ?? [],
-      mentions: parseMentions(message.body),
+      mentions: explicit.get(message.id) ?? parseMentions(message.body),
     }));
   }
 
@@ -2987,7 +3040,7 @@ export class KonfabService {
     }
     let mentioned: string[] = [];
     const messageId = this.db.transaction(() => {
-      const mentions = parseMentions(body);
+      const mentions = this.normalizeMentions(room.id, parseMentions(body));
       const members = this.memberIds(room.id);
       const targets = mentions.includes("all")
         ? members.filter((member) => member !== "lead")
@@ -2998,7 +3051,14 @@ export class KonfabService {
           : members.filter((member) => member !== "lead");
 
       if (mentions.length > 0) mentioned = targets;
-      const id = this.insertMessage(room.id, "user", "user", body, targets);
+      const id = this.insertMessage(
+        room.id,
+        "user",
+        "user",
+        body,
+        targets,
+        mentions,
+      );
       this.db
         .prepare(
           "UPDATE automatic_continuations SET state = 'cancelled' WHERE room_id = ? AND state IN ('pending','capped')",
@@ -3118,12 +3178,12 @@ export class KonfabService {
     const boundary = active?.last_message_id ?? member.last_seen_message_id;
     const rows = this.db
       .prepare(
-        "SELECT id, body FROM messages WHERE room_id = ? AND sender_type = 'user' AND id > ? ORDER BY id LIMIT 3",
+        "SELECT id, body, mentioned FROM messages WHERE room_id = ? AND sender_type = 'user' AND id > ? ORDER BY id LIMIT 3",
       )
       .all(session.room_id, boundary) as {
       id: number;
       body: string;
-      mentions: string;
+      mentioned: string | null;
     }[];
     if (!rows.length) return null;
     const count = this.db
@@ -3137,7 +3197,10 @@ export class KonfabService {
         excerpt: Array.from(row.body.replace(/[\p{C}\s]+/gu, " ").trim())
           .slice(0, 120)
           .join(""),
-        addressed_to: parseMentions(row.body).filter((name) => name !== "lead"),
+        addressed_to: (row.mentioned
+          ? (JSON.parse(row.mentioned) as string[])
+          : parseMentions(row.body)
+        ).filter((name) => name !== "lead"),
       })),
       more: count.count - rows.length,
     };
@@ -4200,6 +4263,11 @@ export class KonfabService {
     parts.push(
       `During long work, call report_status with kind working and a short detail about every ${interval} ${interval === 1 ? "minute" : "minutes"} when practical, and check the reply for lead mentions. A status detail can acknowledge a mention without ending your turn; post_message ends your turn.`,
     );
+    const named = this.namedMembers(roomId);
+    if (named.some((member) => member.name))
+      parts.push(
+        `Members: ${named.map((member) => `@${member.name ?? member.id} (${member.id})`).join(", ")}. Mention members by these names; agent IDs also work.`,
+      );
     parts.push(RULES);
     return parts.join("\n\n");
   }
@@ -4266,6 +4334,7 @@ export class KonfabService {
         );
       }
     }
+    this.requireUnambiguousNames(this.namedMembers(roomId, unique));
     const removed = this.memberIds(roomId).filter(
       (agentId) => !unique.includes(agentId),
     );
@@ -4938,6 +5007,7 @@ export class KonfabService {
         ).swap_role_text_snapshot ?? undefined,
       ),
       role: roleEnvelope,
+      member_names: this.memberNames(room.id),
       messages: this.withAttachments(room.id, messages),
       truncated,
       wait_seconds: this.options.waitTimeoutSeconds,
@@ -5141,11 +5211,12 @@ export class KonfabService {
     senderId: string,
     body: string,
     mentions: readonly string[],
+    explicitMentions?: readonly string[],
   ): number {
     const result = this.db
       .prepare(
-        `INSERT INTO messages (room_id, sender_type, sender_id, body, mentions, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (room_id, sender_type, sender_id, body, mentions, mentioned, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         roomId,
@@ -5153,6 +5224,7 @@ export class KonfabService {
         senderId,
         body,
         JSON.stringify(mentions),
+        explicitMentions ? JSON.stringify(explicitMentions) : null,
         this.now(),
       );
     return Number(result.lastInsertRowid);
@@ -5189,6 +5261,124 @@ export class KonfabService {
       )
       .all(roomId) as { agent_id: string }[];
     return rows.map((row) => row.agent_id);
+  }
+
+  /** Current members with their room names, in room order. */
+  private namedMembers(
+    roomId: number,
+    agentIds: readonly string[] = this.memberIds(roomId),
+  ): NamedMember[] {
+    const rows = this.db.prepare(
+      `SELECT a.id, a.display_name, n.name FROM agents a
+         LEFT JOIN room_agent_names n ON n.room_id = ? AND n.agent_id = a.id
+         WHERE a.id = ?`,
+    );
+    return agentIds.flatMap((id) => {
+      const row = rows.get(roomId, id) as
+        { id: string; display_name: string; name: string | null } | undefined;
+      return row
+        ? [{ id: row.id, name: row.name, label: row.name ?? row.display_name }]
+        : [];
+    });
+  }
+
+  /** Mention tokens mapped to member IDs (names first, then IDs). */
+  private normalizeMentions(
+    roomId: number,
+    tokens: readonly string[],
+  ): string[] {
+    return normalizeMentionTokens(tokens, this.namedMembers(roomId));
+  }
+
+  /** Rejects a member set in which one mention would reach two members. */
+  private requireUnambiguousNames(members: readonly NamedMember[]): void {
+    const clash = mentionConflict(members);
+    if (!clash) return;
+    const owner = (member: NamedMember) =>
+      member.name?.toLowerCase() === clash.token
+        ? `${member.label}'s name`
+        : `${member.label}'s agent ID`;
+    throw new KonfabError(
+      "name_conflict",
+      409,
+      `@${clash.token} would mean both ${owner(clash.holder)} and ${owner(clash.other)} in this room. Choose another name.`,
+    );
+  }
+
+  /** True once the agent has ever joined the room; its name is then fixed. */
+  private hasJoined(roomId: number, agentId: string): boolean {
+    return Boolean(
+      this.db
+        .prepare("SELECT 1 FROM sessions WHERE room_id = ? AND agent_id = ?")
+        .get(roomId, agentId),
+    );
+  }
+
+  /** Set (or clear, with null) a member's room name before it first joins. */
+  setRoomName(ref: RoomRef, agentId: string, name: string | null): void {
+    const room = this.room(ref);
+    this.db.transaction(() => {
+      this.writeRoomName(room, agentId, name);
+    })();
+    this.logEvent("member_named", room.id, agentId, { name });
+    this.notify();
+  }
+
+  private writeRoomName(
+    room: { id: number; archived_at: number | null },
+    agentId: string,
+    name: string | null,
+  ): void {
+    if (room.archived_at !== null)
+      throw new KonfabError("room_archived", 409, "This room is archived.");
+    const members = this.memberIds(room.id);
+    if (!members.includes(agentId))
+      throw new KonfabError(
+        "agent_not_found",
+        404,
+        "That agent is not a member of this room.",
+      );
+    if (this.hasJoined(room.id, agentId))
+      throw new KonfabError(
+        "name_fixed",
+        409,
+        "Names are fixed once the agent joins this room.",
+      );
+    const trimmed = name?.trim() ?? null;
+    if (trimmed) {
+      const problem = roomNameProblem(trimmed);
+      if (problem)
+        throw new KonfabError(
+          problem.code,
+          problem.code === "name_reserved" ? 409 : 400,
+          problem.message,
+        );
+      this.requireUnambiguousNames(
+        this.namedMembers(room.id, members).map((member) =>
+          member.id === agentId ? { ...member, name: trimmed } : member,
+        ),
+      );
+      this.db
+        .prepare(
+          `INSERT INTO room_agent_names (room_id, agent_id, name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(room_id, agent_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`,
+        )
+        .run(room.id, agentId, trimmed, this.now(), this.now());
+    } else
+      this.db
+        .prepare(
+          "DELETE FROM room_agent_names WHERE room_id = ? AND agent_id = ?",
+        )
+        .run(room.id, agentId);
+  }
+
+  /** Member IDs with the name each one is mentioned by (room name or ID). */
+  private memberNames(roomId: number): { id: string; name: string }[] {
+    return this.namedMembers(roomId).map((member) => ({
+      id: member.id,
+      name: member.name ?? member.id,
+    }));
   }
 
   private activeSession(

@@ -157,6 +157,19 @@ describe("Add agent form", () => {
     ]);
   });
 
+  it("sends the name in this room, which is only offered when adding to the room", async () => {
+    const { user, onAdded } = setup();
+    await user.type(screen.getByLabelText("Display name"), "Helper");
+    await user.type(screen.getByLabelText(/Name in this room/), "H");
+    await user.click(submit());
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    expect(posts[0]?.body).toMatchObject({ room_id: 7, room_name: "H" });
+    cleanup();
+    setup();
+    await user.click(screen.getByLabelText("Add to this room"));
+    expect(screen.queryByLabelText(/Name in this room/)).toBeNull();
+  });
+
   it("requires a preview and confirmation of the exact revision", async () => {
     const { user, onAdded } = setup();
     await user.type(screen.getByLabelText("Display name"), "Reviewer");

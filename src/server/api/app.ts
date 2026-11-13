@@ -1699,6 +1699,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         display_name: z.string().min(1),
         app_id: z.string().min(1),
         room_id: z.number().int().positive().optional(),
+        room_name: z.string().max(200).optional(),
         role: z
           .object({
             role_id: z.string().min(1).max(200),
@@ -1726,6 +1727,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
               "",
             )
         : undefined,
+      body.room_name,
     );
     return reply.code(201).send({ ok: true });
   });
@@ -1938,6 +1940,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const { id } = idParams.parse(request.params);
     service.setMembers(id, membersBody.parse(request.body).members);
     return service.roomState(id);
+  });
+  app.put("/api/rooms/:id/members/:agentId/name", async (request) => {
+    const { id, agentId } = memberParams.parse(request.params);
+    const { name } = z
+      .object({ name: z.string().min(1).max(200) })
+      .parse(request.body);
+    service.setRoomName(id, agentId, name);
+    return { ok: true };
+  });
+  app.delete("/api/rooms/:id/members/:agentId/name", async (request) => {
+    const { id, agentId } = memberParams.parse(request.params);
+    service.setRoomName(id, agentId, null);
+    return { ok: true };
   });
 
   app.get("/api/rooms/:id/deletion-preview", async (request) => {

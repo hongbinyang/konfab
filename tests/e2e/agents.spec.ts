@@ -78,3 +78,37 @@ test("warns when a mentioned agent can't hear the lead", async ({
   await notice.getByRole("button", { name: "Dismiss" }).click();
   await expect(notice).toHaveCount(0);
 });
+
+test("name an agent in the room and mention it by that name", async ({
+  page,
+}, testInfo) => {
+  await openRoom(page, `names-${testInfo.project.name}`);
+  const roomName = `Q${testInfo.project.name}`;
+
+  await page.getByRole("button", { name: "+ Add agent" }).click();
+  const form = page.getByRole("form", { name: "Add agent" });
+  await form.getByLabel("Display name").fill(`Namer ${testInfo.project.name}`);
+  await form.getByLabel(/^App/).selectOption("claude");
+  await form.getByLabel(/^Name in this room/).fill(roomName);
+  await form.getByRole("button", { name: "Add agent", exact: true }).click();
+
+  const card = page.locator(".compact-agent", { hasText: `@${roomName}` });
+  await expect(card.getByRole("strong").first()).toHaveText(
+    `${roomName} @${roomName}`,
+  );
+  await expect(page.getByText(" · default")).toHaveCount(0);
+
+  // Before it joins, the name can still change; a clash is explained inline.
+  const codexCard = page.locator(".compact-agent", { hasText: "@codex" });
+  await codexCard.getByLabel("Name in this room").fill(roomName.toLowerCase());
+  await codexCard.getByRole("button", { name: "Save" }).click();
+  await expect(codexCard.getByRole("alert")).toContainText("would mean both");
+
+  await page
+    .getByPlaceholder(/Message the room/)
+    .fill(`@${roomName.toLowerCase()} are you there?`);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator(".unreachable-notice")).toContainText(
+    `${roomName} hasn't joined this room, so your mention is waiting.`,
+  );
+});

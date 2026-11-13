@@ -506,6 +506,18 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE rooms ADD COLUMN checkin_minutes INTEGER CHECK(checkin_minutes IS NULL OR checkin_minutes IN (1,2,5,10));
   `,
+  `
+  CREATE TABLE room_agent_names (
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, agent_id)
+  );
+  CREATE INDEX room_agent_names_by_name ON room_agent_names(room_id, lower(name));
+  ALTER TABLE messages ADD COLUMN mentioned TEXT;
+  `,
 ];
 
 export function openDatabase(path: string): Db {

@@ -37,6 +37,7 @@ export function AddAgentForm({
   );
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
+  const [roomName, setRoomName] = useState("");
   const [idEdited, setIdEdited] = useState(false);
   const [newRole, setNewRole] = useState("");
   const [roles, setRoles] = useState<RoleOption[]>([]);
@@ -100,6 +101,9 @@ export function AddAgentForm({
           display_name: newName,
           app_id: newApp,
           ...(addToRoom ? { room_id: roomId } : {}),
+          ...(addToRoom && roomName.trim()
+            ? { room_name: roomName.trim() }
+            : {}),
           ...(role
             ? {
                 role: {
@@ -148,7 +152,7 @@ export function AddAgentForm({
           placeholder="reviewer"
         />
         <small className="hint">
-          Used for @mentions. Lowercase, hyphens allowed.
+          Lowercase, hyphens allowed. Always works as an @mention.
         </small>
       </label>
       <label>
@@ -178,6 +182,22 @@ export function AddAgentForm({
         />{" "}
         Add to this room
       </label>
+      {addToRoom && (
+        <label>
+          Name in this room (optional)
+          <input
+            value={roomName}
+            onChange={(event) => setRoomName(event.target.value)}
+            maxLength={32}
+            pattern="[A-Za-z][A-Za-z0-9_\-]{0,31}"
+            placeholder="A"
+          />
+          <small className="hint">
+            What everyone types after @ in this room. Fixed once the agent
+            joins.
+          </small>
+        </label>
+      )}
       {addToRoom && (
         <label>
           Role in this room

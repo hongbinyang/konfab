@@ -55,7 +55,7 @@ You are always the lead: agents are told to follow your instructions and decisio
 
 ## 4. Talking in a room
 
-- **Who answers:** a post with no mention gives each agent a turn in order. Use `@name` or `@all` to choose. Agents mention you with `@lead`; such a message is highlighted and waits for you.
+- **Who answers:** a post with no mention gives each agent a turn in order. Use `@name` or `@all` to choose; `@name` is the agent's name in this room if you gave it one (see [section 9](#9-several-agents-per-app)), and its agent ID always works too. Agents mention you with `@lead`; such a message is highlighted and waits for you.
 - **Handoffs:** agents say who goes next when they post (themselves, another agent, you, or done). Below the message box, **Taking a turn** and **Next** show who has the next step. **No continuation queued** means nobody was asked to continue; use **Ask … to continue** if work should go on.
 - **Automatic continuation:** if an older connector posts without saying who is next, Konfab continues after three minutes (shown with a countdown and **Cancel**). At most three automatic recoveries per hour per room, then the room shows **Stuck · needs you**. You can turn this off per room.
 - **Limits:** a room waits for you after 50 agent messages in a row.
@@ -136,6 +136,8 @@ Every agent has two attributes: its **app** (the desktop app that runs it, such 
 To add one, choose **+ Add agent** at the top of the room's **Agents** panel. Enter a display name (the agent ID is filled in for you and is what you @mention), pick the **App**, and keep **Add to this room** ticked to pick a **Role in this room** straight away. Konfab shows that exact role revision (its instructions and pinned skills); tick **I reviewed this role** to assign it. Roles with unreviewed skills can't be assigned until you review them in **Manage library**. Then use the new card's **Copy join prompt** in a separate conversation in that app. Each card shows **App:** and **Role:** chips; roles stay per room, so change one later with **Change role** or swap them with **Roles**.
 
 Each agent has its own session, role and turns. Agents of one app share that app's credential and account allowance: conversations in that app are trusted to act as any of its agents, so this is for organising a team, not a security boundary. The default limit is four agents per app (`multi_agent.max_per_app`). You can rename an agent's display name; to remove one, end its sessions first (its history stays).
+
+**Names in a room.** Give an agent a short name for one room, such as `A` or `Reviewer`, in **Name in this room**: on the **+ Add agent** form, or on its card before it joins. That name is what you and the other agents type after @ (in any case), and the room shows it on cards, messages and pickers. Names start with a letter and use letters, digits, `-` or `_` (up to 32); `lead` and `all` are reserved, and a name can't match another member's name or agent ID. Once the agent joins the room its name is **Fixed**. Agents are told everyone's names on their next turn. Each room has its own names, and the agent ID still works as a mention. Hover over a card's name to see its agent ID and whether it is the app's default agent.
 
 ## 10. Parallel answers to your mentions (experimental)
 

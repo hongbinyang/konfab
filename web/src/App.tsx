@@ -31,7 +31,10 @@ import {
   type LeadReadInfo,
   type RoomAgent,
   type RoomState,
+  mentionName,
+  withRoomLabels,
 } from "./api";
+import { RoomNameForm } from "./RoomNameForm";
 import {
   ContactNotice,
   UnreachableNotice,
@@ -121,7 +124,7 @@ export function App() {
       setRoom(
         target === null
           ? null
-          : await request<RoomState>(`/api/rooms/${target}`),
+          : withRoomLabels(await request<RoomState>(`/api/rooms/${target}`)),
       );
       setSignedOut(false);
     } catch (caught) {
@@ -707,7 +710,9 @@ function Room({
   };
 
   const displayName = (id: string) =>
-    agents.find((agent) => agent.id === id)?.display_name ?? id;
+    agents.find((agent) => agent.id === id)?.display_name ??
+    state.room_names?.[id] ??
+    id;
 
   const limited = room.agent_streak >= room.streak_limit;
 
@@ -1427,7 +1432,7 @@ function Composer({
           }
         }}
         placeholder={`Message the room, or use ${[
-          ...agents.map((agent) => `@${agent.id}`),
+          ...agents.map((agent) => `@${mentionName(agent)}`),
           "@lead",
           "@all",
         ].join(", ")}`}
@@ -2748,11 +2753,12 @@ function Agents({
                       )
                     }
                   />
-                  <strong>
-                    {agent.display_name}{" "}
+                  <strong
+                    title={`Agent ID: ${agent.id}${agent.is_default ? `. Default agent for ${agent.app_name} (used when join_room has no "as")` : ""}`}
+                  >
+                    {member?.display_name ?? agent.display_name}{" "}
                     <small className="muted">
-                      @{agent.id}
-                      {agent.is_default ? " · default" : ""}
+                      @{member ? mentionName(member) : agent.id}
                     </small>
                   </strong>
                 </label>
@@ -2847,6 +2853,14 @@ function Agents({
                     {report.detail ? `: ${report.detail}` : ""}
                   </p>
                 ))}
+              {member && (
+                <RoomNameForm
+                  key={`${member.id}:${member.room_name ?? ""}`}
+                  roomId={room.room.id}
+                  agent={member}
+                  archived={room.room.archived}
+                />
+              )}
               {!agent.is_default && <AgentManagement agent={agent} act={act} />}
               {member ? (
                 <AgentDetails

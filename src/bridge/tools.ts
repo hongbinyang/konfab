@@ -463,7 +463,13 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         next: z
           .discriminatedUnion("kind", [
             z.object({ kind: z.literal("self") }),
-            z.object({ kind: z.literal("agent"), agent_id: z.string().min(1) }),
+            z.object({
+              kind: z.literal("agent"),
+              agent_id: z
+                .string()
+                .min(1)
+                .describe("The member's name in this room, or its agent ID"),
+            }),
             z.object({ kind: z.literal("lead") }),
             z.object({ kind: z.literal("done") }),
           ])
@@ -493,7 +499,12 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       inputSchema: {
         session_id: z.string(),
         source_message_id: z.number().int().positive(),
-        to: z.string().min(1).describe("Member agent who should act next"),
+        to: z
+          .string()
+          .min(1)
+          .describe(
+            "Member who should act next: its name in this room, or its agent ID",
+          ),
       },
     },
     async ({ session_id, source_message_id, to }, extra) => {

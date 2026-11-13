@@ -104,7 +104,14 @@ export interface Pass {
 
 export interface RoomAgent {
   id: string;
+  /** In a room view: the room name if set, otherwise the display name. */
   display_name: string;
+  /** The agent's own display name, used outside this room. */
+  account_name?: string;
+  /** The name the lead gave this agent in this room; it is also its mention. */
+  room_name?: string | null;
+  /** True once the agent has joined this room; the name can't change then. */
+  name_fixed?: boolean;
   state: AgentState;
   turn_quiet_since?: number | null;
   bridge_outdated?: boolean;
@@ -206,6 +213,8 @@ export interface RoomState {
     streak_limit: number;
   };
   agents: RoomAgent[];
+  /** Room names by agent ID, including former members. */
+  room_names?: Record<string, string>;
   queued: string[];
   format: null | {
     id: number;
@@ -268,4 +277,23 @@ export async function uploadAttachment(
   const payload = (await response.json()) as Attachment & { message?: string };
   if (!response.ok) throw new Error(payload.message ?? "Upload failed");
   return payload;
+}
+
+/** The mention an agent answers to in a room: its room name, else its ID. */
+export function mentionName(agent: Pick<RoomAgent, "id" | "room_name">) {
+  return agent.room_name ?? agent.id;
+}
+
+/** Show each member by its room name everywhere inside the room view. */
+export function withRoomLabels<
+  T extends { agents: RoomAgent[]; room_names?: Record<string, string> },
+>(state: T): T {
+  return {
+    ...state,
+    agents: state.agents.map((agent) => ({
+      ...agent,
+      account_name: agent.display_name,
+      display_name: agent.room_name ?? agent.display_name,
+    })),
+  };
 }

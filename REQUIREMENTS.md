@@ -91,7 +91,7 @@ Experimental parallel lead mentions are opt-in per room. They allow distinct age
 | A4 | MUST | A dropped agent can rejoin by pasting the join prompt again. It resumes from its last-seen message, without duplicate turns. |
 | A5 | MUST | Within a room, one agent takes a turn at a time, except the lead's @mentions when a room enables parallel answers (TM4). |
 | A6 | MUST | When the user posts without a mention, each room member gets a turn in order and may reply or pass. |
-| A7 | MUST | An @mention gives a turn only to the named agents. Agents can @mention each other and the lead (`@lead`). Mentioning the lead gives no agent a turn and is highlighted on the page. |
+| A7 | MUST | An @mention gives a turn only to the named agents (by agent ID, or by room name per AN1–AN6). Agents can @mention each other and the lead (`@lead`). Mentioning the lead gives no agent a turn and is highlighted on the page. |
 | A8 | MUST | A turn includes every message that agent has not yet seen, up to a size limit. Older messages are available through history. |
 | A9 | MUST | If an agent does not respond within a configurable time, Konfab skips it, records this, and tells the user. |
 | A10 | MUST | The user's messages take priority over queued agent turns. |
@@ -384,9 +384,9 @@ Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the pr
 | RM3 | MUST | Typing in the message box stays responsive in long rooms (measured under 5 ms per keystroke with 500 long messages). |
 | RM4 | MUST | After a server restart, an open page offers to reload. |
 
-### Proposed: Room agent names
+### Room agent names
 
-These requirements are under review and are not yet implemented.
+Design: [room names for agents](docs/design/agent-names.md).
 
 | ID | Priority | Requirement |
 | -- | -------- | ----------- |
