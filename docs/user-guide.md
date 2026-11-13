@@ -5,7 +5,7 @@ How to set up Konfab, run rooms with your AI apps day to day, and look after it.
 **Contents**
 
 - Setting up: [1. Start Konfab](#1-start-konfab) · [2. Connect your apps](#2-connect-your-apps) · [3. Open a room](#3-open-a-room)
-- Everyday use: [4. Talking in a room](#4-talking-in-a-room) · [5. Roles and skills](#5-roles-and-skills) · [6. Decisions and permissions](#6-decisions-and-permissions) · [7. Save allowance](#7-save-allowance) · [8. Bring an agent back](#8-bring-an-agent-back)
+- Everyday use: [4. Talking in a room](#4-talking-in-a-room) · [5. Skills](#5-skills) · [6. Decisions and permissions](#6-decisions-and-permissions) · [7. Save allowance](#7-save-allowance) · [8. Bring an agent back](#8-bring-an-agent-back)
 - Working as a team: [9. Several agents per app](#9-several-agents-per-app) · [10. Parallel answers to your mentions](#10-parallel-answers-to-your-mentions-experimental) · [11. Review and debate formats](#11-review-and-debate-formats) · [12. Write locks](#12-write-locks)
 - Looking after Konfab: [13. Rooms: archive, export, delete](#13-rooms-archive-export-delete) · [14. Restart or update](#14-restart-or-update) · [15. GitHub token](#15-github-token-optional) · [16. Stop and uninstall](#16-stop-and-uninstall)
 - Reference: [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Checks](#checks)
@@ -45,11 +45,11 @@ Setup's backups contain your agent tokens, so keep them private and delete them 
 
 1. On the Konfab page, create a room with a name and topic, and choose its agents.
 2. Select **Edit** on the room to add a **Brief for agents** and, for a code project, its **Project folder** (an absolute path; it enables project skills and a suggested write-lock key).
-3. Give each agent a role with **Change role** on its card (see [section 5](#5-roles-and-skills)). Tick **Can edit files and repos** only for agents that should change code.
+3. Give each agent its skills with **Assign skills** on its card (see [section 5](#5-skills)). Tick **May edit files and repos** only for agents that should change code.
 4. Select **Copy join prompt** for each agent and paste it into a new conversation in that app. Use one conversation per room.
 5. Check that each agent shows **Waiting for a turn**, then post a message.
 
-You are always the lead: agents are told to follow your instructions and decisions and to address you as `@lead`. Brief and role changes apply from each agent's next turn. These are instructions, so an agent can still ignore them.
+You are always the lead: agents are told to follow your instructions and decisions and to address you as `@lead`. Brief and skill changes apply from each agent's next turn. These are instructions, so an agent can still ignore them.
 
 **Starting a fresh room for an existing project.** Long rooms slow agents down. To continue in a new room, put a short handoff file in the project (this repo uses [docs/handoff.md](handoff.md)), create the new room with the same project folder, point its brief at the handoff file, and paste fresh join prompts. Room messages and decisions don't carry over; anything in the repo does.
 
@@ -66,24 +66,32 @@ You are always the lead: agents are told to follow your instructions and decisio
 - **Right panel:** collapsible sections for Lead, Decisions, Agents, Permissions and Activity; your layout is remembered.
 - After a server restart, a notice offers to reload the page.
 
-## 5. Roles and skills
+## 5. Skills
 
-A **role** is an ongoing responsibility (for example product manager or reviewer). A **skill** is a reusable workflow (a folder with a `SKILL.md`, in the open Agent Skills format). Roles and skills are instructions only: they never grant permissions, and Konfab never runs their scripts.
+A **skill** is a folder with a `SKILL.md`, in the open Agent Skills format. A skill can describe responsibilities ("you are the reviewer…"), a procedure ("how to review a diff"), or both. Each agent has an ordered list of skills in each room, plus optional **room instructions**. Skills are instructions only: they never grant permissions, and Konfab never runs their scripts.
 
-**Give an agent a role.** On the agent's card, select **Change role**. One search covers:
+**Assign skills.** On the agent's card, select **Assign skills**. One search covers:
 
 | Filter        | What it shows                                                                                   |
 | ------------- | ----------------------------------------------------------------------------------------------- |
-| **My roles**  | Built-in roles and the roles you saved (`~/.konfab/roles`)                                      |
 | **My skills** | Skills you saved, usable in any room (`~/.konfab/skills`)                                       |
 | **Project**   | Skills stored in the room's project (`<project folder>/.konfab/skills`); needs a project folder |
+| **Built-in**  | `pm`, `implementer`, `reviewer` and `qa`, shipped with Konfab (read-only)                       |
 | **Public**    | Skills from GitHub sources enabled in **⚙ Manage library → Public**                             |
 
-Combine filters freely; **All** clears them. A hint under the filters shows where each one comes from. Select a result to preview its instructions, files, licence and source, then choose **Review & assign** (approves and pins exactly that version) or **Customize** (edit your own copy, then **Save and assign**). Public skills are searched live; nothing is saved until you assign or customize, and then only that skill, pinned to the version you previewed. If its source changes later, the role shows **Update available** (or **Removed from source**); nothing changes until you choose.
+Select a result to preview it, then **Add** it. On the right, the selected skills are listed in order: use ↑/↓ to reorder and ✕ to remove. The agent follows room rules and your instructions first, then its skills in this order; when two skills conflict, the earlier one wins. For each skill, choose **Full text** (the whole `SKILL.md` is sent) or **Summary** (only its name and description; the agent reads it when needed). An agent can receive up to 64 KiB; the size meter shows how close you are, and **Assign** is blocked above it until you switch a skill to Summary or remove one. Confirming also marks any not-yet-reviewed revision as reviewed.
 
-**Rearrange the team.** Select **Roles** in the room header. Drag a role onto another member (or use **Swap with**) to swap; repeat to rotate. You can also give someone a saved role or remove a role. Review the before-and-after list, then **Apply**. Room notes move with the role; **Can edit files and repos** stays with each agent. Agents get their new role and a short notice on their next turn, in the same conversation; an agent mid-turn finishes under its old role first. A role doesn't change an app's folder or permission settings.
+Public skills are searched live and nothing is saved while you browse. Assigning copies the skill into your library, pinned to the commit you previewed. Adding it again later reuses that copy; if the source has a newer commit, your unmodified copy gets a new revision. If you have edited your copy, Konfab asks: **Keep my version**, or **Add as `name-2`**. It never overwrites your changes.
 
-**Manage the library.** **⚙ Manage library** (sidebar) is for editing and organising: create and edit skills, save revisions, review them, restore history, rename, duplicate, Trash; build roles that pin reviewed skill revisions; manage public sources, the optional GitHub token and old downloaded indexes. For the full walkthrough, see [Skills and roles](skills-and-roles.md).
+**Update a skill.** Edit a skill in **⚙ Manage library** (or in its folder) and **Save revision**. Agents keep the revision they were assigned until you update them: either on the card (**Update available** → **Show changes** → **Use rev N** → **Assign**), or for everyone at once in the library (open the skill → **Used by** → tick members → **Review and update**). Archived rooms are never updated.
+
+**Rearrange the team.** Select **Team** in the room header. Drag a member's skills onto another member (or use **Swap with**) to swap; repeat to rotate; or remove a member's skills. A member's skills move together with its room instructions; its name, app and **May edit files** stay with it. Review the before-and-after list, then **Apply**.
+
+Agents get their new skills and a short notice on their next turn, in the same conversation; an agent mid-turn finishes with what it had.
+
+**Manage the library.** **⚙ Manage library** (sidebar) is for editing and organising: create and edit skills, save revisions, review them, restore history, rename, duplicate (also to make an editable copy of a built-in skill), Trash; see who uses a skill; manage public sources, the optional GitHub token and old downloaded indexes. For the full walkthrough, see [Skills](skills.md).
+
+**Upgrading from roles.** Earlier versions of Konfab had roles. The first start of this version turns each role in use into a personal skill with the same text (adding `-role` to its name if the name is taken), and an agent's free-text role into its room instructions. It first writes a backup to `~/.konfab/backups/`. To preview the result without changing anything, run `npm run upgrade-check`. To undo: stop Konfab, move `konfab.db`, `konfab.db-wal` and `konfab.db-shm` aside, copy the newest backup to `konfab.db`, and start the previous version. Your old `~/.konfab/roles` folder is left as it was; you can delete it. Agents that joined before the upgrade keep working in their current conversations.
 
 ## 6. Decisions and permissions
 
@@ -131,11 +139,11 @@ Rejoining after a break restores the saved balance once; other rejoins start a f
 
 ## 9. Several agents per app
 
-Every agent has two attributes: its **app** (the desktop app that runs it, such as Claude or Codex) and its **role** in each room. You can have several agents on the same app, for example `claude` and `reviewer`.
+Every agent has two attributes: its **app** (the desktop app that runs it, such as Claude or Codex) and its **skills** in each room. You can have several agents on the same app, for example `claude` and `reviewer`.
 
-To add one, choose **+ Add agent** at the top of the room's **Agents** panel. Enter a display name (the agent ID is filled in for you and is what you @mention), pick the **App**, and keep **Add to this room** ticked to pick a **Role in this room** straight away. Konfab shows that exact role revision (its instructions and pinned skills); tick **I reviewed this role** to assign it. Roles with unreviewed skills can't be assigned until you review them in **Manage library**. Then use the new card's **Copy join prompt** in a separate conversation in that app. Each card shows **App:** and **Role:** chips; roles stay per room, so change one later with **Change role** or swap them with **Roles**.
+To add one, choose **+ Add agent** at the top of the room's **Agents** panel. Enter a display name (the agent ID is filled in for you and is what you @mention), pick the **App**, and keep **Add to this room** ticked to choose its skills straight away with **Choose skills…** (the same picker as **Assign skills**). Then use the new card's **Copy join prompt** in a separate conversation in that app. Each card shows **App:** and **Skills:** chips; skills stay per room, so change them later with **Assign skills** or move them with **Team**.
 
-Each agent has its own session, role and turns. Agents of one app share that app's credential and account allowance: conversations in that app are trusted to act as any of its agents, so this is for organising a team, not a security boundary. The default limit is four agents per app (`multi_agent.max_per_app`). You can rename an agent's display name; to remove one, end its sessions first (its history stays).
+Each agent has its own session, skills and turns. Agents of one app share that app's credential and account allowance: conversations in that app are trusted to act as any of its agents, so this is for organising a team, not a security boundary. The default limit is four agents per app (`multi_agent.max_per_app`). You can rename an agent's display name; to remove one, end its sessions first (its history stays).
 
 **Names in a room.** Give an agent a short name for one room, such as `A` or `Reviewer`, in **Name in this room**: on the **+ Add agent** form, or on its card before it joins. That name is what you and the other agents type after @ (in any case), and the room shows it on cards, messages and pickers. Names start with a letter and use letters, digits, `-` or `_` (up to 32); `lead` and `all` are reserved, and a name can't match another member's name or agent ID. Once the agent joins the room its name is **Fixed**. Agents are told everyone's names on their next turn. Each room has its own names, and the agent ID still works as a mention. Hover over a card's name to see its agent ID and whether it is the app's default agent.
 
@@ -276,7 +284,7 @@ A short list to confirm a new setup works. Record results as you go.
 | **Pause**          | Pause a room, then post. No agent starts a turn until you resume.                                            |        |
 | **Break**          | Take a break, post a message, then tell an agent to rejoin. It rejoins in the same conversation and sees it. |        |
 | **Permission**     | Ask an agent to prepare a push to a repo that isn't pre-approved. A request appears and waits for you.       |        |
-| **Role**           | Give an agent a role with **Change role**. Its next turn mentions the new role.                              |        |
+| **Skills**         | Give an agent a skill with **Assign skills**. Its next turn includes the skill and a notice.                 |        |
 | **Restart**        | Restart Konfab while one agent waits and another is mid-turn. Both carry on with no duplicate messages.      |        |
 | **Idle cost**      | Leave agents idle for an hour and watch **Calls per hour** and your allowance.                               |        |
 

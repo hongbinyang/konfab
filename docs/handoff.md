@@ -19,10 +19,10 @@ Read this first when joining a new Konfab project room. It summarises where the 
 Re-propose these in the new room so the lead can confirm them there:
 
 1. **Scoped push approvals:** pushes need a `code_push` approval for one repository, branch and commit range; check base and head immediately before pushing; fast-forward only.
-2. **Skill library and role packs:** Agent Skills (`SKILL.md`) format unchanged; personal and project libraries; immutable saved revisions with review per revision; Konfab never runs scripts; roles grant no permissions.
-3. **Choose a role window:** member card → **Change role** searches roles and personal, project and public skills; **Review & assign** or **Customize**; Library is **⚙ Manage library**.
+2. **Skill library:** Agent Skills (`SKILL.md`) format unchanged; personal, project and read-only built-in libraries; immutable saved revisions with review per revision; Konfab never runs scripts; skills grant no permissions.
+3. **Skill-based assignments (replace roles):** member card → **Assign skills**: ordered skills (full text or summary) plus room instructions, 64 KiB limit, explicit updates per member or per skill. See [design](design/skill-assignment.md).
 4. **Public search:** names from GitHub file listings, descriptions streamed into memory only; nothing stored until assign or customize; GitHub request limits handled first.
-5. **Team roles:** swap, rotate, assign or remove roles across any number of agents in one transaction; same-session role-change notices.
+5. **Team:** swap, rotate or remove whole skill bundles across any number of agents in one transaction; same-session change notices.
 6. **Several agents per app:** named agents under one app credential; each session is bound to its agent.
 7. **Write locks:** advisory; any room member with a live session can take one.
 8. **Parallel lead mentions (experimental):** per-room setting; mentioned waiting agents answer immediately; busy agents get a queued note at their next Konfab call and check in at a per-room interval (default 2 minutes).
@@ -32,14 +32,14 @@ Re-propose these in the new room so the lead can confirm them there:
 
 Everything below is on `main`, reviewed and tested (316 tests and 7 smoke tests at `5e564ea`). The full list with IDs is in [REQUIREMENTS.md](../REQUIREMENTS.md) section 17. See the [user guide](user-guide.md) for how to use each part.
 
-| Area             | Shipped                                                                                                                                       |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Setup            | User-level connectors for both apps (`npm run setup`), migration from project `.mcp.json`, token rotation                                     |
-| Roles and skills | Skill library, role packs, **Change role** picker with public search, filter location hints, Team roles, role-change notices, Manage library  |
-| Team             | Several agents per app, review and debate **Formats**, advisory write locks                                                                   |
-| Rooms            | Permanent deletion of archived rooms, parallel lead mentions (per-room setting, off by default), busy-agent check-in interval (default 2 min) |
-| GitHub           | Optional token stored in macOS Keychain, **Check GitHub status**, request caching and rate-limit handling                                     |
-| Quality of life  | Fast typing in long rooms, decision numbers on cards, reload notice after a server restart, inline checkboxes                                 |
+| Area            | Shipped                                                                                                                                                  |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Setup           | User-level connectors for both apps (`npm run setup`), migration from project `.mcp.json`, token rotation                                                |
+| Skills          | Skill library, **Assign skills** picker with public search, built-in skills, Team, change notices, Used by and per-member updates, role-to-skill upgrade |
+| Team            | Several agents per app, review and debate **Formats**, advisory write locks                                                                              |
+| Rooms           | Permanent deletion of archived rooms, parallel lead mentions (per-room setting, off by default), busy-agent check-in interval (default 2 min)            |
+| GitHub          | Optional token stored in macOS Keychain, **Check GitHub status**, request caching and rate-limit handling                                                |
+| Quality of life | Fast typing in long rooms, decision numbers on cards, reload notice after a server restart, inline checkboxes                                            |
 
 Design notes for each feature are in [docs/design](design/).
 
@@ -52,8 +52,8 @@ Design notes for each feature are in [docs/design](design/).
 
 ## Backlog (not started)
 
-- **Continue in a new room:** one action that copies brief, members, roles and confirmed decisions into a new room and archives the old one.
+- **Continue in a new room:** one action that copies brief, members, skills and confirmed decisions into a new room and archives the old one.
 - **Faster first public search:** more concurrent description reads, after measuring GitHub's raw host limits.
-- **Smaller page bundle:** load the role picker and Team roles on demand.
+- **Smaller page bundle:** load the skill picker and Team on demand.
 - **Delete from the sidebar:** a ⋯ menu on archived rooms, since the delete button inside the room is easy to miss.
 - From [REQUIREMENTS.md](../REQUIREMENTS.md) (LATER): scheduled rejoin (A14), per-agent modes (M4), Mac notifications (U7), threads and reactions (R11).

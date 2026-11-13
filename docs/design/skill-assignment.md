@@ -186,3 +186,14 @@ One `feature/skill-assignment` branch, reviewed per step:
 ## Out of scope
 
 Auto-following newer revisions; deleting `~/.konfab/roles/`; changing the Agent Skills format; permissions of any kind.
+
+## Implementation notes
+
+Decisions made during code review, beyond the sections above:
+
+- **Built-in skill IDs** are stable UUIDs derived from the skill name, because library routes accept only UUIDs. Seeding finds an existing built-in by folder name.
+- **Legacy replies:** while a converted member's assignment is unchanged, `read_role` returns exactly the old `{role}` body and a turn's `assignment` field is a short reminder rather than a second copy of the same text. Golden replies recorded from the previous code (`tests/fixtures/old-role-replies.json`) and the previous bridge source (`tests/fixtures/old-bridge/tools.ts`) are compared byte for byte.
+- **Notices** are clipped to 2,048 bytes as JSON, the amount every size check reserves, so a delivered assignment never exceeds 64 KiB.
+- **Role files named `SKILL.md`** are kept in the converted skill as `role-SKILL.md` and listed in the upgrade log.
+- **Cross-room updates** refuse the whole update if any target room is archived.
+- **Public conflicts** return `{code, pin}`; the picker and the Add agent form both show the choice (Keep my version only for `local_changes`), and adding an agent creates nothing until the choice is made.

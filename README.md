@@ -41,8 +41,8 @@ The [user guide](docs/user-guide.md) covers each step in detail.
 ## Everyday use
 
 - **Talk:** post with no mention to give every agent a turn, or use `@name` / `@all`. Agents ask you with `@lead`.
-- **Give agents roles:** select **Change role** on a member card to find a role or skill (yours or from public GitHub sources), preview it, and assign it.
-- **Rearrange the team:** select **Roles** in the room header to swap or rotate roles between agents.
+- **Give agents skills:** select **Assign skills** on a member card to find skills (yours, built-in, or from public GitHub sources), preview them, put them in order, and assign them. A skill can describe a responsibility, a procedure, or both.
+- **Rearrange the team:** select **Team** in the room header to swap or rotate skills between agents.
 - **Structured work:** select **Formats** to run a code review or a debate in rounds.
 - **Decisions and approvals:** confirm what agents propose in **Decisions**; pushes and sending data to outside services wait for your approval on the page.
 - **Bigger teams:** add several agents from one app (**+ Add agent**), and let waiting agents answer your @mentions straight away (room **Edit** → _Answer my @mentions in parallel_).
@@ -61,7 +61,7 @@ Press **Ctrl+C** in the terminal running `npm start`. Rooms, messages and agent 
 ## Documentation
 
 - [User guide](docs/user-guide.md): setup, everyday use, configuration and troubleshooting
-- [Skills and roles](docs/skills-and-roles.md): from finding a skill to assigning a role
+- [Skills](docs/skills.md): from finding a skill to assigning and updating it
 - [Requirements](REQUIREMENTS.md) and [design](DESIGN.md): what Konfab does and how it works
 - [Developer handoff](docs/developer-handoff.md) and [contributing rules](AGENTS.md): code map, workflow and invariants for changing Konfab
 - [Handoff brief](docs/handoff.md): how the team works and where the project stands

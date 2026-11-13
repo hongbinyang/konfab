@@ -17,7 +17,7 @@ Konfab defaults to `~/.konfab` for config, SQLite, attachments and other local s
 | Room state, turns, sessions and permissions | `src/server/domain/service.ts`                                         |
 | SQLite connection and ordered migrations    | `src/server/db/index.ts`                                               |
 | MCP bridge and tool schemas                 | `src/bridge/`                                                          |
-| Skills, sources and roles                   | `src/server/domain/skills.ts`, `skill-sources.ts`, `roles.ts`          |
+| Skills, sources and assignments             | `src/server/domain/skills.ts`, `skill-sources.ts`, `assignments.ts`    |
 | Web client                                  | `web/src/App.tsx`, `web/src/api.ts`, `web/src/styles.css`              |
 | Connector and command-line setup            | `src/cli/`                                                             |
 
@@ -28,7 +28,7 @@ The server owns persistent state; the stdio bridge calls the local HTTP API on a
 - An ordinary room turn is serialized. The optional, off-by-default parallel lead-mention prototype permits additional explicitly addressed agents to work concurrently, with at most one active turn per agent. It is cooperative and shared-checkout locks are advisory. See [parallel mentions](design/parallel-lead.md).
 - A busy agent's check-in interval is guidance, not a timer or delivery guarantee. Room overrides allow 1, 2, 5 or 10 minutes; a null override inherits `defaults.checkin_minutes` (2 by default). It does not alter waiting-agent polling. See [check-in design](design/checkin-interval.md).
 - On restart, active turns with valid active session owners are retained; orphaned active turns are abandoned and requeued. Test durable changes by closing and reopening the real database and rebuilding the service and app.
-- Role assignments and skill revisions are pinned. Active turns retain their role snapshot across changes; a subsequent turn receives the new assignment. See [role change](design/role-change-notice.md) and [role swap](design/role-swap.md).
+- Skill assignments pin exact skill revisions. Active turns keep a snapshot of their assignment across changes; the next turn receives the new one. Roles were replaced by skills in schema v33 (`src/server/db/skill-upgrade.ts`); the old `read_role` reply is kept for converted members until their assignment changes. See [skill-based assignments](design/skill-assignment.md).
 - Room instructions ask agents to request permission before restricted disclosures; the app cannot enforce all actions taken outside it. A code push approval has an exact repository, branch and commit range; verify them again immediately before pushing.
 
 ## Validate and hand off

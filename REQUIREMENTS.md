@@ -1,7 +1,7 @@
 # Konfab: Requirements
 
-**Status:** v1 shipped; later additions in sections 16 and 17
-**Updated:** 2026-11-12
+**Status:** v1 shipped; later additions in sections 16 to 18
+**Updated:** 2026-11-13
 
 Priority levels:
 
@@ -347,6 +347,8 @@ Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the pr
 
 ### V7. Skill library and role packs
 
+_Role parts superseded by section 18 (skill-based assignments)._
+
 | ID | Priority | Requirement |
 | -- | -- | -- |
 | SL1 | MUST | Personal (`~/.konfab/skills`) and project (`<project>/.konfab/skills`) libraries manage standard Agent Skills folders. Untracked folders can be adopted. |
@@ -357,6 +359,8 @@ Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the pr
 
 ### V8. Choose a role (role picker)
 
+_Role parts superseded by section 18 (skill-based assignments)._
+
 | ID | Priority | Requirement |
 | -- | -- | -- |
 | RP1 | MUST | **Change role** on a member card opens one window that searches the user's roles, personal skills, project skills and enabled public sources, with combinable filters, location hints and helpful empty states. |
@@ -366,6 +370,8 @@ Added from 2026-11-09 to 2026-11-12, each feature agreed with the user in the pr
 | RP5 | MUST | **⚙ Manage library** replaces the Library navigation entry for editing skills and roles, managing sources and the token, and removing old downloaded indexes after confirmation. |
 
 ### V9. Teams and parallel work
+
+_Role parts superseded by section 18 (skill-based assignments)._
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
@@ -398,9 +404,9 @@ Design: [room names for agents](docs/design/agent-names.md).
 | AN6 | MUST | The page does not present the standalone default-agent marker as a name; the app and agent identity remain discoverable. |
 | AN7 | LATER | Mention autocomplete, global names and changing agent IDs. |
 
-## Proposed: skill-based agent assignments
+## 18. Skill-based agent assignments
 
-**Status:** Draft for review; supersedes role-specific requirements only when shipped. Design and migration details remain subject to review.
+**Status:** Built on `feature/skill-assignment`. Supersedes the role requirements SL4, SL5, RP1–RP5 (role parts) and TM1–TM2 (role parts) in section 17, and the role part of R13 (now room instructions). Design: [skill-based assignments](docs/design/skill-assignment.md).
 
 The lead wants skills to be the single assignment concept: a skill can describe an agent's responsibilities as well as a procedure, and an agent can use a combination of skills. Skills remain standard Agent Skills folders stored locally; the product should simplify both its interface and implementation by removing the separate role model.
 
@@ -425,8 +431,9 @@ The lead wants skills to be the single assignment concept: a skill can describe 
 - Upgrade a representative old database with role text, pinned skills, notes, active sessions and an active turn; restart the actual service and database, complete or safely recover the turn, then verify the next turn and preserved room data. Cover name collisions and an assignment with no skills.
 - Verify the assignment flow and migration in an isolated instance in both themes, with the required automated checks and a real connected-agent check where feasible.
 
-### Design questions to resolve
+### Resolved in the design
 
-- Define how multiple skill instructions are ordered and how conflicts are resolved; communicate that precedence to agents while preserving the authority of lead instructions and room rules.
-- How will old role content and pinned files be converted without data loss, and how will active-turn snapshots and already-running connectors continue to work? Specify the failure and recovery behavior before implementation.
-- What update scope and confirmation best handles a skill used in several rooms? The default is explicit selection and no automatic rollout.
+- **Order and conflicts:** room rules and the lead > room instructions > skills in list order; the earlier skill wins, and every full assignment tells the agent so.
+- **Upgrade:** converts every role revision in use (including active-turn snapshots) into reviewed personal skills, keeps the old `role` reply until an assignment changes, writes a fresh backup per attempt, and stops without writing if an assignment cannot fit.
+- **Updates:** per member from its card, or per skill across rooms for selected members; never automatic.
+
