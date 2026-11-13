@@ -1,0 +1,127 @@
+{
+  "wait_active_role": {
+    "id": "role-dev",
+    "revision_id": "dev-1",
+    "name": "konfab-dev",
+    "number": 1,
+    "changed": true,
+    "title": "Konfab developer",
+    "notes": "Room notes",
+    "role_md": "---\nname: konfab-dev\ntitle: Konfab developer\ndescription: Konfab developer duties\nskills: []\n---\nDevelop v1",
+    "skills": [
+      {
+        "position": 0,
+        "skill_id": "helper",
+        "skill_revision_id": "helper-1",
+        "name": "helper",
+        "description": "helper skill",
+        "reviewed": 1,
+        "files": [
+          {
+            "path": "SKILL.md"
+          },
+          {
+            "path": "notes.md"
+          }
+        ]
+      }
+    ]
+  },
+  "read_role_active": {
+    "role": {
+      "id": "role-dev",
+      "revision_id": "dev-1",
+      "name": "konfab-dev",
+      "number": 1,
+      "changed": true,
+      "title": "Konfab developer",
+      "notes": "Room notes",
+      "role_md": "---\nname: konfab-dev\ntitle: Konfab developer\ndescription: Konfab developer duties\nskills: []\n---\nDevelop v1",
+      "skills": [
+        {
+          "position": 0,
+          "skill_id": "helper",
+          "skill_revision_id": "helper-1",
+          "name": "helper",
+          "description": "helper skill",
+          "reviewed": 1,
+          "files": [
+            {
+              "path": "SKILL.md"
+            },
+            {
+              "path": "notes.md"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "read_role_file_active": {
+    "content": "---\nname: konfab-dev\ntitle: Konfab developer\ndescription: Konfab developer duties\nskills: []\n---\nDevelop v1",
+    "offset": 0,
+    "total_size": 107,
+    "next_offset": null
+  },
+  "read_skill_file_active": {
+    "content": "notes for helper-1",
+    "offset": 0,
+    "total_size": 18,
+    "next_offset": null
+  },
+  "read_role_current": {
+    "role": {
+      "id": "role-dev",
+      "revision_id": "dev-2",
+      "name": "konfab-dev",
+      "number": 2,
+      "changed": true,
+      "title": "Konfab developer",
+      "notes": "Room notes",
+      "role_md": "---\nname: konfab-dev\ntitle: Konfab developer\ndescription: Konfab developer duties\nskills: []\n---\nDevelop v2",
+      "skills": [
+        {
+          "position": 0,
+          "skill_id": "helper",
+          "skill_revision_id": "helper-2",
+          "name": "helper",
+          "description": "helper skill",
+          "reviewed": 1,
+          "files": [
+            {
+              "path": "SKILL.md"
+            },
+            {
+              "path": "notes.md"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "read_role_file_current": {
+    "content": "checklist dev-2",
+    "offset": 0,
+    "total_size": 15,
+    "next_offset": null
+  },
+  "read_skill_file_current": {
+    "content": "notes for helper-2",
+    "offset": 0,
+    "total_size": 18,
+    "next_offset": null
+  },
+  "read_role_codex": {
+    "role": {
+      "id": "builtin:reviewer",
+      "revision_id": "rev-1",
+      "name": "reviewer",
+      "number": 1,
+      "changed": true,
+      "title": "Reviewer",
+      "notes": "",
+      "role_md": "---\nname: reviewer\ntitle: Reviewer\ndescription: Reviewer duties\nskills: []\n---\nReview things",
+      "skills": []
+    }
+  }
+}

@@ -374,21 +374,25 @@ export class KonfabService {
     return new AssignmentStore(this.db, this.now);
   }
 
-  /** read_role: the old role reply for converted members, otherwise the full assignment. */
+  /**
+   * read_role: exactly the pre-upgrade reply ({role}) while a converted
+   * member's legacy contract applies; otherwise a notice and the full
+   * assignment, so connectors with only the old tools can still read it.
+   */
   readAssignedRole(agentId: string, sessionId: string): AssignmentReply {
     const session = this.requireLiveSession(agentId, sessionId);
     const store = this.assignments();
     const snapshot = store.turnSnapshot(session.room_id, agentId, sessionId);
     if (snapshot)
       return snapshot.legacy_role
-        ? { role: snapshot.legacy_role, assignment: snapshot.assignment }
+        ? { role: snapshot.legacy_role }
         : {
             role: { changed: true, notice: ROLES_REPLACED },
             assignment: snapshot.assignment,
           };
     const legacy = store.legacyRole(session.room_id, agentId, true);
+    if (legacy) return { role: legacy };
     const assignment = store.full(session.room_id, agentId);
-    if (legacy) return { role: legacy, assignment };
     return {
       role: assignment ? { changed: true, notice: ROLES_REPLACED } : null,
       assignment,
@@ -559,6 +563,13 @@ export class KonfabService {
     this.db.transaction(() => {
       const store = this.assignments();
       for (const target of targets) {
+        const room = this.roomById(target.room_id);
+        if (room.archived_at !== null)
+          throw new KonfabError(
+            "room_archived",
+            409,
+            `Room ${room.name} is archived; leave it out of the update.`,
+          );
         const current = store.current(target.room_id, target.agent_id);
         if (current.revision !== target.base_revision)
           throw new KonfabError(

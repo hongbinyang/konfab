@@ -306,6 +306,59 @@ describe("skill assignments", () => {
     });
   });
 
+  it("refuses a cross-room update that includes an archived room, changing nothing", () => {
+    const helper = localSkill("helper", 10);
+    service.createRoom("old", "", ["claude"]);
+    for (const room of ["room", "old"])
+      service.setAssignment(room, "claude", {
+        base_revision: 0,
+        instructions: "",
+        pins: [helper],
+        review: [helper.revision_id],
+      });
+    service.archiveRoom("old");
+    const detail = skills.detail(helper.skill_id);
+    skills.writeFile(
+      helper.skill_id,
+      "SKILL.md",
+      Buffer.from("---\nname: helper\ndescription: helper skill\n---\nv3"),
+      detail.current_revision_id,
+      detail.draft_hash!,
+    );
+    const next = skills.save(
+      helper.skill_id,
+      detail.current_revision_id,
+      skills.detail(helper.skill_id).draft_hash!,
+    );
+    const targets = (
+      service.skillUsages(helper.skill_id) as Array<{
+        room_id: number;
+        agent_id: string;
+        base_revision: number;
+      }>
+    ).map(({ room_id, agent_id, base_revision }) => ({
+      room_id,
+      agent_id,
+      base_revision,
+    }));
+    expect(targets).toHaveLength(2);
+    expect(() =>
+      service.updateSkillAssignments(helper.skill_id, next, targets, true),
+    ).toThrow(/archived/);
+    for (const room of ["room", "old"])
+      expect(service.memberAssignment(room, "claude").skills[0]).toMatchObject({
+        revision_id: helper.revision_id,
+      });
+    const active = targets.filter((target) => target.room_id === 1);
+    service.updateSkillAssignments(helper.skill_id, next, active, true);
+    expect(service.memberAssignment("room", "claude").skills[0]).toMatchObject({
+      revision_id: next,
+    });
+    expect(service.memberAssignment("old", "claude").skills[0]).toMatchObject({
+      revision_id: helper.revision_id,
+    });
+  });
+
   it("protects assigned skills from trash and keeps built-in skills read-only", () => {
     const helper = localSkill("helper", 10);
     assign("claude", [helper], "", [helper.revision_id]);
