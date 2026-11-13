@@ -8,8 +8,8 @@ The lead names an agent when adding it to a room, for example "A". From then on,
 
 - A migration adds the table `room_agent_names(room_id, agent_id, name, created_at, updated_at)`.
   - The primary key is `(room_id, agent_id)`, with foreign keys to rooms and agents.
-  - A unique index on `(room_id, lower(name))` prevents duplicates in the same room.
-  - The names are stored in their own table, not in `room_members`, because `replaceMembers` deletes the member row when a member is removed. When a removed agent is added back, its name returns (AN4).
+  - Names are kept in their own table, not in `room_members`, because `replaceMembers` deletes the member row when a member is removed. When that agent is added back, its name returns (AN4).
+  - **Uniqueness applies only among current members.** A former member's name is not reserved, so the lead can give it to another agent. The validator enforces this inside the write transaction. There is a plain, non-unique index on `(room_id, lower(name))` for lookups. A database unique index would wrongly block reuse of a departed member's name. If the former member is added back while someone else holds its name, the add is rejected (see below).
 - **`name`** must match the existing mention syntax, `^[A-Za-z][A-Za-z0-9_-]{0,31}$` (AN2).
   - It is stored as typed, for example "A" or "Reviewer-2", and matched ignoring case.
   - A name that doesn't match is rejected with a message such as "Names start with a letter and use letters, digits, - or _ (32 at most), so they can be typed after @."
@@ -56,7 +56,17 @@ All routing paths use this function:
 - `addressed_to` in lead-message excerpts
 - the composer's not-listening contact notice
 
-Recipients are already stored as resolved IDs in `messages.mentions`. The message view will return that stored list instead of re-parsing the body, so a name never changes who an earlier message addressed. Message text is never rewritten (AN5).
+### Stored mentions and message metadata
+
+- **`messages.mentions` is left as it is.** It stores delivery targets: for a lead post, every member when the post has no mentions; for an agent post, the resolved member IDs plus `lead` when it is mentioned (`@all` expands to every member and `lead`). Its current consumers keep their meaning: attention counts, the latest-message routing check, and continuations.
+- A migration adds a nullable column, **`messages.mentioned`**. It holds JSON with the post's **explicit** mentions, in the order written and normalized when the post is made:
+  - A token that matched a member's name or ID is stored as that agent's ID.
+  - `lead` and `all` are stored as they are.
+  - A token that matched nothing is stored lowercased, as the view does today.
+  - A post without mentions stores `[]`.
+- **The message view's `mentions` field** (page, `join_room`, `wait_for_turn`, `read_history`) returns `mentioned` when it is set. Otherwise it falls back to today's `parseMentions(body)`. Rows from before the migration have `NULL`. For those, the fallback gives exactly the old result, because before this feature every routable token was already an agent ID. No backfill is needed.
+- **Effect:** `@A` written to claude shows `mentions: ["claude"]` both now and after a later rename, and `@all` stays `["all"]`. The field keeps its meaning ("who was explicitly mentioned") and its shape (an array of strings). Message text is never rewritten (AN5).
+- `addressed_to` in lead-message excerpts reads the same field, minus `lead`.
 
 ## Agents (AN2)
 
@@ -98,11 +108,25 @@ The clickable mockup is [mockups/agent-names.html](mockups/agent-names.html). Op
   - `name_fixed` after a join, including a session from before the feature
   - conflicts on rename and on add, in both directions
   - removing and re-adding a member keeps its name
-  - stored recipients are unchanged after clearing a name before a later join
+  - name reuse:
+    - remove A, then give "A" to B: this succeeds
+    - re-add the old A: rejected with `name_conflict`, which names B
+  - `messages.mentions` keeps its current values:
+    - an unaddressed lead post still lists every member
+    - an agent post's `@all` still expands to every member plus `lead`
+  - `mentioned`:
+    - `@A` is stored as `claude`
+    - `@all` stays `all`
+    - an unknown token is kept as written
+    - an unaddressed post stores `[]`
+    - it is unchanged after clearing a name before a later join
+  - legacy rows with `NULL` `mentioned` return the same `mentions` as before the migration
   - an archived room is rejected
   - another room is unaffected
   - `member_names` and the rules line appear in join and turn results
-- **Restart:** reopen the real database, service and app. Names and the fixed state survive; rooms created before the feature behave as they do today.
+- **Restart:** upgrade a database from the previous schema version, then reopen the real database, service and app.
+  - Names, the fixed state and `mentioned` survive.
+  - Rooms and messages from before the feature behave and display as they do today.
 - **API:**
   - `PUT` and `DELETE` on the name: success, reserved, invalid, conflict, fixed, archived, unknown agent
   - `POST /api/agents` with `room_name`, including a conflict
