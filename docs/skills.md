@@ -85,7 +85,7 @@ Earlier versions had roles. On the first start of this version, Konfab:
 - turns free-text roles and room notes into room instructions;
 - leaves `~/.konfab/roles` untouched (you can delete it).
 
-`npm run upgrade-check` shows the result on a copy without changing anything. If an assignment would not fit in 64 KiB even as summaries, the upgrade stops before changing anything and says which room and agent to adjust. Agents connected before the upgrade keep working in their current conversations; reloading the Konfab connector in an app adds the `read_assignment` tool.
+`npm run upgrade-check` shows the result on a copy without changing anything. If an assignment would not fit in 64 KiB even as summaries, the upgrade stops before changing anything and says which room and agent to adjust. Agents connected before the upgrade are designed to keep working in their current conversations: automated tests replay the previous bridge against the upgraded server, but this hasn't yet been confirmed with the desktop apps. If an agent doesn't continue, use **Take a break**, reload the Konfab connector in its app, and paste a fresh join prompt. Reloading the connector also adds the `read_assignment` tool.
 
 ## Quick reference
 

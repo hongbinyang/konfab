@@ -127,6 +127,8 @@ export type PublicConflict = {
   index: number;
   message: string;
   code: "local_changes" | "name_conflict";
+  /** The selected skill it is about, by identity, so reordering can't misdirect it. */
+  key?: string;
   /** For local changes: the exact saved revision of the lead's copy. */
   local?: {
     skill_id: string;
@@ -288,13 +290,24 @@ export function AssignSkills({
   const [diffs, setDiffs] = useState<
     Record<string, ReturnType<typeof lineDiff> | "loading">
   >({});
-  const [conflict, setConflict] = useState<null | PublicConflict>(
-    initialConflict ?? null,
+  const [conflict, setConflict] = useState<null | PublicConflict>(() =>
+    initialConflict
+      ? {
+          ...initialConflict,
+          key:
+            initialConflict.key ??
+            (initial?.pins[initialConflict.index]
+              ? pickKey(initial.pins[initialConflict.index]!)
+              : undefined),
+        }
+      : null,
   );
   const [keeping, setKeeping] = useState(false);
   const [keepError, setKeepError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The selection is locked while a choice is open, so it can't change under it.
+  const locked = busy || !!conflict;
 
   useEffect(() => {
     const el = dialog.current;
@@ -628,7 +641,11 @@ export function AssignSkills({
       onClose();
     } catch (e) {
       const choice = publicConflict(e);
-      if (choice) setConflict(choice);
+      if (choice)
+        setConflict({
+          ...choice,
+          key: pins[choice.index] && pickKey(pins[choice.index]!),
+        });
       else setError(e instanceof Error ? e.message : "Unable to assign");
     } finally {
       setBusy(false);
@@ -647,7 +664,13 @@ export function AssignSkills({
   ) => {
     setKeepError("");
     if ("copy_name" in choice) {
-      update(found.index, { copy_name: choice.copy_name });
+      setPins((current) =>
+        current.map((item) =>
+          pickKey(item) === found.key && item.kind === "public"
+            ? { ...item, copy_name: choice.copy_name }
+            : item,
+        ),
+      );
       setConflict(null);
       return;
     }
@@ -674,8 +697,8 @@ export function AssignSkills({
       setKeeping(false);
     }
     setPins((current) =>
-      current.map((item, i) =>
-        i === found.index
+      current.map((item) =>
+        pickKey(item) === found.key
           ? {
               kind: "local",
               skill_id: local.skill_id,
@@ -713,7 +736,9 @@ export function AssignSkills({
   const searching =
     publicLoading || progress.some((source) => !source.complete);
   const kib = (value: number) => `${(value / 1024).toFixed(1)} KiB`;
-  const conflictPin = conflict ? pins[conflict.index] : undefined;
+  const conflictPin = conflict
+    ? pins.find((pin) => pickKey(pin) === conflict.key)
+    : undefined;
 
   return (
     <dialog
@@ -859,7 +884,7 @@ export function AssignSkills({
                             type="button"
                             className="secondary"
                             aria-label={`Add ${name}`}
-                            disabled={busy}
+                            disabled={locked}
                             onClick={() => add(item)}
                           >
                             Add
@@ -898,7 +923,7 @@ export function AssignSkills({
                 <button
                   type="button"
                   disabled={
-                    busy ||
+                    locked ||
                     !preview ||
                     (selected.kind === "public" && !previewHash) ||
                     isChosen(selected)
@@ -941,7 +966,7 @@ export function AssignSkills({
                       <button
                         type="button"
                         aria-label={`Move ${pin.name} up`}
-                        disabled={busy || index === 0}
+                        disabled={locked || index === 0}
                         onClick={() => move(index, -1)}
                       >
                         ↑
@@ -949,7 +974,7 @@ export function AssignSkills({
                       <button
                         type="button"
                         aria-label={`Move ${pin.name} down`}
-                        disabled={busy || index === pins.length - 1}
+                        disabled={locked || index === pins.length - 1}
                         onClick={() => move(index, 1)}
                       >
                         ↓
@@ -957,7 +982,7 @@ export function AssignSkills({
                       <button
                         type="button"
                         aria-label={`Remove ${pin.name}`}
-                        disabled={busy}
+                        disabled={locked}
                         onClick={() =>
                           setPins((current) =>
                             current.filter((_, i) => i !== index),
@@ -976,6 +1001,7 @@ export function AssignSkills({
                         <button
                           type="button"
                           aria-pressed={pin.delivery === "full"}
+                          disabled={locked}
                           onClick={() => update(index, { delivery: "full" })}
                         >
                           Full text
@@ -983,6 +1009,7 @@ export function AssignSkills({
                         <button
                           type="button"
                           aria-pressed={pin.delivery === "summary"}
+                          disabled={locked}
                           onClick={() => update(index, { delivery: "summary" })}
                         >
                           Summary
@@ -1029,7 +1056,7 @@ export function AssignSkills({
                         </button>
                         <button
                           type="button"
-                          disabled={busy}
+                          disabled={locked}
                           onClick={() => {
                             update(index, {
                               revision_id: pin.latest!.id,

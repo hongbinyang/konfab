@@ -302,6 +302,64 @@ describe("Assign skills dialog", () => {
     await waitFor(() => expect(onAssigned).toHaveBeenCalled());
   });
 
+  it("locks the selection while a choice is open, so the kept revision replaces the right skill", async () => {
+    putResponses.push(() =>
+      json(409, {
+        code: "local_changes",
+        message: "web-testing has local changes.",
+        pin: 1,
+        local: {
+          skill_id: "s-web",
+          revision_id: "11111111-1111-4111-8111-0000000000c2",
+          name: "web-testing",
+          number: 2,
+          reviewed: true,
+          draft: false,
+        },
+      }),
+    );
+    let release: () => void = () => undefined;
+    api.routes.files = (url) =>
+      url.includes("11111111-1111-4111-8111-0000000000c2")
+        ? new Promise((resolve) => {
+            release = () => resolve(undefined);
+          })
+        : undefined;
+    const { user } = setup();
+    await user.click(
+      await screen.findByRole("button", { name: /web-testing/ }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Add to selection" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Assign 2 skills to Claude" }),
+    );
+    const choice = await screen.findByRole("alertdialog");
+    const disabled = (name: string) =>
+      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+    // While the choice is open, and during the slow load, nothing in the list can change.
+    for (const name of [
+      "Move web-testing up",
+      "Remove web-testing",
+      "Move konfab-dev down",
+      "Remove konfab-dev",
+      "Add qa",
+    ])
+      expect(disabled(name)).toBe(true);
+    await user.click(
+      within(choice).getByRole("button", { name: "Keep my version" }),
+    );
+    expect(disabled("Move web-testing up")).toBe(true);
+    expect(disabled("Remove konfab-dev")).toBe(true);
+    release();
+    await selectedList().findByLabelText("web-testing rev 2");
+    const items = selectedList().getAllByRole("listitem");
+    expect(items[0]!.textContent).toContain("konfab-dev rev 2");
+    expect(items[1]!.textContent).toContain("web-testing rev 2");
+    expect(disabled("Remove konfab-dev")).toBe(false);
+  });
+
   it("adds a separate copy when a different skill has the name", async () => {
     putResponses.push(() =>
       json(409, {
