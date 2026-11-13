@@ -397,3 +397,36 @@ Design: [room names for agents](docs/design/agent-names.md).
 | AN5 | MUST | Names never alter the recipients or text of earlier messages. Room views show the room name for the member, including message senders, cards, status, availability, team and format controls and continuation controls. Elsewhere the existing display name remains in use. A member without a room name retains existing behavior. |
 | AN6 | MUST | The page does not present the standalone default-agent marker as a name; the app and agent identity remain discoverable. |
 | AN7 | LATER | Mention autocomplete, global names and changing agent IDs. |
+
+## Proposed: skill-based agent assignments
+
+**Status:** Draft for review; supersedes role-specific requirements only when shipped. Design and migration details remain subject to review.
+
+The lead wants skills to be the single assignment concept: a skill can describe an agent's responsibilities as well as a procedure, and an agent can use a combination of skills. Skills remain standard Agent Skills folders stored locally; the product should simplify both its interface and implementation by removing the separate role model.
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| SA1 | MUST | The lead can assign an ordered combination of zero or more locally stored skills to each room member, with optional room-specific instructions. A skill may define responsibilities, a procedure, or both. Existing ordinary Agent Skills remain valid; no extra role format is required. Skills and instructions do not grant permissions. |
+| SA2 | MUST | The assignment flow lets the lead find, preview, select, remove and order multiple personal, project and enabled public skills, and edit room instructions. Public selections are copied locally and verified before use. Show exactly what will be assigned, including source and revision, before confirmation. Confirming the displayed revisions records their review; unreviewed revisions are not delivered without that confirmation. Reject an assignment exceeding the supported delivery limit with an actionable explanation before it is applied. |
+| SA3 | MUST | Each assignment pins exact saved skill revisions. Local edits are visible as drafts and can be saved as new revisions; local folders can be adopted and remote skills copied locally. Reassigning or updating an existing skill must not fail merely because a same-named assignment already exists. Name and content conflicts are explained; no unrelated files or revisions are silently overwritten. |
+| SA4 | MUST | The lead can see when a newer saved revision is available and preview its changes, review it and explicitly update selected assignments. Provide a member-card update for that member and a skill-based update that lists affected members across rooms for selection. The confirmation identifies affected members and exact revisions, and records their review; other assignments stay pinned. Assignment never silently follows later edits or upstream changes. |
+| SA5 | MUST | Agents receive the ordered assignment and room instructions on their next turn and can read the pinned skill instructions and supporting files. A change during a turn takes effect on the next turn, with an assignment-change notice; it must not alter the active turn's instruction snapshot. Room rules and lead instructions remain authoritative. |
+| SA6 | MUST | The lead can atomically swap, rotate, assign and remove complete skill bundles and room instructions across members; stale edits apply nothing. Room instructions move with the bundle; room name, app identity, session and edit permissions stay with the member. Formats continue to work with skill assignments. |
+| SA7 | MUST | Remove role as a separate user-facing assignment, management and storage concept, including built-in roles; provide equivalent built-in skills where needed. Preserve useful existing skill-library, review, provenance, revision, search and trash protections. A skill in use cannot be removed in a way that breaks a pinned assignment or active turn. Update the README, user guide, skills guide and agent-facing tool descriptions to reflect the new behavior, and mark superseded role requirements as historical when shipped. |
+| SA8 | MUST | Upgrade existing installations without deleting rooms, messages, members, decisions, sessions or unrelated skills. Preserve the instructions and notes of each existing assignment, including free-text custom roles, roles with no skills and pinned supporting skills, as equivalent skill-based assignments. Preserve free-text role instructions in the member’s room instructions. Do not silently replace or discard role content on naming collisions. Preserve enough state for an in-progress turn to finish with its original instructions, or stop safely with a clear recovery path if that cannot be done. |
+| SA9 | MUST | Existing connected agents must be able to finish their current work and continue after upgrade, including access to their active-turn instructions and supporting files. Clearly communicate any connector reload or rejoin that is actually necessary; do not claim seamless continuation without verifying it. |
+
+### Acceptance checks
+
+- Create and assign several skills, reorder them, inspect the delivered content, change an assignment mid-turn, and verify the next turn and its notice.
+- Edit a tracked skill on disk; save, preview and review a new revision; update selected assignments while other members remain pinned. Reassign without a name-collision failure; test conflicts and rollback.
+- Copy a public skill locally and assign it with a local skill; verify source/revision and that upstream or local changes do not silently change an assignment.
+- Verify exact-revision review, delivery-size rejection and both update entry points. Exercise swaps/rotations, stale updates, in-use protection and a complete Format; verify room instructions move with bundles and edit permissions do not.
+- Upgrade a representative old database with role text, pinned skills, notes, active sessions and an active turn; restart the actual service and database, complete or safely recover the turn, then verify the next turn and preserved room data. Cover name collisions and an assignment with no skills.
+- Verify the assignment flow and migration in an isolated instance in both themes, with the required automated checks and a real connected-agent check where feasible.
+
+### Design questions to resolve
+
+- Define how multiple skill instructions are ordered and how conflicts are resolved; communicate that precedence to agents while preserving the authority of lead instructions and room rules.
+- How will old role content and pinned files be converted without data loss, and how will active-turn snapshots and already-running connectors continue to work? Specify the failure and recovery behavior before implementation.
+- What update scope and confirmation best handles a skill used in several rooms? The default is explicit selection and no automatic rollout.
