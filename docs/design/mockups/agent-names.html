@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent room names – mockup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #fff;
+        --surface: #f4f4f5;
+        --text: #18181b;
+        --muted: #5f5f67;
+        --border: #d4d4d8;
+        --accent: #1d4ed8;
+        --accent-text: #fff;
+        --error: #b91c1c;
+        --error-surface: #fee2e2;
+        --good: #166534;
+        --lead: #fef3c7;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --background: #18181b;
+        --surface: #27272a;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --border: #3f3f46;
+        --accent: #93c5fd;
+        --accent-text: #18181b;
+        --error: #fca5a5;
+        --error-surface: #450a0a;
+        --good: #86efac;
+        --lead: #422006;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--text);
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0;
+        flex: 1;
+      }
+      .note {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 16px;
+        padding: 16px;
+        max-width: 1100px;
+        margin: auto;
+      }
+      @media (max-width: 760px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+      .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-height: 260px;
+      }
+      .msg {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      .msg.lead {
+        background: var(--lead);
+      }
+      .msg b {
+        margin-right: 6px;
+      }
+      .mention {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .routing {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .composer {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .composer input {
+        flex: 1;
+      }
+      .hint {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      input {
+        font: inherit;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--background);
+        color: var(--text);
+      }
+      button {
+        font: inherit;
+        padding: 4px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-text);
+        border-color: var(--accent);
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 12px;
+        background: var(--surface);
+      }
+      .heading strong {
+        font-size: 15px;
+      }
+      .mn {
+        color: var(--muted);
+        margin-left: 4px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 6px 0;
+      }
+      .chip {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 13px;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .namebox {
+        display: grid;
+        gap: 4px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+      }
+      .namebox .row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .namebox input {
+        width: 150px;
+      }
+      .fixed {
+        font-size: 12px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0 6px;
+        margin-left: 6px;
+        color: var(--muted);
+      }
+      .err {
+        color: var(--error);
+        background: var(--error-surface);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 13px;
+      }
+      .state {
+        font-size: 13px;
+      }
+      .state.on {
+        color: var(--good);
+      }
+      h2 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      details.add {
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 12px;
+        font-size: 13px;
+      }
+      details.add label {
+        display: grid;
+        gap: 2px;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>New room “design-review” — mockup: room names for agents</h1>
+      <span class="note"
+        >Clickable mockup, not the real app. “Simulate join” stands in for
+        pasting the join prompt.</span
+      >
+      <button id="theme" type="button">Dark theme</button>
+    </header>
+    <main>
+      <section>
+        <h2>Conversation</h2>
+        <div class="timeline" id="timeline"></div>
+        <form class="composer" id="composer">
+          <input
+            id="draft"
+            aria-label="Message"
+            value="@a please draft the design, then hand off to @B"
+          />
+          <button class="primary">Post</button>
+        </form>
+        <div class="hint" id="hint"></div>
+      </section>
+      <aside>
+        <h2>Agents</h2>
+        <details class="add">
+          <summary>+ Add agent</summary>
+          <form id="addForm">
+            <label
+              >Display name<input name="display" value="Claude reviewer"
+            /></label>
+            <label>Agent ID<input name="id" value="claude-reviewer" /></label>
+            <label>App<input value="Claude" disabled /></label>
+            <label
+              ><span
+                ><input type="checkbox" checked disabled /> Add to this
+                room</span
+              ></label
+            >
+            <label
+              >Name in this room
+              <span class="note"
+                >(optional; what everyone types after @, fixed once it
+                joins)</span
+              ><input name="name" placeholder="e.g. C" maxlength="32"
+            /></label>
+            <div id="addErr"></div>
+            <div class="actions">
+              <button class="primary">Add agent</button>
+            </div>
+          </form>
+        </details>
+        <div id="cards"></div>
+      </aside>
+    </main>
+    <script>
+      const agents = [
+        {
+          id: "claude",
+          app: "Claude",
+          display: "Claude",
+          role: "konfab-dev rev 1",
+          name: null,
+          joined: false,
+          def: true,
+        },
+        {
+          id: "codex",
+          app: "Codex",
+          display: "Codex",
+          role: "konfab-pm rev 1",
+          name: null,
+          joined: false,
+          def: true,
+        },
+      ];
+      const messages = [];
+      const drafts = {};
+      const errs = {};
+      const $ = (s) => document.querySelector(s);
+      const esc = (s) =>
+        String(s).replace(
+          /[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+        );
+      const label = (a) => a.name ?? a.display,
+        mention = (a) => a.name ?? a.id;
+      const find = (t) =>
+        agents.find((a) => a.name && a.name.toLowerCase() === t) ||
+        agents.find((a) => a.id === t);
+      function validate(agent, name, others) {
+        if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name))
+          return "Names start with a letter and use letters, digits, - or _ (32 at most), so they can be typed after @.";
+        const n = name.toLowerCase();
+        if (n === "lead" || n === "all")
+          return `@${name} is reserved. Choose another name.`;
+        for (const o of others) {
+          if (o === agent) continue;
+          if (o.id === n)
+            return `@${name} is ${label(o)}'s agent ID in this room. Choose another name.`;
+          if (o.name && o.name.toLowerCase() === n)
+            return `@${o.name} is already ${o.display}'s name in this room. Choose another name.`;
+        }
+        return null;
+      }
+      function resolve(body) {
+        const toks = [
+          ...body.matchAll(/(?<![\w.])@([a-zA-Z][a-zA-Z0-9_-]*)/g),
+        ].map((m) => m[1].toLowerCase());
+        const out = [];
+        for (const t of toks) {
+          if (t === "all") return agents.map((a) => a.id);
+          const a = find(t);
+          if (a && !out.includes(a.id)) out.push(a.id);
+        }
+        return out;
+      }
+      const renderBody = (b) =>
+        esc(b).replace(/(?<![\w.])@([a-zA-Z][a-zA-Z0-9_-]*)/g, (m, t) => {
+          const a = find(t.toLowerCase());
+          return a || /^(lead|all)$/i.test(t)
+            ? `<span class="mention" title="${a ? esc(label(a) + " (" + a.id + ")") : t}">${m}</span>`
+            : m;
+        });
+      function render() {
+        $("#timeline").innerHTML = messages.length
+          ? messages
+              .map((m) => {
+                const a = agents.find((x) => x.id === m.who);
+                return `<div class="msg ${m.who === "lead" ? "lead" : ""}"><b>${a ? esc(label(a)) : "You"}</b><div>${renderBody(m.body)}</div>${m.note ? `<div class="routing">${esc(m.note)}</div>` : ""}</div>`;
+              })
+              .join("")
+          : `<p class="note">Name the agents on their cards, then use “Simulate join”. Names are fixed once an agent joins.</p>`;
+        $("#hint").textContent =
+          "Mention: " +
+          agents.map((a) => "@" + mention(a)).join(", ") +
+          ", @all · agent IDs also work";
+        $("#cards").innerHTML = agents
+          .map((a, i) => {
+            const tip =
+              `Agent ID: ${a.id}.` +
+              (a.def
+                ? ` Default agent for ${a.app} (used when join_room has no "as").`
+                : "");
+            const nameBox = a.joined
+              ? `<div class="namebox"><div>Name in this room: <b>${a.name ? "@" + esc(a.name) : "none (uses @" + a.id + ")"}</b><span class="fixed" title="Names are fixed once the agent joins this room.">Fixed</span></div></div>`
+              : `<form class="namebox" data-i="${i}"><label for="n${i}">Name in this room <span class="note">— what everyone types after @. Fixed once ${esc(a.display)} joins.</span></label>
+        <div class="row"><span>@</span><input id="n${i}" value="${esc(drafts[i] ?? a.name ?? "")}" maxlength="32" placeholder="${a.id}"><button class="primary">Save</button>${a.name ? `<button type="button" data-clear="${i}">Clear</button>` : ""}</div>
+        ${errs[i] ? `<div class="err" role="alert">${esc(errs[i])}</div>` : ""}</form>`;
+            return `<div class="card"><div class="heading" title="${esc(tip)}"><strong>${esc(label(a))}</strong><span class="mn">@${esc(mention(a))}</span></div>
+      <div class="chips"><span class="chip">App: ${a.app}</span><span class="chip">Role: ${esc(a.role)}</span></div>
+      <div class="state ${a.joined ? "on" : ""}">${a.joined ? "Waiting for a turn" : "Not joined"}</div>
+      <div class="actions"><button type="button">Change role</button><button type="button">Copy join prompt</button>${a.joined ? "" : `<button type="button" data-join="${i}">Simulate join</button>`}</div>${nameBox}</div>`;
+          })
+          .join("");
+        document.querySelectorAll("form.namebox").forEach((f) => {
+          const i = +f.dataset.i,
+            a = agents[i];
+          f.querySelector("input").oninput = (e) => {
+            drafts[i] = e.target.value;
+          };
+          f.onsubmit = (e) => {
+            e.preventDefault();
+            const v = (drafts[i] ?? a.name ?? "").trim();
+            const err = validate(a, v, agents);
+            errs[i] = err;
+            if (!err) {
+              a.name = v;
+              delete drafts[i];
+            }
+            render();
+          };
+        });
+        document.querySelectorAll("[data-clear]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const a = agents[+b.dataset.clear];
+              a.name = null;
+              delete drafts[b.dataset.clear];
+              errs[b.dataset.clear] = null;
+              render();
+            }),
+        );
+        document.querySelectorAll("[data-join]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const a = agents[+b.dataset.join];
+              a.joined = true;
+              messages.push({
+                who: "lead",
+                body: `(event) ${label(a)} joined.`,
+                note: `Name ${a.name ? "@" + a.name : "(none)"} is now fixed in this room. Agents see: Members: ${agents.map((x) => "@" + mention(x) + " (" + x.id + ")").join(", ")}`,
+              });
+              render();
+            }),
+        );
+      }
+      $("#composer").onsubmit = (e) => {
+        e.preventDefault();
+        const body = $("#draft").value.trim();
+        if (!body) return;
+        const to = resolve(body);
+        messages.push({
+          who: "lead",
+          body,
+          note: to.length
+            ? "Turn goes to: " +
+              to
+                .map((id) => {
+                  const a = agents.find((x) => x.id === id);
+                  return `${label(a)} (${a.id})${a.joined ? "" : " — not joined yet, mention waits"}`;
+                })
+                .join(", ")
+            : "No mention: each agent gets a turn in order",
+        });
+        const a = agents.find((x) => x.id === to[0] && x.joined);
+        if (a) {
+          const other = agents.find((x) => x !== a);
+          setTimeout(() => {
+            messages.push({
+              who: a.id,
+              body: `Draft is ready. @${mention(other)} please review.`,
+              note: `Agent handoff → ${label(other)} (${other.id})`,
+            });
+            render();
+          }, 600);
+        }
+        $("#draft").value = "";
+        render();
+      };
+      $("#addForm").onsubmit = (e) => {
+        e.preventDefault();
+        const f = e.target,
+          el = f.elements,
+          id = el.namedItem("id").value.trim().toLowerCase(),
+          name = el.namedItem("name").value.trim();
+        const nu = {
+          id,
+          app: "Claude",
+          display: el.namedItem("display").value.trim() || id,
+          role: "none",
+          name: name || null,
+          joined: false,
+          def: false,
+        };
+        let err = null;
+        for (const o of agents) {
+          if (o.name && o.name.toLowerCase() === id) {
+            err = `Can't add: agent ID @${id} is ${o.display}'s name in this room.`;
+            break;
+          }
+        }
+        if (!err && name) err = validate(nu, name, agents);
+        $("#addErr").innerHTML = err
+          ? `<div class="err" role="alert">${esc(err)}</div>`
+          : "";
+        if (err) return;
+        agents.push(nu);
+        f.closest("details").open = false;
+        render();
+      };
+      $("#theme").onclick = () => {
+        const d = document.documentElement.dataset.theme === "dark";
+        document.documentElement.dataset.theme = d ? "light" : "dark";
+        $("#theme").textContent = d ? "Dark theme" : "Light theme";
+      };
+      render();
+    </script>
+  </body>
+</html>
