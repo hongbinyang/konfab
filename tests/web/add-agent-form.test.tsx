@@ -3,8 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddAgentForm } from "../../web/src/AddAgentForm";
-
-type Handler = (url: string, init?: RequestInit) => unknown | Promise<unknown>;
+import { json, stubSkillApi } from "./skill-fetch";
 
 const overview = {
   agents: [
@@ -37,70 +36,21 @@ const overview = {
   max_agents_per_app: 2,
 };
 
-const roleList = {
-  roles: [
-    { id: "builtin:qa", revision_id: "rev-qa", name: "qa", title: "QA" },
-    {
-      id: "builtin:reviewer",
-      revision_id: "rev-reviewer-1",
-      name: "reviewer",
-      title: "Reviewer",
-    },
-    {
-      id: "personal:risky",
-      revision_id: "rev-risky",
-      name: "risky",
-      title: "Risky",
-    },
-  ],
-};
-
-const preview = (id: string, revision: string, number: number) => ({
-  id,
-  revision_id: revision,
-  number,
-  title: id === "builtin:qa" ? "QA" : "Reviewer",
-  role_md: `Instructions for ${id} rev ${number}`,
-  skills: [],
-});
-
-let routes: Record<string, Handler>;
-let posts: Array<{ url: string; body: unknown }>;
-
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+let api: ReturnType<typeof stubSkillApi>;
+let agentResponse: () => Response;
 
 beforeEach(() => {
-  posts = [];
-  routes = {
-    "/api/roles": () => roleList,
-    "/api/roles/builtin%3Aqa": () => preview("builtin:qa", "rev-qa", 3),
-    "/api/roles/builtin%3Areviewer": () =>
-      preview("builtin:reviewer", "rev-reviewer-1", 1),
-    "/api/roles/personal%3Arisky": () => ({
-      id: "personal:risky",
-      revision_id: "rev-risky",
-      number: 2,
-      title: "Risky",
-      role_md: "Risky role",
-      skills: [{ name: "deploy-prod", reviewed: 0 }],
-    }),
-  };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        posts.push({ url, body: JSON.parse(String(init.body)) });
-        return json(201, { ok: true });
-      }
-      const handler = routes[url];
-      if (!handler) return json(404, { message: `No route ${url}` });
-      return json(200, await handler(url, init));
-    }),
-  );
+  agentResponse = () => json(201, { ok: true });
+  if (!HTMLDialogElement.prototype.showModal)
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.open = true;
+    };
+  if (!HTMLDialogElement.prototype.close)
+    HTMLDialogElement.prototype.close = function close() {
+      this.open = false;
+    };
+  api = stubSkillApi({ "/api/agents": () => agentResponse() });
+  vi.stubGlobal("fetch", api.fetch);
 });
 
 afterEach(() => {
@@ -122,160 +72,87 @@ const setup = () => {
   return { user: userEvent.setup(), onAdded, onCancel };
 };
 
-const submit = () => screen.getByRole("button", { name: "Add agent" });
-
 describe("Add agent form", () => {
-  it("suggests a unique ID from the name and disables full apps", async () => {
-    const { user } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Codex dev");
-    expect(screen.getByLabelText(/Agent ID/)).toHaveProperty(
-      "value",
-      "codex-dev-2",
+  it("suggests an ID, disables full apps and adds a plain agent", async () => {
+    const { user, onAdded } = setup();
+    await user.type(screen.getByLabelText("Display name"), "Claude");
+    expect((screen.getByLabelText(/Agent ID/) as HTMLInputElement).value).toBe(
+      "claude-2",
     );
-    const app = screen.getByLabelText(/^App/) as HTMLSelectElement;
-    expect(app.value).toBe("claude");
-    const codex = [...app.options].find((option) => option.value === "codex");
-    expect(codex?.disabled).toBe(true);
-    expect(codex?.textContent).toBe("Codex (2/2)");
-  });
-
-  it("adds an agent without a role", async () => {
-    const { user, onAdded } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Helper");
-    await user.click(submit());
+    const codex = screen.getByRole("option", {
+      name: "Codex (2/2)",
+    }) as HTMLOptionElement;
+    expect(codex.disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
     await waitFor(() => expect(onAdded).toHaveBeenCalled());
-    expect(posts).toEqual([
-      {
-        url: "/api/agents",
-        body: {
-          id: "helper",
-          display_name: "Helper",
-          app_id: "claude",
-          room_id: 7,
-        },
-      },
-    ]);
+    const post = api.calls.find((call) => call.url === "/api/agents")!;
+    expect(post.body).toEqual({
+      id: "claude-2",
+      display_name: "Claude",
+      app_id: "claude",
+      room_id: 7,
+    });
   });
 
-  it("sends the name in this room, which is only offered when adding to the room", async () => {
+  it("chooses skills and instructions in the picker and sends them with the new agent", async () => {
     const { user, onAdded } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Helper");
-    await user.type(screen.getByLabelText(/Name in this room/), "H");
-    await user.click(submit());
-    await waitFor(() => expect(onAdded).toHaveBeenCalled());
-    expect(posts[0]?.body).toMatchObject({ room_id: 7, room_name: "H" });
-    cleanup();
-    setup();
-    await user.click(screen.getByLabelText("Add to this room"));
-    expect(screen.queryByLabelText(/Name in this room/)).toBeNull();
-  });
-
-  it("requires a preview and confirmation of the exact revision", async () => {
-    const { user, onAdded } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Reviewer");
-    await screen.findByRole("option", { name: "Reviewer" });
-    await user.selectOptions(
-      screen.getByLabelText(/^Role in this room/),
-      "builtin:reviewer",
+    await user.type(screen.getByLabelText("Display name"), "Tester");
+    await user.click(screen.getByRole("button", { name: "Choose skills…" }));
+    await user.click(await screen.findByRole("button", { name: "Add qa" }));
+    await user.click(screen.getByRole("button", { name: "Add fresh" }));
+    await user.type(screen.getByLabelText(/Room instructions/), "Be brief");
+    // In this mode nothing is saved yet; the selection returns to the form.
+    await user.click(
+      screen.getByRole("button", { name: "Use these 2 skills" }),
     );
-    await screen.findByText("Preview: Reviewer · rev 1");
-    expect(
-      screen.getByText("Instructions for builtin:reviewer rev 1"),
-    ).toBeTruthy();
-    expect(submit()).toHaveProperty("disabled", true);
-    await user.click(screen.getByLabelText(/I reviewed this role \(rev 1\)/));
-    expect(submit()).toHaveProperty("disabled", false);
-    await user.click(submit());
+    expect(api.calls.some((call) => call.method === "PUT")).toBe(false);
+    expect(screen.getByText("qa · full text")).toBeTruthy();
+    expect(screen.getByText("Instructions: Be brief")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
     await waitFor(() => expect(onAdded).toHaveBeenCalled());
-    expect(posts[0]?.body).toMatchObject({
-      role: {
-        role_id: "builtin:reviewer",
-        role_revision_id: "rev-reviewer-1",
+    const post = api.calls.find((call) => call.url === "/api/agents")!;
+    expect(post.body).toEqual({
+      id: "tester",
+      display_name: "Tester",
+      app_id: "claude",
+      room_id: 7,
+      assignment: {
+        instructions: "Be brief",
+        pins: [
+          {
+            skill_id: "builtin:qa",
+            revision_id: "11111111-1111-4111-8111-0000000000a1",
+            delivery: "full",
+          },
+          {
+            skill_id: "s-new",
+            revision_id: "11111111-1111-4111-8111-000000000009",
+            delivery: "full",
+          },
+        ],
+        review: ["11111111-1111-4111-8111-000000000009"],
         confirmed: true,
       },
     });
   });
 
-  it("clears the confirmation when the role changes", async () => {
-    const { user } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Reviewer");
-    await screen.findByRole("option", { name: "Reviewer" });
-    const role = screen.getByLabelText(/^Role in this room/);
-    await user.selectOptions(role, "builtin:reviewer");
-    await user.click(
-      await screen.findByLabelText(/I reviewed this role \(rev 1\)/),
-    );
-    await user.selectOptions(role, "builtin:qa");
-    await screen.findByText("Preview: QA · rev 3");
-    expect(
-      (screen.getByLabelText(/I reviewed this role/) as HTMLInputElement)
-        .checked,
-    ).toBe(false);
-    expect(submit()).toHaveProperty("disabled", true);
-  });
-
-  it("ignores a late preview for an earlier choice", async () => {
-    let releaseStale: () => void = () => undefined;
-    let reviewerCalls = 0;
-    routes["/api/roles/builtin%3Areviewer"] = async () => {
-      reviewerCalls += 1;
-      if (reviewerCalls === 1) {
-        await new Promise<void>((resolve) => (releaseStale = resolve));
-        return preview("builtin:reviewer", "rev-stale", 99);
-      }
-      return preview("builtin:reviewer", "rev-reviewer-1", 1);
-    };
+  it("does not send skills for an agent not added to this room, and shows server errors", async () => {
+    agentResponse = () =>
+      json(409, { message: "That agent ID is already in use." });
     const { user, onAdded } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Reviewer");
-    await screen.findByRole("option", { name: "Reviewer" });
-    const role = screen.getByLabelText(/^Role in this room/);
-    await user.selectOptions(role, "builtin:reviewer");
-    await user.selectOptions(role, "builtin:qa");
-    await user.selectOptions(role, "builtin:reviewer");
-    await user.click(
-      await screen.findByLabelText(/I reviewed this role \(rev 1\)/),
-    );
-    releaseStale();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.getByText("Preview: Reviewer · rev 1")).toBeTruthy();
-    expect(screen.queryByText(/rev 99/)).toBeNull();
-    await user.click(submit());
-    await waitFor(() => expect(onAdded).toHaveBeenCalled());
-    expect(posts[0]?.body).toMatchObject({
-      role: { role_revision_id: "rev-reviewer-1", confirmed: true },
-    });
-  });
-
-  it("blocks roles with unreviewed skills", async () => {
-    const { user } = setup();
-    await user.type(screen.getByLabelText("Display name"), "Ops");
-    await screen.findByRole("option", { name: "Risky" });
-    await user.selectOptions(
-      screen.getByLabelText(/^Role in this room/),
-      "personal:risky",
-    );
-    await screen.findByText(/Review deploy-prod in Manage library/);
-    expect(screen.queryByLabelText(/I reviewed this role/)).toBeNull();
-    expect(submit()).toHaveProperty("disabled", true);
-  });
-
-  it("shows server errors and calls cancel", async () => {
-    const { user, onAdded, onCancel } = setup();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        json(409, { message: "That agent ID is already in use." }),
-      ),
-    );
-    await user.type(screen.getByLabelText("Display name"), "Codex");
-    await user.clear(screen.getByLabelText(/Agent ID/));
-    await user.type(screen.getByLabelText(/Agent ID/), "codex");
-    await user.click(submit());
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "That agent ID is already in use.",
+    await user.type(screen.getByLabelText("Display name"), "Helper");
+    await user.click(screen.getByLabelText("Add to this room"));
+    expect(screen.queryByRole("button", { name: "Choose skills…" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "already in use",
     );
     expect(onAdded).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onCancel).toHaveBeenCalled();
+    const post = api.calls.find((call) => call.url === "/api/agents")!;
+    expect(post.body).toEqual({
+      id: "helper",
+      display_name: "Helper",
+      app_id: "claude",
+    });
   });
 });

@@ -130,9 +130,13 @@ export interface RoomAgent {
   saved_run_ms?: number | null;
   closes_at: number | null;
   join_prompt: string;
-  role: string;
-  role_pack_label?: string | null;
-  role_can_revert?: boolean;
+  assignment: {
+    label: string;
+    skill_count: number;
+    instructions: string;
+    revision: number;
+    update_available: boolean;
+  };
   can_edit: boolean;
   stats: {
     session_started_at: number | null;
@@ -242,6 +246,17 @@ export interface RoomState {
 
 export class UnauthorizedError extends Error {}
 
+/** A failed request, with the server's error code and any extra fields. */
+export class RequestError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | undefined,
+    readonly details: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+
 export async function request<T>(
   path: string,
   options: { method?: string; body?: unknown } = {},
@@ -257,7 +272,14 @@ export async function request<T>(
   });
   if (response.status === 401) throw new UnauthorizedError("Sign in required");
   const payload = (await response.json()) as T & { message?: string };
-  if (!response.ok) throw new Error(payload.message ?? "Request failed");
+  if (!response.ok) {
+    const details = payload as unknown as Record<string, unknown>;
+    throw new RequestError(
+      payload.message ?? "Request failed",
+      typeof details.code === "string" ? details.code : undefined,
+      details,
+    );
+  }
   return payload;
 }
 

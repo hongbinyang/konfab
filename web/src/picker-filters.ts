@@ -1,11 +1,11 @@
-export type PickerFilter = "roles" | "personal" | "project" | "public";
+export type PickerFilter = "personal" | "project" | "builtin" | "public";
 export const pickerFilters: ReadonlyArray<{
   value: PickerFilter;
   label: string;
 }> = [
-  { value: "roles", label: "My roles" },
   { value: "personal", label: "My skills" },
   { value: "project", label: "Project" },
+  { value: "builtin", label: "Built-in" },
   { value: "public", label: "Public" },
 ];
 export function togglePickerFilter(
@@ -32,7 +32,6 @@ export function nextPickerIndex(
   return index < 0 || next < 0 || next >= count ? null : next;
 }
 export type PickerLocations = {
-  roles: string | null;
   skills: string | null;
   project: string | null;
   sources: string[];
@@ -42,10 +41,8 @@ export function pickerHint(
   locations: PickerLocations | null,
 ): string {
   if (!locations) return "Library locations unavailable.";
-  if (filter === "roles")
-    return locations.roles
-      ? `Built-in roles and your personal roles · ${locations.roles}`
-      : "Built-in roles and your personal roles";
+  if (filter === "builtin")
+    return "Skills that ship with Konfab (read-only; duplicate one to change it)";
   if (filter === "personal")
     return locations?.skills
       ? `Personal skills, available in any room · ${locations.skills}`
@@ -64,12 +61,12 @@ export function pickerEmpty(
   hasProject: boolean,
 ): string {
   if (query.trim()) return `No matches for “${query.trim()}”.`;
-  if (filter === "roles") return "No roles available.";
+  if (filter === "builtin") return "No built-in skills available.";
   if (filter === "personal")
-    return "No personal skills yet. Customize a public skill to save one.";
+    return "No personal skills yet. Assigning a public skill saves a copy here.";
   if (filter === "project")
     return hasProject
-      ? "No project skills yet. Customize a skill and choose This project."
+      ? "No project skills yet. Create one in Manage library → Project."
       : "Set a project folder in the room's Edit to use project skills.";
   return "No public skills available. Check enabled sources and their status.";
 }

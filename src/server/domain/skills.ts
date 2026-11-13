@@ -557,7 +557,7 @@ export class SkillLibrary {
       this.db
         .prepare(
           `SELECT s.id, s.folder_name, s.current_revision_id, s.trashed_at,
-      r.name, r.description, r.content_hash, r.licence, r.provenance_json, sr.reviewed_at,
+      r.name, r.number, r.description, r.content_hash, r.licence, r.provenance_json, sr.reviewed_at,
       (SELECT COUNT(*) FROM skill_usages u WHERE u.skill_id = s.id) AS usage_count,
       (SELECT state FROM skill_workspace_operations o WHERE o.skill_id = s.id) AS workspace_state
       FROM skills s LEFT JOIN skill_revisions r ON r.id = s.current_revision_id

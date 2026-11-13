@@ -1,22 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { request, type Overview } from "./api";
+import {
+  AssignSkills,
+  requestPins,
+  reviewIds,
+  type Selection,
+} from "./AssignSkills";
 
-export type RolePreview = {
-  id: string;
-  revision_id: string;
-  number: number;
-  title: string;
-  role_md: string;
-  skills: Array<{ name: string; reviewed: number }>;
-};
-
-export type RoleOption = {
-  id: string;
-  revision_id: string;
-  name: string;
-  title: string;
-};
-
+/**
+ * Adds an agent: its app (the desktop app that runs it) and, optionally, its
+ * skills and room instructions in this room.
+ */
 export function AddAgentForm({
   overview,
   roomId,
@@ -39,12 +33,12 @@ export function AddAgentForm({
   const [newName, setNewName] = useState("");
   const [roomName, setRoomName] = useState("");
   const [idEdited, setIdEdited] = useState(false);
-  const [newRole, setNewRole] = useState("");
-  const [roles, setRoles] = useState<RoleOption[]>([]);
-  const [rolePreview, setRolePreview] = useState<RolePreview | null>(null);
-  const [confirmedRevision, setConfirmedRevision] = useState("");
-  const previewRequest = useRef(0);
   const [addToRoom, setAddToRoom] = useState(true);
+  const [selection, setSelection] = useState<Selection>({
+    instructions: "",
+    pins: [],
+  });
+  const [choosing, setChoosing] = useState(false);
   const [agentError, setAgentError] = useState("");
   const used = new Set(overview.agents.map((agent) => agent.id));
   const suggestId = (name: string) => {
@@ -59,40 +53,10 @@ export function AddAgentForm({
     while (used.has(candidate)) candidate = `${base}-${suffix++}`;
     return candidate;
   };
-  useEffect(() => {
-    request<{ roles: RoleOption[] }>("/api/roles")
-      .then((result) => setRoles(result.roles))
-      .catch(() => setRoles([]));
-  }, []);
-  const pickRole = (id: string) => {
-    const requestId = ++previewRequest.current;
-    setNewRole(id);
-    setRolePreview(null);
-    setConfirmedRevision("");
-    if (id)
-      request<RolePreview>(`/api/roles/${encodeURIComponent(id)}`)
-        .then((detail) => {
-          if (requestId !== previewRequest.current) return;
-          setRolePreview(detail);
-          setConfirmedRevision("");
-        })
-        .catch((error) => {
-          if (requestId === previewRequest.current)
-            setAgentError(errorMessage(error));
-        });
-  };
-  const roleUnreviewed =
-    rolePreview?.skills.filter((skill) => !skill.reviewed) ?? [];
-  const roleReady =
-    !addToRoom ||
-    !newRole ||
-    (rolePreview?.id === newRole &&
-      roleUnreviewed.length === 0 &&
-      confirmedRevision === rolePreview.revision_id);
+  const assigned =
+    addToRoom && (selection.pins.length > 0 || !!selection.instructions.trim());
   const addAgent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!roleReady) return;
-    const role = addToRoom && newRole ? rolePreview : null;
     try {
       await request("/api/agents", {
         method: "POST",
@@ -104,11 +68,12 @@ export function AddAgentForm({
           ...(addToRoom && roomName.trim()
             ? { room_name: roomName.trim() }
             : {}),
-          ...(role
+          ...(assigned
             ? {
-                role: {
-                  role_id: role.id,
-                  role_revision_id: role.revision_id,
+                assignment: {
+                  instructions: selection.instructions,
+                  pins: requestPins(selection.pins),
+                  review: reviewIds(selection.pins),
                   confirmed: true,
                 },
               }
@@ -117,7 +82,9 @@ export function AddAgentForm({
       });
       await onAdded();
     } catch (error) {
-      setAgentError(errorMessage(error));
+      setAgentError(
+        error instanceof Error ? error.message : "Something went wrong",
+      );
     }
   };
   return (
@@ -199,69 +166,38 @@ export function AddAgentForm({
         </label>
       )}
       {addToRoom && (
-        <label>
-          Role in this room
-          <select
-            value={newRole}
-            onChange={(event) => pickRole(event.target.value)}
-          >
-            <option value="">No role</option>
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.title || role.name}
-              </option>
-            ))}
-          </select>
-          <small className="hint">
-            Roles are per room. Change it later with Change role.
-          </small>
-        </label>
-      )}
-      {addToRoom && newRole && (
-        <section className="role-preview">
-          {rolePreview?.id !== newRole ? (
-            <p className="muted">Loading role preview…</p>
+        <section aria-label="Skills in this room">
+          <strong>Skills in this room</strong>
+          {selection.pins.length === 0 ? (
+            <p className="muted">
+              No skills yet. You can add them later with Assign skills.
+            </p>
           ) : (
-            <>
-              <h4>
-                Preview: {rolePreview.title} · rev {rolePreview.number}
-              </h4>
-              <pre>{rolePreview.role_md}</pre>
-              <p className="muted">
-                Skills:{" "}
-                {rolePreview.skills.length === 0
-                  ? "none"
-                  : rolePreview.skills
-                      .map(
-                        (skill) =>
-                          `${skill.name} (${skill.reviewed ? "reviewed" : "not reviewed"})`,
-                      )
-                      .join(", ")}
-              </p>
-              {roleUnreviewed.length > 0 ? (
-                <p className="warning-text">
-                  Review {roleUnreviewed.map((skill) => skill.name).join(", ")}{" "}
-                  in Manage library before assigning this role, or add the agent
-                  with no role.
-                </p>
-              ) : (
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={confirmedRevision === rolePreview.revision_id}
-                    onChange={(event) =>
-                      setConfirmedRevision(
-                        event.target.checked ? rolePreview.revision_id : "",
-                      )
-                    }
-                  />{" "}
-                  I reviewed this role (rev {rolePreview.number}) and want to
-                  assign it
-                </label>
-              )}
-            </>
+            <ol>
+              {selection.pins.map((pin) => (
+                <li key={`${pin.kind}:${pin.name}`}>
+                  {pin.name} ·{" "}
+                  {pin.delivery === "full" ? "full text" : "summary"}
+                </li>
+              ))}
+            </ol>
           )}
+          {selection.instructions.trim() && (
+            <p className="muted">Instructions: {selection.instructions}</p>
+          )}
+          <button type="button" onClick={() => setChoosing(true)}>
+            Choose skills…
+          </button>
         </section>
+      )}
+      {choosing && (
+        <AssignSkills
+          roomId={roomId}
+          agentName={newName.trim() || "new agent"}
+          initial={selection}
+          onChoose={setSelection}
+          onClose={() => setChoosing(false)}
+        />
       )}
       {agentError && (
         <p role="alert" className="warning-text">
@@ -269,7 +205,7 @@ export function AddAgentForm({
         </p>
       )}
       <div className="row">
-        <button type="submit" disabled={!newApp || !roleReady}>
+        <button type="submit" disabled={!newApp}>
           Add agent
         </button>
         <button type="button" onClick={onCancel}>
@@ -277,13 +213,9 @@ export function AddAgentForm({
         </button>
       </div>
       <p className="muted">
-        Next: use the new card's Copy join prompt in a new conversation in that
-        app.
+        Next: use the new card&apos;s Copy join prompt in a new conversation in
+        that app.
       </p>
     </form>
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Something went wrong";
 }

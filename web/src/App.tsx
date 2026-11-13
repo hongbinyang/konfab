@@ -13,9 +13,8 @@ import {
 import Markdown from "react-markdown";
 import { EmojiPicker } from "./EmojiPicker";
 import { Library } from "./Library";
-import { ConvertRoles } from "./ConvertRoles";
-import { RolePicker } from "./RolePicker";
-import { TeamRoles } from "./TeamRoles";
+import { AssignSkills } from "./AssignSkills";
+import { TeamSkills } from "./TeamSkills";
 import { DecisionReferences } from "./DecisionReferences";
 import {
   request,
@@ -70,17 +69,6 @@ const BREAK_CONFIRMATION =
   "Agents will stop and use no more allowance. To bring one back, paste its join prompt into its app. Start the break?";
 const BREAK_HELP =
   "Agents stop and use no allowance until you paste their join prompts";
-const ROLE_PRESETS: Record<string, string> = {
-  Implementer:
-    "Implement the agreed changes. Keep changes small, run the tests, and report what you changed.",
-  Reviewer:
-    "Review proposals and code for bugs, risks, and missing tests. Be specific, and say how confident you are.",
-  Critic:
-    "Challenge assumptions and point out weaknesses or better alternatives. Be constructive and concise.",
-  Researcher:
-    "Gather facts and sources, separate evidence from opinion, and summarize what you find.",
-};
-
 function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
@@ -719,7 +707,7 @@ function Room({
   return (
     <>
       {teamRolesOpen && (
-        <TeamRoles
+        <TeamSkills
           roomId={room.id}
           agents={agents}
           onClose={() => setTeamRolesOpen(false)}
@@ -848,7 +836,7 @@ function Room({
                   className="secondary"
                   onClick={() => setTeamRolesOpen(true)}
                 >
-                  Roles
+                  Team
                 </button>
                 <button
                   type="button"
@@ -2767,10 +2755,8 @@ function Agents({
                     App: {agent.app_name}
                   </span>
                   {member && (
-                    <span className="chip" title="Role in this room">
-                      Role:{" "}
-                      {member.role_pack_label ??
-                        (member.role?.trim() ? "custom text" : "none")}
+                    <span className="chip" title="Skills in this room">
+                      Skills: {member.assignment.label}
                     </span>
                   )}
                 </span>
@@ -2869,7 +2855,6 @@ function Agents({
                   peers={room.agents}
                   roomId={room.room.id}
                   archived={room.room.archived}
-                  rolePickerEnabled={overview.ui?.role_picker ?? false}
                   act={act}
                 />
               ) : (
@@ -2943,7 +2928,6 @@ function AgentDetails({
   peers,
   roomId,
   archived,
-  rolePickerEnabled,
   act,
 }: {
   agent: RoomAgent;
@@ -2951,7 +2935,6 @@ function AgentDetails({
   peers: RoomAgent[];
   roomId: number;
   archived: boolean;
-  rolePickerEnabled: boolean;
   act: Act;
 }) {
   const [clock, setClock] = useState(Date.now);
@@ -2969,78 +2952,8 @@ function AgentDetails({
     : false;
   const [copied, setCopied] = useState(false);
   const { stats } = agent;
-  const [editingRole, setEditingRole] = useState(false);
-  const [choosingRole, setChoosingRole] = useState(false);
-  const [swappingRole, setSwappingRole] = useState(false);
-  const [availableUpdates, setAvailableUpdates] = useState<
-    Array<{ name: string; status: string }>
-  >([]);
-  useEffect(() => {
-    let active = true;
-    void request<{ updates: Array<{ name: string; status: string }> }>(
-      `/api/rooms/${roomId}/members/${encodeURIComponent(agent.id)}/role-updates`,
-    )
-      .then((result) => {
-        if (active)
-          setAvailableUpdates(
-            result.updates.filter(
-              (item) => item.status === "changed" || item.status === "removed",
-            ),
-          );
-      })
-      .catch(() => {
-        if (active) setAvailableUpdates([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [roomId, agent.id, agent.role, agent.role_pack_label]);
-  const [convertingRole, setConvertingRole] = useState(false);
-  const [role, setRole] = useState(agent.role);
-  const [canEdit, setCanEdit] = useState(agent.can_edit);
-  const [rolePacks, setRolePacks] = useState<
-    Array<{
-      id: string;
-      revision_id: string;
-      title: string;
-      library_id: string;
-    }>
-  >([]);
-  const [rolePack, setRolePack] = useState("");
-  const [roleNotes, setRoleNotes] = useState("");
-  const [packPreview, setPackPreview] = useState("");
-  const [packSkills, setPackSkills] = useState<
-    Array<{
-      name: string;
-      reviewed: number;
-      skill_id: string;
-      skill_revision_id: string;
-    }>
-  >([]);
-  const [reviewSkill, setReviewSkill] = useState<null | {
-    skill_id: string;
-    revision_id: string;
-    text: string;
-    files: Array<{ path: string; size: number }>;
-  }>(null);
-  const [assignmentRevision, setAssignmentRevision] = useState<
-    number | undefined
-  >();
-
-  const saveRole = (event: FormEvent) => {
-    event.preventDefault();
-    void act(async () => {
-      await request(`/api/rooms/${roomId}/members/${agent.id}`, {
-        method: "PUT",
-        body: {
-          role,
-          can_edit: canEdit,
-          base_role_revision: assignmentRevision,
-        },
-      });
-      setEditingRole(false);
-    });
-  };
+  const [assigning, setAssigning] = useState(false);
+  const [movingSkills, setMovingSkills] = useState(false);
 
   return (
     <>
@@ -3064,48 +2977,45 @@ function AgentDetails({
         </p>
       )}
       {agent.bridge_outdated && <p className="warning">Reload connector</p>}
-      {availableUpdates.length > 0 && (
-        <p className="muted">
-          {availableUpdates
-            .map(
-              (item) =>
-                `${item.name}: ${item.status === "removed" ? "Removed from source" : "Update available"}`,
-            )
-            .join(" · ")}
-          . Current assignments stay pinned.
+      {agent.assignment.update_available && !archived && (
+        <p>
+          <button
+            type="button"
+            className="chip warning"
+            onClick={() => setAssigning(true)}
+          >
+            Update available
+          </button>{" "}
+          <span className="muted">
+            A newer revision of an assigned skill is saved. This member stays
+            pinned until you update it.
+          </span>
         </p>
       )}
       {!archived && (
         <details>
-          <summary>Role actions</summary>
-          <button type="button" onClick={() => setSwappingRole(true)}>
-            Swap role…
+          <summary>Skill actions</summary>
+          <button type="button" onClick={() => setMovingSkills(true)}>
+            Move skills to another member…
           </button>
         </details>
       )}
-      {swappingRole && (
-        <TeamRoles
+      {movingSkills && (
+        <TeamSkills
           roomId={roomId}
           agents={peers}
           selected={agent.id}
-          onClose={() => setSwappingRole(false)}
+          onClose={() => setMovingSkills(false)}
           onApplied={() => void act(async () => {})}
         />
       )}
-      {choosingRole && (
-        <RolePicker
+      {assigning && (
+        <AssignSkills
           roomId={roomId}
           agentId={agent.id}
           agentName={agent.display_name}
-          onClose={() => setChoosingRole(false)}
+          onClose={() => setAssigning(false)}
           onAssigned={() => void act(async () => {})}
-        />
-      )}
-      {convertingRole && (
-        <ConvertRoles
-          roomId={roomId}
-          agentId={agent.id}
-          onClose={() => setConvertingRole(false)}
         />
       )}
       <CollapsibleSection
@@ -3113,7 +3023,7 @@ function AgentDetails({
         accessibleLabel={`${agent.display_name} details`}
         preferenceKey={`konfab.ui.v1.agent.${agent.id}.details`}
         defaultOpen={false}
-        urgent={editingRole}
+        urgent={false}
       >
         <p className="muted">
           Connected since:{" "}
@@ -3138,242 +3048,35 @@ function AgentDetails({
           ({stats.paused_turns} of {stats.answer_samples} turns had permission
           pauses; pause time excluded)
         </p>
-        {editingRole ? (
-          <form className="stack role-form" onSubmit={saveRole}>
-            <label>
-              Role pack
-              <select
-                value={rolePack}
-                onChange={(event) => {
-                  const id = event.target.value;
-                  setRolePack(id);
-                  setPackPreview("");
-                  setPackSkills([]);
-                  setReviewSkill(null);
-                  if (id)
-                    void request<{
-                      role_md: string;
-                      skills: Array<{
-                        name: string;
-                        reviewed: number;
-                        skill_id: string;
-                        skill_revision_id: string;
-                      }>;
-                    }>(`/api/roles/${encodeURIComponent(id)}`).then(
-                      (detail) => {
-                        setPackPreview(detail.role_md);
-                        setPackSkills(detail.skills);
-                      },
-                    );
-                }}
-              >
-                <option value="">Custom text</option>
-                {rolePacks.map((pack) => (
-                  <option key={pack.id} value={pack.id}>
-                    {pack.title} ·{" "}
-                    {pack.library_id === "builtin" ? "built-in" : "personal"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {rolePack && (
-              <>
-                <section>
-                  <h4>Preview role</h4>
-                  <pre>{packPreview}</pre>
-                  {packSkills.map((skill) => (
-                    <p key={skill.name}>
-                      {skill.name} ·{" "}
-                      {skill.reviewed
-                        ? "Reviewed"
-                        : "Review this skill before assignment"}
-                      {!skill.reviewed && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void act(async () => {
-                              const data = await request<{
-                                content_base64: string;
-                              }>(
-                                `/api/library/skills/${skill.skill_id}/revisions/${skill.skill_revision_id}/files?path=SKILL.md`,
-                              );
-                              const listing = await request<{
-                                files: Array<{ path: string; size: number }>;
-                              }>(
-                                `/api/library/skills/${skill.skill_id}/revisions/${skill.skill_revision_id}`,
-                              );
-                              setReviewSkill({
-                                skill_id: skill.skill_id,
-                                revision_id: skill.skill_revision_id,
-                                files: listing.files,
-                                text: new TextDecoder().decode(
-                                  Uint8Array.from(
-                                    atob(data.content_base64),
-                                    (c) => c.charCodeAt(0),
-                                  ),
-                                ),
-                              });
-                            })
-                          }
-                        >
-                          Review now
-                        </button>
-                      )}
-                    </p>
-                  ))}
-                  {reviewSkill && (
-                    <section>
-                      <h4>Skill revision preview</h4>
-                      <pre>{reviewSkill.text}</pre>
-                      {reviewSkill.files.map((file) => (
-                        <p key={file.path}>
-                          {file.path} ({file.size} bytes){" "}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void act(async () => {
-                                const data = await request<{
-                                  content_base64: string;
-                                }>(
-                                  `/api/library/skills/${reviewSkill.skill_id}/revisions/${reviewSkill.revision_id}/files?path=${encodeURIComponent(file.path)}`,
-                                );
-                                setReviewSkill({
-                                  ...reviewSkill,
-                                  text: new TextDecoder().decode(
-                                    Uint8Array.from(
-                                      atob(data.content_base64),
-                                      (c) => c.charCodeAt(0),
-                                    ),
-                                  ),
-                                });
-                              })
-                            }
-                          >
-                            View file
-                          </button>
-                        </p>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void act(async () => {
-                            await request(
-                              `/api/library/skills/${reviewSkill.skill_id}/reviews/${reviewSkill.revision_id}`,
-                              { method: "PUT" },
-                            );
-                            setPackSkills(
-                              packSkills.map((skill) =>
-                                skill.skill_revision_id ===
-                                reviewSkill.revision_id
-                                  ? { ...skill, reviewed: 1 }
-                                  : skill,
-                              ),
-                            );
-                            setReviewSkill(null);
-                          })
-                        }
-                      >
-                        Mark this revision reviewed
-                      </button>
-                    </section>
-                  )}
-                  <p>Room notes: {roleNotes || "None"}</p>
-                </section>
-                <label>
-                  Room notes
-                  <textarea
-                    value={roleNotes}
-                    onChange={(event) => setRoleNotes(event.target.value)}
-                    maxLength={4000}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void act(async () => {
-                      const pack = rolePacks.find(
-                        (item) => item.id === rolePack,
-                      );
-                      if (!pack) return;
-                      await request(
-                        `/api/rooms/${roomId}/members/${agent.id}/role-pack`,
-                        {
-                          method: "PUT",
-                          body: {
-                            role_id: pack.id,
-                            role_revision_id: pack.revision_id,
-                            notes: roleNotes,
-                            base_revision: assignmentRevision,
-                            can_edit: canEdit,
-                          },
-                        },
-                      );
-                      setEditingRole(false);
-                    })
-                  }
-                >
-                  Assign role pack
-                </button>
-              </>
-            )}
-            <label>
-              Start from
-              <select
-                defaultValue=""
-                onChange={(event) => {
-                  const preset = ROLE_PRESETS[event.target.value];
-                  if (preset) setRole(preset);
-                }}
-              >
-                <option value="">Choose a preset</option>
-                {Object.keys(ROLE_PRESETS).map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Role
-              <textarea
-                value={role}
-                rows={4}
-                placeholder="What this agent should do in this room"
-                onChange={(event) => setRole(event.target.value)}
-              />
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={canEdit}
-                onChange={(event) => setCanEdit(event.target.checked)}
-              />
-              Can edit files and repos
-            </label>
-            <div className="row">
-              {!rolePack && <button type="submit">Save role</button>}
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setEditingRole(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        ) : (
-          <>
-            <p className="role">
-              {agent.role ? (
-                agent.role
-              ) : (
-                <span className="muted">No role set</span>
-              )}
-            </p>
-            {agent.can_edit && (
-              <p className="muted">Can edit files and repos</p>
-            )}
-          </>
+        <p className="role">
+          {agent.assignment.skill_count === 0 &&
+          !agent.assignment.instructions.trim() ? (
+            <span className="muted">No skills assigned</span>
+          ) : (
+            agent.assignment.label
+          )}
+        </p>
+        {agent.assignment.instructions.trim() && (
+          <p className="muted">
+            Room instructions: {agent.assignment.instructions}
+          </p>
+        )}
+        {!archived && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={agent.can_edit}
+              onChange={(event) =>
+                void act(() =>
+                  request(
+                    `/api/rooms/${roomId}/members/${encodeURIComponent(agent.id)}`,
+                    { method: "PUT", body: { can_edit: event.target.checked } },
+                  ),
+                )
+              }
+            />{" "}
+            May edit files and repos
+          </label>
         )}
         <details>
           <summary>Activity</summary>
@@ -3394,94 +3097,13 @@ function AgentDetails({
         </details>
       </CollapsibleSection>
       <div className="agent-actions">
-        {!archived && !agent.role_pack_label && !!agent.role.trim() && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setConvertingRole(true)}
-          >
-            Save as role pack
-          </button>
-        )}
-        {!archived && agent.role_can_revert && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() =>
-              void act(async () => {
-                const current = await request<{
-                  assignment: { revision: number; can_revert: boolean };
-                }>(`/api/rooms/${roomId}/members/${agent.id}/role-preview`);
-                if (!current.assignment.can_revert)
-                  throw new Error(
-                    "No unchanged converted assignment is available to revert",
-                  );
-                if (!window.confirm("Restore the original custom role text?"))
-                  return;
-                await request(
-                  `/api/rooms/${roomId}/members/${agent.id}/revert-conversion`,
-                  {
-                    method: "POST",
-                    body: { base_revision: current.assignment.revision },
-                  },
-                );
-              })
-            }
-          >
-            Revert to custom text
-          </button>
-        )}
-        {!archived && rolePickerEnabled && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setChoosingRole(true)}
-          >
-            Change role
-          </button>
-        )}
         {!archived && (
           <button
             type="button"
             className="secondary"
-            onClick={() => {
-              setRole(agent.role);
-              setCanEdit(agent.can_edit);
-              setEditingRole(true);
-              void request<{
-                roles: Array<{
-                  id: string;
-                  revision_id: string;
-                  title: string;
-                  library_id: string;
-                }>;
-              }>("/api/roles").then((result) => setRolePacks(result.roles));
-              void request<{
-                assignment: null | {
-                  role_id?: string;
-                  notes?: string;
-                  revision: number;
-                };
-              }>(`/api/rooms/${roomId}/members/${agent.id}/role-preview`).then(
-                (result) => {
-                  setRolePack(result.assignment?.role_id ?? "");
-                  setRoleNotes(result.assignment?.notes ?? "");
-                  setAssignmentRevision(result.assignment?.revision);
-                  if (result.assignment?.role_id)
-                    void request<{
-                      role_md: string;
-                      skills: typeof packSkills;
-                    }>(
-                      `/api/roles/${encodeURIComponent(result.assignment.role_id)}`,
-                    ).then((detail) => {
-                      setPackPreview(detail.role_md);
-                      setPackSkills(detail.skills);
-                    });
-                },
-              );
-            }}
+            onClick={() => setAssigning(true)}
           >
-            Edit role
+            Assign skills
           </button>
         )}
         {!archived &&

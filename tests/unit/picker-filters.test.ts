@@ -7,11 +7,14 @@ import {
   togglePickerFilter,
 } from "../../web/src/picker-filters.js";
 
-describe("role-picker filters", () => {
+describe("skill picker filters", () => {
   it("combines choices as a union and restores All when the last is removed", () => {
-    const both = togglePickerFilter(togglePickerFilter([], "roles"), "public");
-    expect(both).toEqual(["roles", "public"]);
-    expect(matchesPickerFilter(both, "roles")).toBe(true);
+    const both = togglePickerFilter(
+      togglePickerFilter([], "builtin"),
+      "public",
+    );
+    expect(both).toEqual(["builtin", "public"]);
+    expect(matchesPickerFilter(both, "builtin")).toBe(true);
     expect(matchesPickerFilter(both, "public")).toBe(true);
     expect(matchesPickerFilter(both, "project")).toBe(false);
     expect(togglePickerFilter(both, "all")).toEqual([]);
@@ -26,16 +29,14 @@ describe("role-picker filters", () => {
   });
 });
 
-describe("role-picker guidance", () => {
+describe("skill picker guidance", () => {
   it("uses supplied library paths and names enabled sources", () => {
     const locations = {
-      roles: "/custom/roles",
       skills: "/custom/skills",
       project: "/work/project/.konfab/skills",
       sources: ["example/skills", "other/plugins"],
     };
-    expect(pickerHint("roles", locations)).toContain("/custom/roles");
-    expect(pickerHint("roles", locations)).toContain("Built-in");
+    expect(pickerHint("builtin", locations)).toContain("ship with Konfab");
     expect(pickerHint("personal", locations)).toContain("/custom/skills");
     expect(pickerHint("project", locations)).toContain(
       "/work/project/.konfab/skills",

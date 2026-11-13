@@ -194,9 +194,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         request.url,
       );
     if (error instanceof SkillError) {
-      return reply
-        .code(error.statusCode)
-        .send({ code: error.code, message: error.message });
+      const pin = (error as SkillError & { pin?: number }).pin;
+      return reply.code(error.statusCode).send({
+        code: error.code,
+        message: error.message,
+        ...(pin !== undefined ? { pin } : {}),
+      });
     }
     if (error instanceof KonfabError) {
       return reply
@@ -1216,12 +1219,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       return service.assignmentSize(body.instructions, body.pins);
     },
   );
-  app.put("/api/rooms/:id/members/:agentId/assignment", async (request) => {
-    const params = memberParams.parse(request.params);
-    const body = assignmentBody.parse(request.body);
-    // Fetch and verify public skills before the transaction; nothing is stored yet.
+  /**
+   * Fetches and verifies the public skills in a selection before any
+   * transaction (nothing is stored), and returns a function that, inside the
+   * caller's transaction, copies them locally and returns the pins. Each
+   * public skill's new revision is added to `review`: confirming the
+   * assignment reviews it.
+   */
+  const preparePins = async (
+    roomId: number,
+    pins: z.infer<typeof pinBody>[],
+  ) => {
     const packs = await Promise.all(
-      body.pins.map((pin) =>
+      pins.map((pin) =>
         "public" in pin
           ? sourceService().live.packageFiles(
               pin.public.source_id,
@@ -1232,6 +1242,37 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           : null,
       ),
     );
+    return (review: string[]) =>
+      pins.map((pin, index) => {
+        if (!("public" in pin)) return pin;
+        const { libraryId } = skillScope(pin.public.scope, roomId, true);
+        if (!libraryId)
+          throw new SkillError("unavailable", 404, "Skill library unavailable");
+        let imported;
+        try {
+          imported = skillService().importPublicForAssignment(
+            libraryId,
+            packs[index]!,
+            { keep: pin.public.keep_local, name: pin.public.copy_name },
+          );
+        } catch (error) {
+          // Tell the page which selected skill needs a choice.
+          if (error instanceof SkillError) Object.assign(error, { pin: index });
+          throw error;
+        }
+        review.push(imported.revision_id);
+        return {
+          skill_id: imported.skill_id,
+          revision_id: imported.revision_id,
+          delivery: pin.delivery,
+        };
+      });
+  };
+
+  app.put("/api/rooms/:id/members/:agentId/assignment", async (request) => {
+    const params = memberParams.parse(request.params);
+    const body = assignmentBody.parse(request.body);
+    const resolve = await preparePins(params.id, body.pins);
     service.setAssignment(
       params.id,
       params.agentId,
@@ -1241,34 +1282,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         pins: [],
         review: body.review,
       },
-      () =>
-        body.pins.map((pin, index) => {
-          if (!("public" in pin)) return pin;
-          const { libraryId } = skillScope(pin.public.scope, params.id, true);
-          if (!libraryId)
-            throw new SkillError(
-              "unavailable",
-              404,
-              "Skill library unavailable",
-            );
-          const imported = skillService().importPublicForAssignment(
-            libraryId,
-            packs[index]!,
-            {
-              keep: pin.public.keep_local,
-              name: pin.public.copy_name,
-            },
-          );
-          // Confirming the assignment reviews exactly the revision it adds.
-          body.review.push(imported.revision_id);
-          return {
-            skill_id: imported.skill_id,
-            revision_id: imported.revision_id,
-            delivery: pin.delivery,
-          };
-        }),
+      () => resolve(body.review),
     );
-    skillService().finishWorkspaces();
+    if (body.pins.some((pin) => "public" in pin))
+      skillService().finishWorkspaces();
     return service.memberAssignment(params.id, params.agentId);
   });
 
@@ -1359,15 +1376,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         assignment: z
           .object({
             instructions: z.string().max(6000).default(""),
-            pins: z
-              .array(
-                z.object({
-                  skill_id: z.string().min(1).max(200),
-                  revision_id: z.string().uuid(),
-                  delivery: z.enum(["full", "summary"]).default("full"),
-                }),
-              )
-              .max(50),
+            pins: z.array(pinBody).max(50),
             review: z.array(z.string().uuid()).max(50).default([]),
             confirmed: z.literal(true, {
               message: "Preview the skills and confirm them before assigning.",
@@ -1377,6 +1386,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       })
       .parse(request.body);
     const assignment = body.assignment;
+    const resolve =
+      assignment && body.room_id
+        ? await preparePins(body.room_id, assignment.pins)
+        : null;
     service.addAppAgent(
       body.app_id,
       body.id,
@@ -1386,12 +1399,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         ? () =>
             service.applyAssignment(body.room_id as number, body.id, {
               instructions: assignment.instructions,
-              pins: assignment.pins,
+              pins: resolve ? resolve(assignment.review) : [],
               review: assignment.review,
             })
         : undefined,
       body.room_name,
     );
+    if (assignment?.pins.some((pin) => "public" in pin))
+      skillService().finishWorkspaces();
     return reply.code(201).send({ ok: true });
   });
   app.patch("/api/agents/:agentId", async (request) => {

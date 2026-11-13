@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Markdown from "react-markdown";
 import { request } from "./api";
-import { ConvertRoles } from "./ConvertRoles";
 import { NameField } from "./NameField";
-import { suggestName, validName } from "./name-validation";
+import { validName } from "./name-validation";
 
 type Skill = {
   id: string;
@@ -39,10 +38,11 @@ export function Library({
   roomId: number | null;
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [scope, setScope] = useState<"personal" | "project">("personal");
+  const [scope, setScope] = useState<"personal" | "project" | "builtin">(
+    "personal",
+  );
   const [publicTab, setPublicTab] = useState(false);
-  const [rolesTab, setRolesTab] = useState(false);
-  const [roleDirty, setRoleDirty] = useState(false);
+  const builtin = scope === "builtin";
   const [trash, setTrash] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [untracked, setUntracked] = useState<string[]>([]);
@@ -62,8 +62,9 @@ export function Library({
   const [body, setBody] = useState("");
   const [loadedBody, setLoadedBody] = useState("");
   const [error, setError] = useState("");
+  // Built-in skills are read-only; copies of them go to the personal library.
   const context = {
-    scope,
+    scope: scope === "builtin" ? ("personal" as const) : scope,
     ...(scope === "project" && roomId ? { room_id: roomId } : {}),
   };
   const refresh = useCallback(async () => {
@@ -75,7 +76,7 @@ export function Library({
         untracked: string[];
         untracked_details?: { folder: string; diagnostic: string | null }[];
         unavailable?: boolean;
-      }>(`/api/library?${params}`);
+      }>(builtin ? "/api/library/builtin" : `/api/library?${params}`);
       setSkills(result.skills);
       setUntracked(result.untracked);
       setUntrackedDetails(result.untracked_details ?? []);
@@ -87,23 +88,23 @@ export function Library({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Library unavailable");
     }
-  }, [scope, trash, roomId]);
+  }, [scope, trash, roomId, builtin]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
   const dirty = !!selected && body !== loadedBody;
   useEffect(() => {
-    onDirtyChange(dirty || roleDirty);
-  }, [dirty, roleDirty, onDirtyChange]);
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (dirty || roleDirty) event.preventDefault();
+      if (dirty) event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, roleDirty]);
+  }, [dirty]);
   const canLeave = () =>
-    (!dirty && !roleDirty) || window.confirm("Discard unsaved editor changes?");
+    !dirty || window.confirm("Discard unsaved editor changes?");
   async function open(id: string) {
     const detail = await request<Detail>(`/api/library/skills/${id}`);
     const history = await request<Revision[]>(
@@ -180,26 +181,12 @@ export function Library({
   return (
     <div className="library">
       <h1>Skill Library</h1>
-      <div className="library-navigation" aria-label="Library sections">
-        <button
-          aria-pressed={!rolesTab}
-          onClick={() => {
-            if (canLeave()) setRolesTab(false);
-          }}
-        >
-          Skills
-        </button>
-        <button
-          aria-pressed={rolesTab}
-          onClick={() => {
-            if (canLeave()) setRolesTab(true);
-          }}
-        >
-          Roles
-        </button>
-      </div>
-      {rolesTab && <RolesView onDirtyChange={setRoleDirty} />}
-      <div hidden={rolesTab}>
+      <p className="muted">
+        Skills are what you assign to agents: each one can describe
+        responsibilities, a procedure, or both. Assign them from an agent&apos;s
+        card with Assign skills.
+      </p>
+      <div>
         {error && (
           <p className="banner error" role="alert">
             {error}
@@ -231,6 +218,18 @@ export function Library({
             Project
           </button>
           <button
+            aria-pressed={!publicTab && builtin}
+            onClick={() => {
+              if (!canLeave()) return;
+              setPublicTab(false);
+              setTrash(false);
+              setScope("builtin");
+              setSelected(null);
+            }}
+          >
+            Built-in
+          </button>
+          <button
             aria-pressed={!publicTab && trash}
             onClick={() => {
               if (!canLeave()) return;
@@ -257,7 +256,9 @@ export function Library({
           <p>
             {scope === "personal"
               ? "Personal library"
-              : "Project library for the selected room"}
+              : builtin
+                ? "Built-in skills ship with Konfab and are read-only. Duplicate one to make an editable copy in your library."
+                : "Project library for the selected room"}
           </p>
           <input
             aria-label="Search skills"
@@ -327,7 +328,7 @@ export function Library({
                 )}
               </p>
             ))}
-          {!trash && (
+          {!trash && !builtin && (
             <form onSubmit={create} className="stack">
               <h2>New skill</h2>
               <NameField
@@ -387,6 +388,7 @@ export function Library({
                     <textarea
                       rows={16}
                       value={body}
+                      readOnly={builtin}
                       onChange={(e) => setBody(e.target.value)}
                     />
                   </label>
@@ -452,7 +454,7 @@ export function Library({
                       </li>
                     ))}
                   </ul>
-                  {!trash && (
+                  {!trash && !builtin && (
                     <div>
                       <label>
                         File path
@@ -507,7 +509,9 @@ export function Library({
                       </button>
                     </div>
                   )}
-                  {!trash && <button onClick={save}>Save revision</button>}
+                  {!trash && !builtin && (
+                    <button onClick={save}>Save revision</button>
+                  )}
                 </>
               )}
               {!trash && (
@@ -518,12 +522,15 @@ export function Library({
                       skill.
                     </p>
                   )}
-                  <NameField
-                    label="New name"
-                    value={renameTo}
-                    onChange={setRenameTo}
-                  />
+                  {!builtin && (
+                    <NameField
+                      label="New name"
+                      value={renameTo}
+                      onChange={setRenameTo}
+                    />
+                  )}
                   <button
+                    hidden={builtin}
                     disabled={body !== loadedBody || !validName(renameTo)}
                     onClick={() =>
                       void run(async () => {
@@ -575,6 +582,7 @@ export function Library({
                     Duplicate revision
                   </button>
                   <button
+                    hidden={builtin}
                     onClick={() =>
                       void run(async () => {
                         await request(
@@ -588,6 +596,7 @@ export function Library({
                     Mark saved revision reviewed
                   </button>
                   <button
+                    hidden={builtin}
                     disabled={body !== loadedBody}
                     onClick={() =>
                       void run(async () => {
@@ -629,6 +638,12 @@ export function Library({
                 >
                   Restore
                 </button>
+              )}
+              {!trash && (
+                <UsedBy
+                  skillId={selected.id}
+                  currentRevision={selected.current_revision_id}
+                />
               )}
               <h3>History</h3>
               <ul>
@@ -707,534 +722,6 @@ export function Library({
         </div>
       </div>
     </div>
-  );
-}
-
-function RolesView({
-  onDirtyChange,
-}: {
-  onDirtyChange: (dirty: boolean) => void;
-}) {
-  const [roles, setRoles] = useState<
-    Array<{
-      id: string;
-      title: string;
-      description: string;
-      library_id: string;
-      revision_id: string;
-      number: number;
-    }>
-  >([]);
-  const [selected, setSelected] = useState<null | {
-    id: string;
-    title: string;
-    library_id: string;
-    revision_id: string;
-    role_md: string;
-    workspace_state: string | null;
-    is_draft: boolean | null;
-    root_path: string;
-    folder_name: string;
-    skills: Array<{
-      skill_id: string;
-      skill_revision_id: string;
-      name: string;
-      reviewed: number;
-    }>;
-  }>(null);
-  const [name, setName] = useState("");
-  const [availableSkills, setAvailableSkills] = useState<
-    Array<{
-      id: string;
-      name: string;
-      current_revision_id: string;
-      reviewed_at: number | null;
-    }>
-  >([]);
-  const [skillChoice, setSkillChoice] = useState("");
-  const [showTrash, setShowTrash] = useState(false);
-  const [converting, setConverting] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [nameEdited, setNameEdited] = useState(false);
-  const [roleCopyName, setRoleCopyName] = useState("");
-  const [newDescription, setNewDescription] = useState("");
-  const [history, setHistory] = useState<
-    Array<{ id: string; number: number; title: string }>
-  >([]);
-  const [externalDraft, setExternalDraft] = useState<null | {
-    revision_id: string;
-    draft_hash: string;
-    manifest: string;
-  }>(null);
-  const [loadedRole, setLoadedRole] = useState("");
-  const roleValue = (item: NonNullable<typeof selected>) =>
-    JSON.stringify([
-      item.role_md,
-      item.skills.map((skill) => [skill.skill_id, skill.skill_revision_id]),
-    ]);
-  const [error, setError] = useState("");
-  const load = useCallback(
-    async () =>
-      setRoles(
-        (
-          await request<{ roles: typeof roles }>(
-            `/api/roles?trash=${showTrash}`,
-          )
-        ).roles,
-      ),
-    [showTrash],
-  );
-  useEffect(() => {
-    void load().catch((e) =>
-      setError(e instanceof Error ? e.message : "Roles unavailable"),
-    );
-    void request<{ skills: typeof availableSkills }>(
-      "/api/library?scope=personal",
-    ).then((result) => setAvailableSkills(result.skills));
-  }, [load]);
-  async function open(id: string, force = false) {
-    if (
-      !force &&
-      selected &&
-      roleValue(selected) !== loadedRole &&
-      !window.confirm("Discard unsaved role edits?")
-    )
-      return;
-    const detail = await request<NonNullable<typeof selected>>(
-      `/api/roles/${encodeURIComponent(id)}`,
-    );
-    setSelected(detail);
-    setLoadedRole(roleValue(detail));
-    setHistory(await request(`/api/roles/${encodeURIComponent(id)}/revisions`));
-    setExternalDraft(null);
-  }
-  useEffect(() => {
-    onDirtyChange(!!selected && roleValue(selected) !== loadedRole);
-    return () => onDirtyChange(false);
-  }, [selected, loadedRole, onDirtyChange]);
-  async function act(action: () => Promise<void>) {
-    try {
-      await action();
-      setError("");
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Operation failed");
-    }
-  }
-  return (
-    <section>
-      <h2>Roles</h2>
-      <button onClick={() => setConverting(true)}>
-        Convert all custom roles
-      </button>
-      {converting && (
-        <ConvertRoles
-          onClose={() => {
-            setConverting(false);
-            void load();
-          }}
-        />
-      )}
-      <button
-        onClick={() => {
-          setShowTrash(!showTrash);
-          setSelected(null);
-        }}
-      >
-        {showTrash ? "Active roles" : "Role Trash"}
-      </button>
-      {error && <p className="banner error">{error}</p>}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void act(async () => {
-            const result = await request<{ id: string }>("/api/roles", {
-              method: "POST",
-              body: { name, title: newTitle, description: newDescription },
-            });
-            setName("");
-            setNewTitle("");
-            setNameEdited(false);
-            setNewDescription("");
-            await open(result.id);
-          });
-        }}
-      >
-        <h3>New role</h3>
-        <NameField
-          label="Name"
-          value={name}
-          onChange={(value) => {
-            setName(value);
-            setNameEdited(true);
-          }}
-          required
-        />
-        <label>
-          Title
-          <input
-            value={newTitle}
-            onChange={(event) => {
-              setNewTitle(event.target.value);
-              if (!nameEdited) setName(suggestName(event.target.value));
-            }}
-            required
-          />
-        </label>
-        <label>
-          Description
-          <input
-            value={newDescription}
-            onChange={(event) => setNewDescription(event.target.value)}
-            required
-          />
-        </label>
-        <button disabled={!validName(name)}>Create role</button>
-      </form>
-      {roles.map((role) => (
-        <article key={role.id}>
-          <button
-            disabled={showTrash}
-            onClick={() => void act(() => open(role.id))}
-          >
-            {role.title}
-          </button>{" "}
-          · {role.library_id === "builtin" ? "Built-in · read-only" : "Mine"} ·
-          revision {role.number}
-          <p>{role.description}</p>
-          {showTrash && (
-            <button
-              onClick={() =>
-                void act(async () => {
-                  await request(
-                    `/api/roles/${encodeURIComponent(role.id)}/restore`,
-                    {
-                      method: "POST",
-                      body: { base_revision: role.revision_id },
-                    },
-                  );
-                })
-              }
-            >
-              Restore
-            </button>
-          )}
-        </article>
-      ))}
-      {selected && (
-        <section>
-          <h3>{selected.title}</h3>
-          {selected.library_id === "personal" && (
-            <p>
-              Working folder:{" "}
-              <code>
-                {selected.root_path}/{selected.folder_name}
-              </code>{" "}
-              <button
-                onClick={() =>
-                  void navigator.clipboard.writeText(
-                    `${selected.root_path}/${selected.folder_name}`,
-                  )
-                }
-              >
-                Copy path
-              </button>
-            </p>
-          )}
-          {selected.workspace_state === "pending" && (
-            <p className="banner error">
-              The role folder needs recovery. Your files have been preserved.
-            </p>
-          )}
-          {selected.is_draft && (
-            <p className="banner error">
-              The working folder has changes. Review them before saving.
-            </p>
-          )}
-          {selected.is_draft && (
-            <button
-              onClick={() =>
-                void act(async () => {
-                  setExternalDraft(
-                    await request(
-                      `/api/roles/${encodeURIComponent(selected.id)}/draft`,
-                    ),
-                  );
-                })
-              }
-            >
-              Review working draft
-            </button>
-          )}
-          {externalDraft && (
-            <section>
-              <h4>Working draft</h4>
-              <pre>{externalDraft.manifest}</pre>
-              <button
-                onClick={() =>
-                  void act(async () => {
-                    await request(
-                      `/api/roles/${encodeURIComponent(selected.id)}/draft/save`,
-                      {
-                        method: "POST",
-                        body: {
-                          base_revision: externalDraft.revision_id,
-                          draft_hash: externalDraft.draft_hash,
-                          pins: selected.skills.map((skill) => ({
-                            skill_id: skill.skill_id,
-                            revision_id: skill.skill_revision_id,
-                          })),
-                        },
-                      },
-                    );
-                    await open(selected.id, true);
-                  })
-                }
-              >
-                Save working draft
-              </button>
-            </section>
-          )}
-          {selected.library_id === "personal" ? (
-            <textarea
-              rows={15}
-              value={selected.role_md}
-              onChange={(e) =>
-                setSelected({ ...selected, role_md: e.target.value })
-              }
-            />
-          ) : (
-            <pre>{selected.role_md}</pre>
-          )}
-          <p>
-            Skills:{" "}
-            {selected.skills.length
-              ? selected.skills.map((s) => s.name).join(", ")
-              : "None"}
-          </p>
-          {selected.library_id === "personal" && (
-            <div>
-              <select
-                value={skillChoice}
-                onChange={(event) => setSkillChoice(event.target.value)}
-                aria-label="Add a skill revision"
-              >
-                <option value="">Choose a skill revision</option>
-                {availableSkills.map((skill) => (
-                  <option key={skill.id} value={skill.id}>
-                    {skill.name} ·{" "}
-                    {skill.reviewed_at ? "Reviewed" : "Not reviewed"}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  const skill = availableSkills.find(
-                    (item) => item.id === skillChoice,
-                  );
-                  if (
-                    skill &&
-                    !selected.skills.some((item) => item.skill_id === skill.id)
-                  )
-                    setSelected({
-                      ...selected,
-                      skills: [
-                        ...selected.skills,
-                        {
-                          skill_id: skill.id,
-                          skill_revision_id: skill.current_revision_id,
-                          name: skill.name,
-                          reviewed: skill.reviewed_at ? 1 : 0,
-                        },
-                      ],
-                    });
-                }}
-              >
-                Add skill
-              </button>
-              {selected.skills.map((skill, index) => (
-                <p key={skill.skill_id}>
-                  {skill.name} ·{" "}
-                  {skill.reviewed ? "Reviewed" : "Review before assignment"}{" "}
-                  <button
-                    disabled={index === 0}
-                    onClick={() => {
-                      const pins = [...selected.skills];
-                      [pins[index - 1], pins[index]] = [
-                        pins[index]!,
-                        pins[index - 1]!,
-                      ];
-                      setSelected({ ...selected, skills: pins });
-                    }}
-                  >
-                    Move up
-                  </button>{" "}
-                  <button
-                    disabled={index === selected.skills.length - 1}
-                    onClick={() => {
-                      const pins = [...selected.skills];
-                      [pins[index], pins[index + 1]] = [
-                        pins[index + 1]!,
-                        pins[index]!,
-                      ];
-                      setSelected({ ...selected, skills: pins });
-                    }}
-                  >
-                    Move down
-                  </button>{" "}
-                  {availableSkills.some(
-                    (item) =>
-                      item.id === skill.skill_id &&
-                      item.current_revision_id !== skill.skill_revision_id,
-                  ) && (
-                    <button
-                      onClick={() => {
-                        const latest = availableSkills.find(
-                          (item) => item.id === skill.skill_id,
-                        )!;
-                        setSelected({
-                          ...selected,
-                          skills: selected.skills.map((item) =>
-                            item.skill_id === skill.skill_id
-                              ? {
-                                  ...item,
-                                  skill_revision_id: latest.current_revision_id,
-                                  reviewed: latest.reviewed_at ? 1 : 0,
-                                }
-                              : item,
-                          ),
-                        });
-                      }}
-                    >
-                      Update skill revision
-                    </button>
-                  )}{" "}
-                  <button
-                    onClick={() =>
-                      setSelected({
-                        ...selected,
-                        skills: selected.skills.filter(
-                          (item) => item.skill_id !== skill.skill_id,
-                        ),
-                      })
-                    }
-                  >
-                    Remove
-                  </button>
-                </p>
-              ))}
-            </div>
-          )}
-          {selected.library_id === "personal" && (
-            <section>
-              <h4>History</h4>
-              {history.map((item) => (
-                <p key={item.id}>
-                  Revision {item.number}: {item.title}{" "}
-                  <button
-                    disabled={item.id === selected.revision_id}
-                    onClick={() =>
-                      void act(async () => {
-                        if (
-                          roleValue(selected) !== loadedRole &&
-                          !window.confirm("Discard unsaved role edits?")
-                        )
-                          return;
-                        await request(
-                          `/api/roles/${encodeURIComponent(selected.id)}/revisions/${item.id}/restore`,
-                          {
-                            method: "POST",
-                            body: { base_revision: selected.revision_id },
-                          },
-                        );
-                        await open(selected.id, true);
-                      })
-                    }
-                  >
-                    Restore as new revision
-                  </button>
-                </p>
-              ))}
-            </section>
-          )}
-          {selected.library_id === "personal" && (
-            <button
-              onClick={() =>
-                void act(async () => {
-                  await request(
-                    `/api/roles/${encodeURIComponent(selected.id)}/save`,
-                    {
-                      method: "POST",
-                      body: {
-                        base_revision: selected.revision_id,
-                        manifest: selected.role_md,
-                        pins: selected.skills.map((s) => ({
-                          skill_id: s.skill_id,
-                          revision_id: s.skill_revision_id,
-                        })),
-                      },
-                    },
-                  );
-                  await open(selected.id, true);
-                })
-              }
-            >
-              Save revision
-            </button>
-          )}
-          {selected.library_id === "personal" && (
-            <button
-              onClick={() =>
-                void act(async () => {
-                  if (
-                    roleValue(selected) !== loadedRole &&
-                    !window.confirm("Discard unsaved role edits?")
-                  )
-                    return;
-                  await request(
-                    `/api/roles/${encodeURIComponent(selected.id)}/trash`,
-                    {
-                      method: "POST",
-                      body: { base_revision: selected.revision_id },
-                    },
-                  );
-                  setSelected(null);
-                })
-              }
-            >
-              Move to Trash
-            </button>
-          )}
-          <NameField
-            label="Copy name"
-            value={roleCopyName}
-            onChange={setRoleCopyName}
-          />
-          <button
-            disabled={!validName(roleCopyName)}
-            onClick={() =>
-              void act(async () => {
-                if (
-                  roleValue(selected) !== loadedRole &&
-                  !window.confirm(
-                    "Duplicate the saved revision and discard unsaved edits?",
-                  )
-                )
-                  return;
-                const result = await request<{ id: string }>(
-                  `/api/roles/${encodeURIComponent(selected.id)}/duplicate`,
-                  { method: "POST", body: { name: roleCopyName } },
-                );
-                setRoleCopyName("");
-                await open(result.id, true);
-              })
-            }
-          >
-            Duplicate role
-          </button>
-        </section>
-      )}
-    </section>
   );
 }
 
@@ -1451,6 +938,132 @@ function PublicSources() {
           <button>Add source</button>
         </form>
       </details>
+    </section>
+  );
+}
+
+type Usage = {
+  room_id: number;
+  room_name: string;
+  agent_id: string;
+  member_name: string;
+  revision_id: string;
+  number: number;
+  base_revision: number;
+  archived: number;
+};
+
+/**
+ * Who uses a skill, across rooms, and the update to its current revision for
+ * the members the lead selects. Everyone else stays pinned.
+ */
+function UsedBy({
+  skillId,
+  currentRevision,
+}: {
+  skillId: string;
+  currentRevision: string;
+}) {
+  const [usages, setUsages] = useState<Usage[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const key = (usage: Usage) => `${usage.room_id}:${usage.agent_id}`;
+  const load = useCallback(async () => {
+    try {
+      const result = await request<{ usages: Usage[] }>(
+        `/api/library/skills/${encodeURIComponent(skillId)}/usages`,
+      );
+      setUsages(result.usages);
+      setPicked([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Usage unavailable");
+    }
+  }, [skillId]);
+  useEffect(() => {
+    void load();
+  }, [load, currentRevision]);
+  const outdated = usages.filter(
+    (usage) => usage.revision_id !== currentRevision && !usage.archived,
+  );
+  return (
+    <section aria-label="Used by">
+      <h3>Used by</h3>
+      {error && <p role="alert">{error}</p>}
+      {usages.length === 0 ? (
+        <p className="muted">Not assigned to anyone.</p>
+      ) : (
+        <ul>
+          {usages.map((usage) => {
+            const current = usage.revision_id === currentRevision;
+            return (
+              <li key={key(usage)}>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    disabled={current || !!usage.archived || busy}
+                    checked={picked.includes(key(usage))}
+                    onChange={(event) =>
+                      setPicked((list) =>
+                        event.target.checked
+                          ? [...list, key(usage)]
+                          : list.filter((item) => item !== key(usage)),
+                      )
+                    }
+                  />{" "}
+                  {usage.room_name} · {usage.member_name} · rev {usage.number}
+                  {current
+                    ? " (current)"
+                    : usage.archived
+                      ? " · archived room, not updated"
+                      : ""}
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {outdated.length > 0 && (
+        <button
+          type="button"
+          disabled={!picked.length || busy}
+          onClick={() => {
+            if (
+              !window.confirm(
+                `Review the current revision and update ${picked.length} member${picked.length === 1 ? "" : "s"} to it? Others stay pinned. The change applies from each agent's next turn.`,
+              )
+            )
+              return;
+            setBusy(true);
+            setError("");
+            void request(
+              `/api/library/skills/${encodeURIComponent(skillId)}/update-assignments`,
+              {
+                method: "POST",
+                body: {
+                  revision_id: currentRevision,
+                  targets: usages
+                    .filter((usage) => picked.includes(key(usage)))
+                    .map((usage) => ({
+                      room_id: usage.room_id,
+                      agent_id: usage.agent_id,
+                      base_revision: usage.base_revision,
+                    })),
+                  review: true,
+                },
+              },
+            )
+              .then(load)
+              .catch((e: unknown) =>
+                setError(e instanceof Error ? e.message : "Update failed"),
+              )
+              .finally(() => setBusy(false));
+          }}
+        >
+          Review and update {picked.length} member
+          {picked.length === 1 ? "" : "s"}
+        </button>
+      )}
     </section>
   );
 }
