@@ -1,6 +1,6 @@
 # Developer handoff
 
-This guide orients a newcomer to the repository as of commit `5e564ea` (busy-agent check-in intervals). Start with the [README](../README.md) and [user guide](user-guide.md) for installation and normal use, then read [AGENTS.md](../AGENTS.md) before changing the repository. Room instructions and the lead's current decisions take precedence. The baseline [architecture](../DESIGN.md) and [requirements](../REQUIREMENTS.md) contain historical material; feature design notes are indexed [here](design/README.md). Code and tests determine the behavior of a specific checkout.
+This guide orients a newcomer to the repository as of the skill-based assignment release (schema v33, 2026-11-13). Start with the [README](../README.md) and [user guide](user-guide.md) for installation and normal use, then read [AGENTS.md](../AGENTS.md) before changing the repository. Room instructions and the lead's current decisions take precedence. The [architecture](../DESIGN.md) describes the current system and the [requirements](../REQUIREMENTS.md) its scope; feature design notes are indexed [here](design/README.md). Code and tests determine the behavior of a specific checkout.
 
 ## Set up and work safely
 

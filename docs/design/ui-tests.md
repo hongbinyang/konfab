@@ -25,8 +25,9 @@ Server rules, the API and the bridge were well covered, but the page (`web/src`)
 
 ## First tests
 
-- `tests/web/add-agent-form.test.tsx`: ID suggestion, full apps, add without a role, preview and confirmation of the exact revision, confirmation cleared on role change, late preview ignored, unreviewed skills blocked, server errors and cancel.
-- `tests/web/team-roles.test.tsx`: swap two roles and apply with base revisions; failed apply keeps the dialog open with the error.
-- `tests/e2e/agents.spec.ts`: sign in, create a room, add an agent with an app and a confirmed role, check its chips, post a message, pause the room.
+- `tests/web/add-agent-form.test.tsx`: ID suggestion, full apps, plain add, skills chosen in the picker, public-skill clash choices, and no agent until a choice is made.
+- `tests/web/team-skills.test.tsx`: swap two skill bundles and apply with base revisions; remove and undo; a failed apply keeps the dialog open with the error.
+- `tests/web/assign-skills.test.tsx`: load, add, order and save skills; diff and update a revision; size limit; public-skill clash choices, including a failed or slow preview and a locked list; supporting-file view.
+- `tests/e2e/agents.spec.ts`: sign in, create a room, add an agent with an app and skills, reorder them from the card, check its chips, post a message, pause the room.
 
 `npx playwright install chromium` downloads the browser (about 100 MB) once per machine.

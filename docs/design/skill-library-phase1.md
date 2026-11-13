@@ -1,5 +1,7 @@
 # Skill Library phase 1: local lifecycle
 
+**Status:** built; still the basis of the skill library. The role packs mentioned as "phase 3" were later replaced by [skill-based assignments](skill-assignment.md): agents use skills directly, and usages are recorded per assignment.
+
 Status: design for review. Implements the local portion of confirmed decision 3.
 Remote catalogue/import is phase 2; role packs and agent delivery are phase 3.
 

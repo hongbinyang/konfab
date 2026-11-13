@@ -1,5 +1,7 @@
 # Library v2: feasibility spike and design
 
+**Status:** built (live public search, progressive descriptions, legacy index removal). The role parts are superseded: assigning a public skill now adds it to the agent's skill list ([skill-based assignments](skill-assignment.md), [skill picker](skill-picker.md)) instead of creating a role around it.
+
 Status: proposal for review. The room's description of the approved mockup is the UX reference; this spike did not inspect the private artifact itself. No production code, user data or real source cache was modified.
 
 ## Finding: path discovery works, complete description search does not come for free

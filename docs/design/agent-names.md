@@ -22,7 +22,7 @@ The name can be set in three places. All of them go through one validator, insid
 
 1. **Add agent form:** a new optional field, **Name in this room**, shown when "Add to this room" is ticked. `POST /api/agents` accepts `room_name`.
 2. **Member card, before the agent first joins:** an inline **Name in this room** form. It calls `PUT /api/rooms/:id/members/:agentId/name` with body `{name}`. `DELETE` on the same path clears the name. This form is how the lead names a default agent or an existing agent that is being added to a new room.
-3. **Team roles / Agents member picker:** no name field. Adding a member here only runs the conflict check described below.
+3. **Team / Agents member picker:** no name field. Adding a member here only runs the conflict check described below.
 
 The validator rejects:
 
@@ -31,7 +31,7 @@ The validator rejects:
 - `lead` or `all` (400 `name_reserved`)
 - a name that matches, ignoring case, another current member's name or ID (409 `name_conflict`, message "@b is Codex's name in this room. Choose another name."). An agent's own ID is allowed as its name.
 
-**Adding a member** (through the Agents picker, Add agent or Team roles) runs the same conflict check in both directions:
+**Adding a member** (through the Agents picker, Add agent or Team) runs the same conflict check in both directions:
 
 - the new agent's ID against existing members' names
 - the new agent's retained name against existing members' IDs and names
@@ -83,7 +83,7 @@ All routing paths use this function:
   - message senders
   - cards and status lines
   - contact notices
-  - Team roles and format pickers
+  - Team and format pickers
   - continuation buttons
 
   The sidebar, Manage agent and other rooms keep the display name.

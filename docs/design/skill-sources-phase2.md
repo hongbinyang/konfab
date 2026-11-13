@@ -1,5 +1,7 @@
 # Skill Library phase 2: public sources
 
+**Status:** historical. Public skills are now found with live search ([library v2](library-v2.md)) and copied only when assigned ([skill-based assignments](skill-assignment.md)). The indexed refresh, browse and import-draft flow described here is no longer used by the page; its code is a removal candidate. Source settings, licences and the GitHub request handling still apply.
+
 Status: reviewed; phase 2a shipped and phase 2b implemented for review. Builds on the phase 1 local library and the measured source spike.
 Phase 2a delivers sources, index, search, preview, offline/rate-limit state and
 local UI polish. Phase 2b delivers Add, duplication, invalid drafts and import

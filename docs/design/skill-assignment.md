@@ -1,6 +1,6 @@
 # Skill-based assignments
 
-Requirements: SA1–SA9 in [REQUIREMENTS.md](../../REQUIREMENTS.md) (draft at `2a282b6`). This note replaces the role model described in [role packs](role-packs-phase3.md), [role swap](role-swap.md), [role change notice](role-change-notice.md) and [custom role conversion](convert-custom-roles.md); those notes become historical when this ships.
+**Status:** built and live (schema v33, 2026-11-13; checked with both desktop apps). Requirements: SA1–SA9 in [REQUIREMENTS.md](../../REQUIREMENTS.md) section 18. This note replaces the earlier role-pack, role-swap, role-change-notice and custom-role-conversion notes (see git history before `450521e`); the picker is described in [skill picker](skill-picker.md).
 
 ## Summary
 
