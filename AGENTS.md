@@ -30,4 +30,6 @@ Conventions for AI agents (and people) changing this repo. Konfab room rules and
 
 ## Docs
 
+- Start with [developer handoff](docs/developer-handoff.md) for the code map, testing and current feature boundaries; see the [design-note index](docs/design/README.md) for feature history.
+
 - Keep `README.md`, `docs/user-guide.md` and `REQUIREMENTS.md` in step with user-visible changes, and keep them concise.

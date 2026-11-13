@@ -1,5 +1,7 @@
 # Parallel lead mentions: prototype design
 
+**Historical prototype proposal:** this note describes the original isolated trial and its then-current limitations. The opt-in prototype has since been implemented; consult the [developer handoff](../developer-handoff.md), code and tests for current behavior.
+
 The lead's explicitly mentioned agents may answer in the same room while another agent has a turn. Unaddressed lead posts and agent handoffs retain serial ordering. This prototype runs only in an isolated test home and port; do not deploy it against a real room or user database. The user authorized a prototype first, with real-client measurements before a production design is approved.
 
 ## Invariants and scheduler

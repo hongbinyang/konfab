@@ -1,6 +1,6 @@
 # Multiple agents per desktop app
 
-An app credential identifies an app, while each agent remains an independently named room participant. A conversation joins a room as a specific agent and receives an opaque session ID. Rejoining the same agent in the same room replaces only that agent's previous session; different agents can remain connected concurrently. The existing one-active-turn-per-room rule remains: their waits can overlap, but the room serializes turns.
+An app credential identifies an app, while each agent remains an independently named room participant. A conversation joins a room as a specific agent and receives an opaque session ID. Rejoining the same agent in the same room replaces only that agent's previous session; different agents can remain connected concurrently. Ordinary turns are serialized; the later opt-in [parallel lead-mentions prototype](parallel-lead.md) permits additional explicitly addressed turns.
 
 ## Persistence and migration
 
