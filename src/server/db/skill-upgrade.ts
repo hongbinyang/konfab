@@ -314,35 +314,39 @@ export function upgradeRolesToSkills(db: Db, now = Date.now()): void {
       member.agent_id,
     );
   }
-  if (tooLarge.length)
-    throw new UpgradeStopped(
-      `Konfab could not convert these roles to skills without losing content:\n- ${tooLarge.join("\n- ")}\nStart the previous Konfab version, shorten this member's notes or role text, or remove pinned skills, then upgrade again.`,
-    );
-
   // 6. Active turns keep their exact replies and get an equivalent snapshot.
   for (const turn of activeTurns) {
     const reply = parse(turn.role_envelope_json);
     const swap = turn.swap_role_snapshot_json;
     const member = db
       .prepare(
-        "SELECT assignment_revision, instructions FROM room_members WHERE room_id = ? AND agent_id = ?",
+        `SELECT m.assignment_revision, m.instructions, r.name AS room_name, a.display_name
+         FROM room_members m JOIN rooms r ON r.id = m.room_id JOIN agents a ON a.id = m.agent_id
+         WHERE m.room_id = ? AND m.agent_id = ?`,
       )
       .get(turn.room_id, turn.agent_id) as {
       assignment_revision: number;
       instructions: string;
+      room_name: string;
+      display_name: string;
     };
+    // The same bounded fitting as members: summaries, then stop. Never an oversized snapshot.
     const build = (
       envelope: OldEnvelope | null,
       text: string | null,
-    ): FullAssignment => {
+    ): FullAssignment | null => {
       const instructions = joinText(text, envelope?.notes);
-      const pins =
+      const wanted =
         envelope?.revision_id && converted.has(envelope.revision_id)
-          ? (fit(
-              instructions,
-              rolePins(envelope.revision_id, envelope.skills),
-            ) ?? rolePins(envelope.revision_id, envelope.skills))
+          ? rolePins(envelope.revision_id, envelope.skills)
           : [];
+      const pins = fit(instructions, wanted);
+      if (!pins) {
+        tooLarge.push(
+          `Room "${member.room_name}", ${member.display_name} (turn in progress): instructions ${Buffer.byteLength(instructions)} bytes and ${wanted.length} skills still exceed ${ASSIGNMENT_LIMIT_BYTES / 1024} KiB as summaries; let the turn finish first`,
+        );
+        return null;
+      }
       return fullAssignment(db, member.assignment_revision, instructions, pins);
     };
     if (turn.role_envelope_json !== null) {
@@ -366,8 +370,10 @@ export function upgradeRolesToSkills(db: Db, now = Date.now()): void {
     }
     if (swap !== null) {
       const legacy = parse(swap);
+      const built = build(legacy, turn.swap_role_text_snapshot);
+      if (!built) continue;
       const snapshot: TurnSnapshot = {
-        assignment: build(legacy, turn.swap_role_text_snapshot),
+        assignment: built,
         ...(legacy?.revision_id
           ? {
               legacy_role: JSON.parse(swap) as TurnSnapshot["legacy_role"],
@@ -387,6 +393,11 @@ export function upgradeRolesToSkills(db: Db, now = Date.now()): void {
         );
     }
   }
+
+  if (tooLarge.length)
+    throw new UpgradeStopped(
+      `Konfab could not convert these roles to skills without losing content:\n- ${tooLarge.join("\n- ")}\nStart the previous Konfab version, shorten this member's notes or role text, or remove pinned skills, then upgrade again.`,
+    );
 
   db.exec(CLEANUP);
 }
@@ -467,12 +478,27 @@ function convertRevision(
   const skillMd = Buffer.from(
     `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(revision.description)}\n---\n${body}`,
   );
+  // A role's own supporting file named SKILL.md would clash with the new manifest; keep it under a free name.
+  const taken = new Set(files.map((file) => file.path));
+  let kept = "role-SKILL.md";
+  for (let n = 2; taken.has(kept); n += 1) kept = `role-SKILL-${n}.md`;
   const skillFiles: SkillFile[] = [
     { path: "SKILL.md", content: skillMd, mode: 0o600 },
     ...files
-      .filter((file) => file.path !== "ROLE.md" && file.path !== "SKILL.md")
-      .map(({ path, content, mode }) => ({ path, content, mode })),
+      .filter((file) => file.path !== "ROLE.md")
+      .map(({ path, content, mode }) => ({
+        path: path === "SKILL.md" ? kept : path,
+        content,
+        mode,
+      })),
   ];
+  if (taken.has("SKILL.md"))
+    log(
+      db,
+      "renamed_file",
+      `Role ${revision.title} rev ${revision.number}: its file SKILL.md is now ${kept} in the skill ${name}`,
+      now,
+    );
   db.prepare(
     "INSERT INTO skill_revisions(id, skill_id, number, content_hash, name, description, provenance_json, licence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
   ).run(

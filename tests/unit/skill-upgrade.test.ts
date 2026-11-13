@@ -102,7 +102,12 @@ interface Fixture {
  */
 function buildOldDatabase(
   dir: string,
-  extra: { freeText?: string; bigRole?: number } = {},
+  extra: {
+    freeText?: string;
+    bigRole?: number;
+    roleSkillFile?: boolean;
+    snapshotText?: string;
+  } = {},
 ): Fixture {
   const path = join(dir, "konfab.db");
   const skillsRoot = join(dir, "skills");
@@ -223,6 +228,10 @@ function buildOldDatabase(
         db.prepare(
           "INSERT INTO role_revision_files(revision_id, path, blob_hash, mode) VALUES (?, 'checklist.md', ?, 384)",
         ).run(id, blob(db, `checklist ${id}`));
+      if (role === "role-dev" && extra.roleSkillFile)
+        db.prepare(
+          "INSERT INTO role_revision_files(revision_id, path, blob_hash, mode) VALUES (?, 'SKILL.md', ?, 384)",
+        ).run(id, blob(db, `role's own SKILL.md for ${id}`));
       if (pin) {
         db.prepare(
           "INSERT INTO role_revision_skills(role_revision_id, position, skill_id, skill_revision_id) VALUES (?, 0, 'helper', ?)",
@@ -247,8 +256,8 @@ function buildOldDatabase(
       oldEnvelope(db, "role-dev", "dev-1", "Room notes"),
     );
     db.prepare(
-      "INSERT INTO turns(id, room_id, agent_id, reason, state, created_at, started_at, session_id, role_envelope_json, swap_role_snapshot_json, swap_role_text_snapshot) VALUES (1, 1, 'claude', 'user', 'active', ?, ?, 's-claude', ?, ?, '')",
-    ).run(Date.now(), Date.now(), started, started);
+      "INSERT INTO turns(id, room_id, agent_id, reason, state, created_at, started_at, session_id, role_envelope_json, swap_role_snapshot_json, swap_role_text_snapshot) VALUES (1, 1, 'claude', 'user', 'active', ?, ?, 's-claude', ?, ?, ?)",
+    ).run(Date.now(), Date.now(), started, started, extra.snapshotText ?? "");
   })();
   // A stray folder in the personal library with the built-in role's name.
   mkdirSync(join(skillsRoot, "reviewer"));
@@ -631,6 +640,92 @@ describe("upgrading roles to skills", () => {
       role: "short",
     });
     check.close();
+  });
+
+  it("keeps a role's own SKILL.md under a new name, for current and in-progress revisions", () => {
+    const fixture = buildOldDatabase(dir, { roleSkillFile: true });
+    const db = openDatabase(fixture.path);
+    try {
+      const files = db
+        .prepare(
+          `SELECT r.number, f.path, b.content FROM skill_revisions r JOIN skills s ON s.id = r.skill_id
+           JOIN skill_revision_files f ON f.revision_id = r.id JOIN skill_blobs b ON b.hash = f.blob_hash
+           WHERE s.folder_name = 'konfab-dev-role' ORDER BY r.number, f.path`,
+        )
+        .all() as Array<{ number: number; path: string; content: Buffer }>;
+      expect(files.map((file) => [file.number, file.path])).toEqual([
+        [1, "SKILL.md"],
+        [1, "checklist.md"],
+        [1, "role-SKILL.md"],
+        [2, "SKILL.md"],
+        [2, "checklist.md"],
+        [2, "role-SKILL.md"],
+      ]);
+      expect(
+        files
+          .filter((file) => file.path === "role-SKILL.md")
+          .map((file) => file.content.toString("utf8")),
+      ).toEqual([
+        "role's own SKILL.md for dev-1",
+        "role's own SKILL.md for dev-2",
+      ]);
+      expect(
+        files
+          .find((file) => file.number === 1 && file.path === "SKILL.md")!
+          .content.toString("utf8"),
+      ).toContain("Develop v1");
+      expect(
+        db
+          .prepare("SELECT detail FROM upgrade_log WHERE kind = 'renamed_file'")
+          .all(),
+      ).toHaveLength(2);
+      // The turn in progress reads it both ways: as the old role file and as the converted skill's file.
+      const service = new KonfabService(db, options);
+      const dev1 = (
+        db
+          .prepare(
+            "SELECT skill_revision_id FROM legacy_role_revisions WHERE role_revision_id = 'dev-1'",
+          )
+          .get() as { skill_revision_id: string }
+      ).skill_revision_id;
+      expect(
+        service.readAssignedRoleFile(
+          "claude",
+          "s-claude",
+          "dev-1",
+          "SKILL.md",
+          0,
+          4096,
+        ),
+      ).toMatchObject({ content: "role's own SKILL.md for dev-1" });
+      expect(
+        service.readAssignedSkillFile(
+          "claude",
+          "s-claude",
+          dev1,
+          "role-SKILL.md",
+          0,
+          4096,
+        ),
+      ).toMatchObject({ content: "role's own SKILL.md for dev-1" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stops when a turn in progress cannot fit, even though the current assignment does", () => {
+    const fixture = buildOldDatabase(dir, {
+      snapshotText: "s".repeat(70 * 1024),
+    });
+    expect(() => openDatabase(fixture.path)).toThrow(
+      /could not convert[\s\S]*Claude \(turn in progress\)/,
+    );
+    const raw = new Database(fixture.path);
+    expect(raw.pragma("user_version", { simple: true })).toBe(OLD_VERSION);
+    expect(
+      raw.prepare("SELECT count(*) AS n FROM role_revisions").get(),
+    ).toEqual({ n: 3 });
+    raw.close();
   });
 
   it("previews the upgrade on a copy without touching the live database", () => {
