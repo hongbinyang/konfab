@@ -1692,6 +1692,40 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     service.addAppAgent(appId, body.id, body.display_name, body.room_id);
     return reply.code(201).send({ ok: true });
   });
+  app.post("/api/agents", async (request, reply) => {
+    const body = z
+      .object({
+        id: z.string().min(1),
+        display_name: z.string().min(1),
+        app_id: z.string().min(1),
+        room_id: z.number().int().positive().optional(),
+        role: z
+          .object({
+            role_id: z.string().min(1).max(200),
+            role_revision_id: z.string().uuid(),
+          })
+          .optional(),
+      })
+      .parse(request.body);
+    const role = body.role;
+    service.addAppAgent(
+      body.app_id,
+      body.id,
+      body.display_name,
+      body.room_id,
+      role
+        ? () =>
+            roleService().assign(
+              body.room_id as number,
+              body.id,
+              role.role_id,
+              role.role_revision_id,
+              "",
+            )
+        : undefined,
+    );
+    return reply.code(201).send({ ok: true });
+  });
   app.patch("/api/agents/:agentId", async (request) => {
     const { agentId } = z
       .object({ agentId: z.string().min(1) })

@@ -387,6 +387,63 @@ describe("page API", () => {
     ).toBe("Public sample");
   });
 
+  it("adds an agent with its app and room role in one step", async () => {
+    const room = service.createRoom("add-agent", "", ["codex"]);
+    const role = (await call("GET", "/api/roles")).json().roles[0] as {
+      id: string;
+      revision_id: string;
+      title: string;
+    };
+    const added = await call("POST", "/api/agents", {
+      id: "reviewer",
+      display_name: "Reviewer",
+      app_id: "claude",
+      room_id: room.id,
+      role: { role_id: role.id, role_revision_id: role.revision_id },
+    });
+    expect(added.statusCode).toBe(201);
+    const agent = service
+      .roomState(room.id)
+      .agents.find((item) => item.id === "reviewer");
+    expect(agent?.role_pack_label).toContain(role.title);
+    expect(
+      service.overview().agents.find((item) => item.id === "reviewer")?.app_id,
+    ).toBe("claude");
+
+    const badRole = await call("POST", "/api/agents", {
+      id: "tester",
+      display_name: "Tester",
+      app_id: "codex",
+      room_id: room.id,
+      role: {
+        role_id: role.id,
+        role_revision_id: "00000000-0000-4000-8000-000000000000",
+      },
+    });
+    expect(badRole.statusCode).toBe(404);
+    expect(service.overview().agents.some((item) => item.id === "tester")).toBe(
+      false,
+    );
+
+    const noRoom = await call("POST", "/api/agents", {
+      id: "tester",
+      display_name: "Tester",
+      app_id: "codex",
+      role: { role_id: role.id, role_revision_id: role.revision_id },
+    });
+    expect(noRoom.statusCode).toBe(400);
+
+    const plain = await call("POST", "/api/agents", {
+      id: "tester",
+      display_name: "Tester",
+      app_id: "codex",
+    });
+    expect(plain.statusCode).toBe(201);
+    expect(
+      service.roomState(room.id).agents.some((item) => item.id === "tester"),
+    ).toBe(false);
+  });
+
   it("assigns a pinned built-in role and serves its preview", async () => {
     const room = service.createRoom("role-test", "", ["codex"]);
     const list = (await call("GET", "/api/roles")).json().roles as Array<{

@@ -128,7 +128,9 @@ Rejoining after a break restores the saved balance once; other rejoins start a f
 
 ## 9. Several agents per app
 
-You can have several agents from the same app, for example `claude` and `claude-dev`. In the room's **Agents** panel, choose **+ Add agent** under an app, pick an ID and display name (**Add to this room** is ticked), then copy the new agent's join prompt into a separate conversation in that app.
+Every agent has two attributes: its **app** (the desktop app that runs it, such as Claude or Codex) and its **role** in each room. You can have several agents on the same app, for example `claude` and `reviewer`.
+
+To add one, choose **+ Add agent** at the top of the room's **Agents** panel. Enter a display name (the agent ID is filled in for you and is what you @mention), pick the **App**, and keep **Add to this room** ticked to pick a **Role in this room** straight away. Then use the new card's **Copy join prompt** in a separate conversation in that app. Each card shows **App:** and **Role:** chips; roles stay per room, so change one later with **Change role** or swap them with **Roles**.
 
 Each agent has its own session, role and turns. Agents of one app share that app's credential and account allowance: conversations in that app are trusted to act as any of its agents, so this is for organising a team, not a security boundary. The default limit is four agents per app (`multi_agent.max_per_app`). You can rename an agent's display name; to remove one, end its sessions first (its history stays).
 

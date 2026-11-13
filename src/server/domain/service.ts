@@ -580,7 +580,14 @@ export class KonfabService {
     id: string,
     displayName: string,
     roomId?: number,
+    afterAdd?: () => void,
   ): void {
+    if (afterAdd && roomId === undefined)
+      throw new KonfabError(
+        "invalid_agent",
+        400,
+        "A role can only be assigned when the agent joins a room.",
+      );
     if (
       !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(id) ||
       id.length > 64 ||
@@ -623,7 +630,10 @@ export class KonfabService {
           throw new KonfabError("room_archived", 409, "This room is archived.");
         this.replaceMembers(roomId, [...this.memberIds(roomId), id]);
       }
+      afterAdd?.();
     })();
+    if (afterAdd && roomId !== undefined)
+      this.logEvent("role_changed", roomId, id, { kind: "role_pack" });
     this.notify();
   }
 

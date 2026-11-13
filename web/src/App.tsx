@@ -2649,6 +2649,13 @@ function DecisionCard({
   );
 }
 
+type RoleOption = {
+  id: string;
+  revision_id: string;
+  name: string;
+  title: string;
+};
+
 function Agents({
   overview,
   room,
@@ -2660,36 +2667,68 @@ function Agents({
   act: Act;
   urgent: boolean;
 }) {
-  const [addingApp, setAddingApp] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newApp, setNewApp] = useState("");
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
+  const [idEdited, setIdEdited] = useState(false);
+  const [newRole, setNewRole] = useState("");
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [addToRoom, setAddToRoom] = useState(true);
   const [agentError, setAgentError] = useState("");
-  const openAdd = (appId: string) => {
-    const used = new Set(overview.agents.map((agent) => agent.id));
-    let candidate = `${appId.replaceAll("_", "-")}-dev`,
+  const appCount = (appId: string) =>
+    overview.agents.filter((agent) => agent.app_id === appId).length;
+  const appFull = (appId: string) =>
+    appCount(appId) >= overview.max_agents_per_app;
+  const openApps = overview.apps.filter((app) => !appFull(app.id));
+  const used = new Set(overview.agents.map((agent) => agent.id));
+  const suggestId = (name: string) => {
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^[^a-z]+|-+$/g, "")
+        .slice(0, 60) || "agent";
+    let candidate = base,
       suffix = 2;
-    while (used.has(candidate))
-      candidate = `${appId.replaceAll("_", "-")}-dev-${suffix++}`;
-    setNewId(candidate);
-    setNewName(candidate);
+    while (used.has(candidate)) candidate = `${base}-${suffix++}`;
+    return candidate;
+  };
+  const openAdd = () => {
+    setNewApp(openApps[0]?.id ?? "");
+    setNewName("");
+    setNewId("");
+    setIdEdited(false);
+    setNewRole("");
     setAddToRoom(true);
     setAgentError("");
-    setAddingApp(appId);
+    setAdding(true);
+    request<{ roles: RoleOption[] }>("/api/roles")
+      .then((result) => setRoles(result.roles))
+      .catch(() => setRoles([]));
   };
   const addAgent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!addingApp) return;
+    const role = roles.find((item) => item.id === newRole);
     try {
-      await request(`/api/apps/${encodeURIComponent(addingApp)}/agents`, {
+      await request("/api/agents", {
         method: "POST",
         body: {
           id: newId,
           display_name: newName,
+          app_id: newApp,
           ...(addToRoom ? { room_id: room.room.id } : {}),
+          ...(addToRoom && role
+            ? {
+                role: {
+                  role_id: role.id,
+                  role_revision_id: role.revision_id,
+                },
+              }
+            : {}),
         },
       });
-      setAddingApp(null);
+      setAdding(false);
       await act(async () => {});
     } catch (error) {
       setAgentError(errorMessage(error));
@@ -2710,207 +2749,259 @@ function Agents({
       preferenceKey="konfab.ui.v1.section.agents"
       urgent={urgent}
     >
-      {overview.apps.map((app) => (
-        <section key={app.id} className="app-agent-group">
-          <div className="row">
-            <h3>{app.display_name} app</h3>
-            <button
-              type="button"
-              disabled={
-                room.room.archived ||
-                overview.agents.filter((agent) => agent.app_id === app.id)
-                  .length >= overview.max_agents_per_app
-              }
-              onClick={() => openAdd(app.id)}
+      <div className="row agent-toolbar">
+        <button
+          type="button"
+          disabled={room.room.archived || openApps.length === 0}
+          title={
+            openApps.length === 0
+              ? `Every app has ${overview.max_agents_per_app} agents`
+              : undefined
+          }
+          onClick={() => (adding ? setAdding(false) : openAdd())}
+        >
+          + Add agent
+        </button>
+      </div>
+      {adding && (
+        <form className="stack card" onSubmit={(event) => void addAgent(event)}>
+          <label>
+            Display name
+            <input
+              value={newName}
+              onChange={(event) => {
+                setNewName(event.target.value);
+                if (!idEdited) setNewId(suggestId(event.target.value));
+              }}
+              required
+              maxLength={100}
+              placeholder="Reviewer"
+            />
+          </label>
+          <label>
+            Agent ID
+            <input
+              value={newId}
+              onChange={(event) => {
+                setNewId(event.target.value);
+                setIdEdited(true);
+              }}
+              required
+              pattern="[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
+              placeholder="reviewer"
+            />
+            <small className="hint">
+              Used for @mentions. Lowercase, hyphens allowed.
+            </small>
+          </label>
+          <label>
+            App
+            <select
+              value={newApp}
+              onChange={(event) => setNewApp(event.target.value)}
+              required
             >
-              + Add agent
+              {overview.apps.map((app) => (
+                <option key={app.id} value={app.id} disabled={appFull(app.id)}>
+                  {app.display_name} ({appCount(app.id)}/
+                  {overview.max_agents_per_app})
+                </option>
+              ))}
+            </select>
+            <small className="hint">
+              The desktop app that runs this agent. Agents on one app share its
+              allowance.
+            </small>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={addToRoom}
+              onChange={(event) => setAddToRoom(event.target.checked)}
+            />{" "}
+            Add to this room
+          </label>
+          {addToRoom && (
+            <label>
+              Role in this room
+              <select
+                value={newRole}
+                onChange={(event) => setNewRole(event.target.value)}
+              >
+                <option value="">No role</option>
+                {roles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.title || role.name}
+                  </option>
+                ))}
+              </select>
+              <small className="hint">
+                Roles are per room. Change it later with Change role.
+              </small>
+            </label>
+          )}
+          {agentError && (
+            <p role="alert" className="warning-text">
+              {agentError}
+            </p>
+          )}
+          <div className="row">
+            <button type="submit" disabled={!newApp}>
+              Add agent
+            </button>
+            <button type="button" onClick={() => setAdding(false)}>
+              Cancel
             </button>
           </div>
-          {addingApp === app.id && (
-            <form className="stack" onSubmit={(event) => void addAgent(event)}>
-              <label>
-                Agent ID
-                <input
-                  value={newId}
-                  onChange={(event) => setNewId(event.target.value)}
-                  required
-                  pattern="[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
-                />
-              </label>
-              <label>
-                Display name
-                <input
-                  value={newName}
-                  onChange={(event) => setNewName(event.target.value)}
-                  required
-                  maxLength={100}
-                />
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={addToRoom}
-                  onChange={(event) => setAddToRoom(event.target.checked)}
-                />{" "}
-                Add to this room
-              </label>
-              <p className="muted">
-                Up to {overview.max_agents_per_app} agents per app for
-                coordination; they share the app account's allowance.
-              </p>
-              {agentError && (
-                <p role="alert" className="warning-text">
-                  {agentError}
-                </p>
-              )}
-              <div className="row">
-                <button type="submit">Add agent</button>
-                <button type="button" onClick={() => setAddingApp(null)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-          {overview.agents
-            .filter((agent) => agent.app_id === app.id)
-            .map((agent) => {
-              const member = room.agents.find((item) => item.id === agent.id);
-              const lastPost = [...room.messages]
-                .reverse()
-                .find(
-                  (message) =>
-                    message.sender_type === "agent" &&
-                    message.sender_id === agent.id,
-                );
-              return (
-                <div className="card compact-agent" key={agent.id}>
-                  <div className="agent-heading">
-                    <label className="check">
-                      <input
-                        type="checkbox"
-                        checked={member !== undefined}
-                        disabled={room.room.archived}
-                        onChange={(event) =>
-                          setMembers(
-                            event.target.checked
-                              ? [...members, agent.id]
-                              : members.filter((id) => id !== agent.id),
-                          )
-                        }
-                      />
-                      <strong>
-                        {agent.display_name}{" "}
-                        <small className="muted">
-                          {agent.app_name} · @{agent.id}
-                          {agent.is_default ? " · default" : ""}
-                        </small>
-                        {member?.role_pack_label
-                          ? ` · ${member.role_pack_label}`
-                          : ""}
-                      </strong>
-                    </label>
-                    {member && (
-                      <>
-                        <span className={`state ${member.state}`}>
-                          {room.queued.includes(member.id) &&
-                          (member.state === "working" ||
-                            (member.state === "queued" && member.working))
-                            ? "Working · reply queued"
-                            : STATE_LABELS[member.state]}
+          <p className="muted">
+            Next: use the new card's Copy join prompt in a new conversation in
+            that app.
+          </p>
+        </form>
+      )}
+      <section className="app-agent-group">
+        {overview.agents.map((agent) => {
+          const member = room.agents.find((item) => item.id === agent.id);
+          const lastPost = [...room.messages]
+            .reverse()
+            .find(
+              (message) =>
+                message.sender_type === "agent" &&
+                message.sender_id === agent.id,
+            );
+          return (
+            <div className="card compact-agent" key={agent.id}>
+              <div className="agent-heading">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={member !== undefined}
+                    disabled={room.room.archived}
+                    onChange={(event) =>
+                      setMembers(
+                        event.target.checked
+                          ? [...members, agent.id]
+                          : members.filter((id) => id !== agent.id),
+                      )
+                    }
+                  />
+                  <strong>
+                    {agent.display_name}{" "}
+                    <small className="muted">
+                      @{agent.id}
+                      {agent.is_default ? " · default" : ""}
+                    </small>
+                  </strong>
+                </label>
+                <span className="agent-chips">
+                  <span className="chip" title="App that runs this agent">
+                    App: {agent.app_name}
+                  </span>
+                  {member && (
+                    <span className="chip" title="Role in this room">
+                      Role:{" "}
+                      {member.role_pack_label ??
+                        (member.role?.trim() ? "custom text" : "none")}
+                    </span>
+                  )}
+                </span>
+                {member && (
+                  <>
+                    <span className={`state ${member.state}`}>
+                      {room.queued.includes(member.id) &&
+                      (member.state === "working" ||
+                        (member.state === "queued" && member.working))
+                        ? "Working · reply queued"
+                        : STATE_LABELS[member.state]}
+                    </span>
+                    {member.state === "waiting" &&
+                      !member.working &&
+                      lastPost && (
+                        <span
+                          className="muted"
+                          title={new Date(lastPost.created_at).toLocaleString()}
+                        >
+                          last post{" "}
+                          {Math.max(
+                            0,
+                            Math.floor(
+                              (Date.now() - lastPost.created_at) / 60000,
+                            ),
+                          )}{" "}
+                          min ago
                         </span>
-                        {member.state === "waiting" &&
-                          !member.working &&
-                          lastPost && (
-                            <span
-                              className="muted"
-                              title={new Date(
-                                lastPost.created_at,
-                              ).toLocaleString()}
-                            >
-                              last post{" "}
-                              {Math.max(
-                                0,
-                                Math.floor(
-                                  (Date.now() - lastPost.created_at) / 60000,
-                                ),
-                              )}{" "}
-                              min ago
-                            </span>
-                          )}
-                        <RunCountdown agent={member} />
-                      </>
+                      )}
+                    <RunCountdown agent={member} />
+                  </>
+                )}
+              </div>
+              {room.locks
+                .filter((lock) => lock.agent_id === agent.id)
+                .map((lock) => (
+                  <div className="lock-chip" key={lock.resource}>
+                    <span>
+                      🔒 Advisory lock: {lock.resource} · {lock.purpose} ·
+                      expires {formatTime(lock.expires_at)}
+                    </span>{" "}
+                    {!room.room.archived && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Force-release the advisory lock ${lock.resource}? The holder may still be writing.`,
+                            )
+                          )
+                            void act(() =>
+                              request(
+                                `/api/rooms/${room.room.id}/locks/release`,
+                                {
+                                  method: "POST",
+                                  body: { resource: lock.resource },
+                                },
+                              ),
+                            );
+                        }}
+                      >
+                        Force-release
+                      </button>
                     )}
                   </div>
-                  {room.locks
-                    .filter((lock) => lock.agent_id === agent.id)
-                    .map((lock) => (
-                      <div className="lock-chip" key={lock.resource}>
-                        <span>
-                          🔒 Advisory lock: {lock.resource} · {lock.purpose} ·
-                          expires {formatTime(lock.expires_at)}
-                        </span>{" "}
-                        {!room.room.archived && (
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  `Force-release the advisory lock ${lock.resource}? The holder may still be writing.`,
-                                )
-                              )
-                                void act(() =>
-                                  request(
-                                    `/api/rooms/${room.room.id}/locks/release`,
-                                    {
-                                      method: "POST",
-                                      body: { resource: lock.resource },
-                                    },
-                                  ),
-                                );
-                            }}
-                          >
-                            Force-release
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  {overview.reports
-                    .filter(
-                      (report) =>
-                        report.agent_id === agent.id &&
-                        report.room === room.room.name &&
-                        report.kind !== "other",
-                    )
-                    .map((report) => (
-                      <p className="warning-text" key={report.id}>
-                        {report.kind === "out_of_allowance"
-                          ? "Out of allowance"
-                          : "Low allowance"}
-                        {report.detail ? `: ${report.detail}` : ""}
-                      </p>
-                    ))}
-                  {!agent.is_default && (
-                    <AgentManagement agent={agent} act={act} />
-                  )}
-                  {member ? (
-                    <AgentDetails
-                      agent={member}
-                      replyQueued={room.queued.includes(member.id)}
-                      peers={room.agents}
-                      roomId={room.room.id}
-                      archived={room.room.archived}
-                      rolePickerEnabled={overview.ui?.role_picker ?? false}
-                      act={act}
-                    />
-                  ) : (
-                    <p className="muted">Not in this room</p>
-                  )}
-                </div>
-              );
-            })}
-        </section>
-      ))}
+                ))}
+              {overview.reports
+                .filter(
+                  (report) =>
+                    report.agent_id === agent.id &&
+                    report.room === room.room.name &&
+                    report.kind !== "other",
+                )
+                .map((report) => (
+                  <p className="warning-text" key={report.id}>
+                    {report.kind === "out_of_allowance"
+                      ? "Out of allowance"
+                      : "Low allowance"}
+                    {report.detail ? `: ${report.detail}` : ""}
+                  </p>
+                ))}
+              {!agent.is_default && <AgentManagement agent={agent} act={act} />}
+              {member ? (
+                <AgentDetails
+                  agent={member}
+                  replyQueued={room.queued.includes(member.id)}
+                  peers={room.agents}
+                  roomId={room.room.id}
+                  archived={room.room.archived}
+                  rolePickerEnabled={overview.ui?.role_picker ?? false}
+                  act={act}
+                />
+              ) : (
+                <p className="muted">Not in this room</p>
+              )}
+            </div>
+          );
+        })}
+      </section>
     </CollapsibleSection>
   );
 }
