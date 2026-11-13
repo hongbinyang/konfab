@@ -279,6 +279,96 @@ describe("page API", () => {
     expect(badOwner.json().message).toContain("no spaces");
   });
 
+  /** Serves one public skill from a fake GitHub source and returns its picker pin. */
+  const publicSkill = async (manifest: string) => {
+    const commit = "a".repeat(40);
+    const hash = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(manifest)}\0`)
+      .update(manifest)
+      .digest("hex");
+    sourceFetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/commits/"))
+        return new Response(JSON.stringify({ sha: commit }));
+      if (url.includes("/git/trees/"))
+        return new Response(
+          JSON.stringify({
+            truncated: false,
+            tree: [
+              {
+                path: "skills/public-sample/SKILL.md",
+                type: "blob",
+                mode: "100644",
+                sha: hash,
+                size: Buffer.byteLength(manifest),
+              },
+            ],
+          }),
+        );
+      return new Response(manifest);
+    };
+    await call("GET", "/api/library/live?q=invoice");
+    await vi.waitFor(async () =>
+      expect(
+        (await call("GET", "/api/library/live?q=invoice")).json().items.length,
+      ).toBeGreaterThan(0),
+    );
+    const result = (await call("GET", "/api/library/live?q=invoice")).json()
+      .items[0];
+    const query = new URLSearchParams({
+      source_id: result.source_id,
+      commit,
+      path: result.path,
+    });
+    const preview = (
+      await call("GET", `/api/library/live/preview?${query}`)
+    ).json();
+    return {
+      source_id: result.source_id as string,
+      commit,
+      path: result.path as string,
+      preview_hash: preview.preview_hash as string,
+    };
+  };
+
+  it("adds no agent when a chosen public skill clashes, then adds it with the chosen copy name", async () => {
+    const room = service.createRoom("public-agent", "", ["codex"]);
+    // A different local skill already uses the public skill's name.
+    await call("POST", "/api/library/skills", {
+      scope: "personal",
+      name: "public-sample",
+      description: "Mine",
+    });
+    const pin = await publicSkill(
+      "---\nname: public-sample\ndescription: Invoice workflow\n---\nBody",
+    );
+    const body = (copy?: string) => ({
+      id: "invoicer",
+      display_name: "Invoicer",
+      app_id: "claude",
+      room_id: room.id,
+      assignment: {
+        pins: [{ public: { ...pin, ...(copy ? { copy_name: copy } : {}) } }],
+        confirmed: true,
+      },
+    });
+    const clash = await call("POST", "/api/agents", body());
+    expect(clash.statusCode).toBe(409);
+    expect(clash.json()).toMatchObject({ code: "name_conflict", pin: 0 });
+    expect(
+      service.overview().agents.some((agent) => agent.id === "invoicer"),
+    ).toBe(false);
+    expect(
+      (await call("GET", "/api/library?scope=personal")).json().skills,
+    ).toHaveLength(1);
+    const added = await call("POST", "/api/agents", body("public-sample-2"));
+    expect(added.statusCode).toBe(201);
+    expect(
+      service.roomState(room.id).agents.find((agent) => agent.id === "invoicer")
+        ?.assignment.label,
+    ).toBe("public-sample-2 rev 1");
+  });
+
   it("discovers, previews and assigns a pinned public skill without persisting the search", async () => {
     const commit = "a".repeat(40);
     const manifest =

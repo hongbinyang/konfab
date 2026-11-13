@@ -2,8 +2,11 @@ import { useState, type FormEvent } from "react";
 import { request, type Overview } from "./api";
 import {
   AssignSkills,
+  PublicChoice,
+  publicConflict,
   requestPins,
   reviewIds,
+  type PublicConflict,
   type Selection,
 } from "./AssignSkills";
 
@@ -40,6 +43,7 @@ export function AddAgentForm({
   });
   const [choosing, setChoosing] = useState(false);
   const [agentError, setAgentError] = useState("");
+  const [conflict, setConflict] = useState<PublicConflict | null>(null);
   const used = new Set(overview.agents.map((agent) => agent.id));
   const suggestId = (name: string) => {
     const base =
@@ -57,6 +61,7 @@ export function AddAgentForm({
     addToRoom && (selection.pins.length > 0 || !!selection.instructions.trim());
   const addAgent = async (event: FormEvent) => {
     event.preventDefault();
+    setAgentError("");
     try {
       await request("/api/agents", {
         method: "POST",
@@ -82,6 +87,12 @@ export function AddAgentForm({
       });
       await onAdded();
     } catch (error) {
+      // The server adds nothing when a public skill clashes; ask, then the lead submits again.
+      const choice = publicConflict(error);
+      if (choice) {
+        setConflict(choice);
+        return;
+      }
       setAgentError(
         error instanceof Error ? error.message : "Something went wrong",
       );
@@ -178,6 +189,11 @@ export function AddAgentForm({
                 <li key={`${pin.kind}:${pin.name}`}>
                   {pin.name} ·{" "}
                   {pin.delivery === "full" ? "full text" : "summary"}
+                  {pin.kind === "public" && pin.keep_local
+                    ? " · your local version"
+                    : pin.kind === "public" && pin.copy_name
+                      ? ` · added as ${pin.copy_name}`
+                      : ""}
                 </li>
               ))}
             </ol>
@@ -199,13 +215,31 @@ export function AddAgentForm({
           onClose={() => setChoosing(false)}
         />
       )}
+      {conflict && selection.pins[conflict.index]?.kind === "public" && (
+        <PublicChoice
+          code={conflict.code}
+          message={conflict.message}
+          name={selection.pins[conflict.index]!.name}
+          onChoose={(choice) => {
+            setSelection((current) => ({
+              ...current,
+              pins: current.pins.map((pin, index) =>
+                index === conflict.index && pin.kind === "public"
+                  ? { ...pin, ...choice }
+                  : pin,
+              ),
+            }));
+            setConflict(null);
+          }}
+        />
+      )}
       {agentError && (
         <p role="alert" className="warning-text">
           {agentError}
         </p>
       )}
       <div className="row">
-        <button type="submit" disabled={!newApp}>
+        <button type="submit" disabled={!newApp || !!conflict}>
           Add agent
         </button>
         <button type="button" onClick={onCancel}>

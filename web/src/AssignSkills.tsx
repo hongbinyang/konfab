@@ -121,6 +121,66 @@ export function lineDiff(before: string, after: string) {
   ];
 }
 
+/** A public skill in a selection that needs the lead's choice before it can be copied. */
+export type PublicConflict = {
+  index: number;
+  message: string;
+  code: "local_changes" | "name_conflict";
+};
+
+/** Reads a server conflict about one selected public skill, if that is what the error is. */
+export function publicConflict(error: unknown): PublicConflict | null {
+  return error instanceof RequestError &&
+    (error.code === "local_changes" || error.code === "name_conflict") &&
+    typeof error.details.pin === "number"
+    ? { index: error.details.pin, message: error.message, code: error.code }
+    : null;
+}
+
+/**
+ * The choice for a public skill that clashes with the library: keep the local
+ * version (only when it is a copy of the same skill with local changes), or
+ * add the upstream skill as a separate copy. Nothing is overwritten.
+ */
+export function PublicChoice({
+  code,
+  message,
+  name,
+  onChoose,
+}: {
+  code: PublicConflict["code"];
+  message: string;
+  name: string;
+  onChoose: (choice: { keep_local?: boolean; copy_name?: string }) => void;
+}) {
+  const copy = suggestName(`${name}-2`);
+  return (
+    <div
+      className="banner warning"
+      role="alertdialog"
+      aria-label={`${name} needs a choice`}
+    >
+      <p>{message}</p>
+      <div className="row">
+        {code === "local_changes" && (
+          <button
+            type="button"
+            onClick={() => onChoose({ keep_local: true, copy_name: undefined })}
+          >
+            Keep my version
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onChoose({ keep_local: false, copy_name: copy })}
+        >
+          Add as {copy}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** The request form of a selection's pins. */
 export function requestPins(pins: Pick[]) {
   return pins.map((pin) =>
@@ -201,10 +261,7 @@ export function AssignSkills({
   const [diffs, setDiffs] = useState<
     Record<string, ReturnType<typeof lineDiff> | "loading">
   >({});
-  const [conflict, setConflict] = useState<null | {
-    index: number;
-    message: string;
-  }>(null);
+  const [conflict, setConflict] = useState<null | PublicConflict>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -539,12 +596,8 @@ export function AssignSkills({
       onAssigned?.();
       onClose();
     } catch (e) {
-      if (
-        e instanceof RequestError &&
-        (e.code === "local_changes" || e.code === "name_conflict") &&
-        typeof e.details.pin === "number"
-      )
-        setConflict({ index: e.details.pin, message: e.message });
+      const choice = publicConflict(e);
+      if (choice) setConflict(choice);
       else setError(e instanceof Error ? e.message : "Unable to assign");
     } finally {
       setBusy(false);
@@ -933,35 +986,15 @@ export function AssignSkills({
         </section>
       </div>
       {conflict && conflictPin?.kind === "public" && (
-        <div className="banner warning" role="alertdialog">
-          <p>{conflict.message}</p>
-          <div className="row">
-            <button
-              type="button"
-              onClick={() => {
-                update(conflict.index, {
-                  keep_local: true,
-                  copy_name: undefined,
-                });
-                setConflict(null);
-              }}
-            >
-              Keep my version
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                update(conflict.index, {
-                  keep_local: false,
-                  copy_name: suggestName(`${conflictPin.name}-2`),
-                });
-                setConflict(null);
-              }}
-            >
-              Add as {suggestName(`${conflictPin.name}-2`)}
-            </button>
-          </div>
-        </div>
+        <PublicChoice
+          code={conflict.code}
+          message={conflict.message}
+          name={conflictPin.name}
+          onChoose={(choice) => {
+            update(conflict.index, choice);
+            setConflict(null);
+          }}
+        />
       )}
       <footer>
         <span className="muted">

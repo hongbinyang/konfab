@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddAgentForm } from "../../web/src/AddAgentForm";
@@ -154,5 +160,88 @@ describe("Add agent form", () => {
       display_name: "Helper",
       app_id: "claude",
     });
+  });
+
+  const choosePublic = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByLabelText("Display name"), "Webber");
+    await user.click(screen.getByRole("button", { name: "Choose skills…" }));
+    await user.click(
+      await screen.findByRole("button", { name: /web-testing/ }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Add to selection" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Use these 1 skill" }));
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+  };
+  const posts = () => api.calls.filter((call) => call.url === "/api/agents");
+
+  it("asks to keep the local version of a changed public skill, then adds the agent", async () => {
+    agentResponse = () =>
+      posts().length === 1
+        ? json(409, {
+            code: "local_changes",
+            message:
+              "web-testing has local changes. Keep your version, or add the upstream skill as a separate skill.",
+            pin: 0,
+          })
+        : json(201, { ok: true });
+    const { user, onAdded } = setup();
+    await choosePublic(user);
+    const choice = await screen.findByRole("alertdialog");
+    expect(choice.textContent).toContain("has local changes");
+    expect(
+      (screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    await user.click(
+      within(choice).getByRole("button", { name: "Keep my version" }),
+    );
+    expect(
+      screen.getByText(/web-testing · full text · your local version/),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+    const pin = (
+      posts()[1]!.body as {
+        assignment: { pins: Array<{ public: Record<string, unknown> }> };
+      }
+    ).assignment.pins[0]!;
+    expect(pin.public).toMatchObject({
+      path: "skills/web-testing",
+      keep_local: true,
+    });
+    expect(pin.public.copy_name).toBeUndefined();
+  });
+
+  it("offers only a separate copy when a different skill has the name, then adds the agent", async () => {
+    agentResponse = () =>
+      posts().length === 1
+        ? json(409, {
+            code: "name_conflict",
+            message:
+              "A different skill named web-testing already exists. Choose another name for this copy.",
+            pin: 0,
+          })
+        : json(201, { ok: true });
+    const { user, onAdded } = setup();
+    await choosePublic(user);
+    const choice = await screen.findByRole("alertdialog");
+    expect(
+      within(choice).queryByRole("button", { name: "Keep my version" }),
+    ).toBeNull();
+    await user.click(
+      within(choice).getByRole("button", { name: "Add as web-testing-2" }),
+    );
+    expect(screen.getByText(/added as web-testing-2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+    const pin = (
+      posts()[1]!.body as {
+        assignment: { pins: Array<{ public: Record<string, unknown> }> };
+      }
+    ).assignment.pins[0]!;
+    expect(pin.public).toMatchObject({ copy_name: "web-testing-2" });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
