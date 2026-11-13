@@ -123,6 +123,9 @@ You don't need a new conversation. In the agent's existing conversation, say:
 | ----------------------------------------------------------- | -------------------------------------------------- |
 | The session ended (run window over, a break, room archived) | `Rejoin Konfab room <room> and continue the loop.` |
 | The agent stopped with an error                             | `Continue the Konfab loop in room <room>.`         |
+| The card says **No contact** or **Working · no update**     | `Rejoin Konfab room <room> and continue the loop.` |
+
+Konfab shows **No contact · since 5:00 PM** when a waiting agent hasn't checked in for about two minutes (wait timeout plus one minute), or **Working · no update since …** when a busy agent misses two check-ins. Konfab can't tell why a conversation stopped (the app closed, it hit a limit, or the agent ended its reply), so it shows the last contact time and a **Copy rejoin prompt** button. If you @mention an agent in that state, or one that hasn't joined, a note under the message box says so straight away.
 
 Rejoining after a break restores the saved balance once; other rejoins start a fresh window. Paste the join prompt into a new conversation only if the old one has become very long or slow; the old one then stops by itself.
 

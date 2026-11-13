@@ -32,6 +32,11 @@ import {
   type RoomAgent,
   type RoomState,
 } from "./api";
+import {
+  ContactNotice,
+  UnreachableNotice,
+  type Unreachable,
+} from "./ContactNotice";
 import { AddAgentForm } from "./AddAgentForm";
 
 const STATE_LABELS: Record<AgentState, string> = {
@@ -42,7 +47,7 @@ const STATE_LABELS: Record<AgentState, string> = {
   waiting_approval: "Waiting for approval",
   window_ended: "Run window ended",
   on_break: "On break",
-  not_responding: "Not responding",
+  not_responding: "No contact",
 };
 
 const REPORT_LABELS = {
@@ -1305,6 +1310,7 @@ function Composer({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
+  const [unreachable, setUnreachable] = useState<Unreachable[]>([]);
   const addFiles = async (files: File[]) => {
     if (!files.length || uploading) return;
     if (attachments.length + files.length > 20) {
@@ -1338,10 +1344,14 @@ function Composer({
   const send = () => {
     if (uploading || (!body.trim() && !attachments.length)) return;
     void act(async () => {
-      await request(`/api/rooms/${roomId}/messages`, {
-        method: "POST",
-        body: { body, attachment_ids: attachments.map((item) => item.id) },
-      });
+      const result = await request<{ unreachable?: Unreachable[] }>(
+        `/api/rooms/${roomId}/messages`,
+        {
+          method: "POST",
+          body: { body, attachment_ids: attachments.map((item) => item.id) },
+        },
+      );
+      setUnreachable(result.unreachable ?? []);
       setBody("");
       setAttachments([]);
       onSent();
@@ -1364,6 +1374,11 @@ function Composer({
       }}
     >
       <label htmlFor="message">Message</label>
+      <UnreachableNotice
+        items={unreachable}
+        agents={agents}
+        onDismiss={() => setUnreachable([])}
+      />
       {attachmentError && (
         <p className="attachment-error" role="alert">
           {attachmentError}
@@ -3015,11 +3030,7 @@ function AgentDetails({
 
   return (
     <>
-      {agent.state === "not_responding" && (
-        <p className="warning-text">
-          It may be out of allowance, so check its app.
-        </p>
-      )}
+      <ContactNotice agent={agent} />
       {agent.working && (
         <p className={workingStale ? "warning-text" : "muted"}>
           {workingStale

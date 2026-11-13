@@ -1128,3 +1128,19 @@ dd {
   overflow: auto;
   white-space: pre-wrap;
 }
+
+.contact-notice p {
+  margin: 2px 0;
+}
+
+.unreachable-notice {
+  grid-column: 1 / -1;
+  padding: 6px 8px;
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.unreachable-notice p {
+  margin: 0 0 4px;
+}

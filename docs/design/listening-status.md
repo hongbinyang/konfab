@@ -1,6 +1,6 @@
 # Listening status and recovery
 
-**Status:** proposed for review. Follows the 2026-11-12 incident where an agent's conversation stopped polling and the lead's `@all` waited unanswered.
+**Status:** built (`contactStale()` in the service, `web/src/ContactNotice.tsx`). Follows the 2026-11-12 incident where an agent's conversation stopped polling and the lead's `@all` waited unanswered.
 
 ## What happened
 
@@ -40,7 +40,7 @@ The agent's last `wait_for_turn` was at about 17:00:00. The lead posted `@all` a
   - **waiting** agents: `wait_timeout + 60 s` (110 s by default, same as today's event);
   - agents with a **working status**: `2 × check-in interval + 60 s` (5 min by default), so a 2-minute reporter is never flagged between reports.
 
-`agentState()` and the tick both use it. `isLive()` stays for turn routing but uses the same limit. The restart grace comes from `server_started_at`, kept in memory and set at boot.
+`agentState()` and the tick both use it. `isLive()` (90 s) is left as is for turn routing (who to skip, handoffs, automatic continuations); changing routing is a separate decision. The restart grace comes from `server_started_at`, kept in memory and set at boot.
 
 ### Card wording (page)
 
@@ -70,4 +70,4 @@ The idle reply gains `next: "Call wait_for_turn again now. Keep this conversatio
 - **Unit** (fake clock): one rule for the waiting and working limits; no flag between 2-minute reports; restart grace; pause doesn't flag an agent that keeps polling; break and ended window excluded; an active turn excluded; `contact_restored` on the next call.
 - **Integration:** a message API response lists unreachable mentioned agents (direct and `@all`), and lists nothing when everyone is in contact; the idle reply includes `next`.
 - **Component:** card wording for each state, plus a Copy rejoin prompt button that copies the agent's prompt; the mention note renders and is dismissible.
-- **Browser** (isolated, light and dark): join a scripted agent, stop polling, advance time on the server (via a test-only clock override in the fixture, or a short `wait_timeout`), see **No contact · last …**, mention it, see the note, then make a call and watch it clear.
+- **Browser** (Playwright, light and dark): mentioning an agent that hasn't joined shows the note with **Copy join prompt**, and **Dismiss** clears it. The stale card itself needs real time to pass, so it's covered by unit and component tests and checked by hand with `wait_timeout_seconds: 5`.

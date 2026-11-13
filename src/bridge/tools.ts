@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+/** Repeated on every idle reply so a long conversation keeps the loop going. */
+export const IDLE_NEXT =
+  "Call wait_for_turn again now. Keep this conversation in the loop until the status is closed or replaced, or the lead tells you to stop.";
+
 const SERVER_POLL_SECONDS = 20;
 const RETRY_DELAY_MS = 2_000;
 const CONNECTION_RETRY_MS = 100;
@@ -438,6 +442,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         if (!extra.signal.aborted) await finish();
         return asToolResult({
           status: "idle",
+          next: IDLE_NEXT,
           ...(runWindowNotice ? { run_window_notice: runWindowNotice } : {}),
         });
       } catch (error) {

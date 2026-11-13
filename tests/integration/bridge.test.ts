@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createBridgeServer } from "../../src/bridge/tools.js";
+import { createBridgeServer, IDLE_NEXT } from "../../src/bridge/tools.js";
 import { buildApp } from "../../src/server/api/app.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import {
@@ -767,6 +767,8 @@ describe("server and bridge", () => {
       session_id: joined.session_id,
     });
     expect(value.status).toBe("idle");
+    expect(value.next).toBe(IDLE_NEXT);
+    expect(IDLE_NEXT).toMatch(/wait_for_turn again now/);
     expect(service.roomState(ROOM).agents[0]?.stats.model_wait_calls).toBe(1);
     expect(
       service.roomState(ROOM).agents[0]?.stats.longest_wait_ms,

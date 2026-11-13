@@ -61,3 +61,20 @@ test("add an agent with an app and a confirmed role, then talk to the room", asy
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByText(/Room is paused/)).toBeVisible();
 });
+
+test("warns when a mentioned agent can't hear the lead", async ({
+  page,
+}, testInfo) => {
+  await openRoom(page, `mention-${testInfo.project.name}`);
+  await page.getByPlaceholder(/Message the room/).fill("@codex are you there?");
+  await page.getByRole("button", { name: "Send" }).click();
+  const notice = page.locator(".unreachable-notice");
+  await expect(notice).toContainText(
+    "Codex hasn't joined this room, so your mention is waiting.",
+  );
+  await expect(
+    notice.getByRole("button", { name: "Copy join prompt" }),
+  ).toBeVisible();
+  await notice.getByRole("button", { name: "Dismiss" }).click();
+  await expect(notice).toHaveCount(0);
+});
