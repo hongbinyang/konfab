@@ -1257,3 +1257,7 @@ button.link {
   white-space: pre-wrap;
   font-size: 0.85em;
 }
+.kept-version pre {
+  max-height: 12rem;
+  overflow: auto;
+}

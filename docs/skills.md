@@ -51,7 +51,7 @@ Assigning a public skill copies only that skill's files into your library, verif
 
 - **same commit:** reuses your copy;
 - **newer commit, your copy unchanged:** adds a new revision to your copy;
-- **newer commit, your copy edited** (or a different skill has that name): Konfab asks — **Keep my version**, or **Add as `name-2`**. It never overwrites your changes.
+- **newer commit, your copy edited** (or a different skill has that name): Konfab asks — **Keep my version**, or **Add as `name-2`**. It never overwrites your changes. Keeping your version shows that exact saved revision for you to review before you confirm; unsaved changes in its folder are not included.
 
 If the assignment fails (for example someone changed it meanwhile), nothing it would have copied is kept. The same applies when adding an agent with skills: no agent is created until the choice is made.
 

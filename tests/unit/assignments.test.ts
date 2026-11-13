@@ -424,6 +424,79 @@ describe("skill assignments", () => {
     });
   });
 
+  it("updates an unmodified public copy to a newer commit, but never replaces a locally saved revision", () => {
+    const pack = (commit: string, body: string) => ({
+      files: [
+        {
+          path: "SKILL.md",
+          content: Buffer.from(
+            `---\nname: web-check\ndescription: Checks web pages\n---\n${body}`,
+          ),
+          mode: 0o600,
+        },
+      ],
+      licence: "MIT",
+      provenance: {
+        source: { owner: "example", repository: "skills" },
+        commit: commit.repeat(40),
+        path: "skills/web-check",
+      },
+    });
+    const run = (commit: string, body: string, name?: string) =>
+      db.transaction(() =>
+        skills.importPublicForAssignment(
+          libraryId,
+          pack(commit, body),
+          name ? { name } : undefined,
+        ),
+      )();
+    const first = run("a", "v1");
+    expect(first.created).toBe("skill");
+    skills.finishWorkspaces();
+    expect(run("a", "v1")).toMatchObject({
+      created: "none",
+      revision_id: first.revision_id,
+    });
+    const second = run("b", "v2");
+    expect(second).toMatchObject({
+      created: "revision",
+      skill_id: first.skill_id,
+    });
+    skills.finishWorkspaces();
+    expect(skills.detail(first.skill_id)).toMatchObject({
+      current_revision_id: second.revision_id,
+      is_draft: false,
+    });
+    // A local edit saved as a new revision carries the same provenance, but is not upstream content.
+    const detail = skills.detail(first.skill_id);
+    skills.writeFile(
+      first.skill_id,
+      "notes.md",
+      Buffer.from("mine"),
+      detail.current_revision_id,
+      detail.draft_hash!,
+    );
+    const mine = skills.save(
+      first.skill_id,
+      detail.current_revision_id,
+      skills.detail(first.skill_id).draft_hash!,
+    );
+    let error: unknown;
+    try {
+      run("c", "v3");
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toMatchObject({
+      code: "local_changes",
+      local: { skill_id: first.skill_id, revision_id: mine, draft: false },
+    });
+    expect(skills.detail(first.skill_id).current_revision_id).toBe(mine);
+    // A separate copy leaves the lead's skill untouched.
+    expect(run("c", "v3", "web-check-2")).toMatchObject({ created: "skill" });
+    expect(skills.detail(first.skill_id).current_revision_id).toBe(mine);
+  });
+
   it("protects assigned skills from trash and keeps built-in skills read-only", () => {
     const helper = localSkill("helper", 10);
     assign("claude", [helper], "", [helper.revision_id]);

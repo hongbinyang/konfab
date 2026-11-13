@@ -194,11 +194,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         request.url,
       );
     if (error instanceof SkillError) {
-      const pin = (error as SkillError & { pin?: number }).pin;
+      const { pin, local } = error as SkillError & {
+        pin?: number;
+        local?: unknown;
+      };
       return reply.code(error.statusCode).send({
         code: error.code,
         message: error.message,
         ...(pin !== undefined ? { pin } : {}),
+        ...(local !== undefined ? { local } : {}),
       });
     }
     if (error instanceof KonfabError) {
@@ -1181,7 +1185,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         path: z.string().min(1).max(1024),
         preview_hash: z.string().regex(/^[a-f0-9]{64}$/),
         scope: z.enum(["personal", "project"]).default("personal"),
-        keep_local: z.boolean().optional(),
         copy_name: z.string().min(1).max(128).optional(),
       }),
       delivery: z.enum(["full", "summary"]).default("full"),
@@ -1253,7 +1256,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           imported = skillService().importPublicForAssignment(
             libraryId,
             packs[index]!,
-            { keep: pin.public.keep_local, name: pin.public.copy_name },
+            { name: pin.public.copy_name },
           );
         } catch (error) {
           // Tell the page which selected skill needs a choice.

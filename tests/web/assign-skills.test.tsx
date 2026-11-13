@@ -165,12 +165,73 @@ describe("Assign skills dialog", () => {
     ).toBe(true);
   });
 
-  it("asks what to do when a public skill has local changes, then retries with the choice", async () => {
+  it("keeping my version shows that exact saved revision for review and assigns it as an ordinary pin", async () => {
     putResponses.push(() =>
       json(409, {
         code: "local_changes",
         message:
           "web-testing has local changes. Keep your version, or add the upstream skill as a separate skill.",
+        pin: 1,
+        local: {
+          skill_id: "s-web",
+          revision_id: "11111111-1111-4111-8111-0000000000c2",
+          name: "web-testing",
+          number: 2,
+          reviewed: false,
+          draft: true,
+        },
+      }),
+    );
+    const { user, onAssigned } = setup();
+    await user.click(
+      await screen.findByRole("button", { name: /web-testing/ }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Add to selection" }),
+    );
+    const assign = () =>
+      screen.getByRole("button", { name: "Assign 2 skills to Claude" });
+    await user.click(assign());
+    const choice = await screen.findByRole("alertdialog");
+    expect(choice.textContent).toContain("has local changes");
+    // Nothing can be assigned until the lead chooses.
+    expect((assign() as HTMLButtonElement).disabled).toBe(true);
+    await user.click(
+      within(choice).getByRole("button", { name: "Keep my version" }),
+    );
+    // The saved revision itself is shown, with the draft caveat.
+    const kept = await selectedList().findByLabelText("web-testing rev 2");
+    expect(kept.textContent).toContain("line from c2");
+    expect(
+      selectedList().getByText(
+        /unsaved changes in its folder are not included/,
+      ),
+    ).toBeTruthy();
+    expect(
+      selectedList().getAllByText(/Not reviewed — confirming reviews it/),
+    ).toHaveLength(1);
+    await user.click(assign());
+    await waitFor(() => expect(onAssigned).toHaveBeenCalled());
+    const puts = api.calls.filter((call) => call.method === "PUT");
+    expect(puts).toHaveLength(2);
+    expect(puts[1]!.body).toMatchObject({
+      pins: [
+        { skill_id: "s-dev", revision_id: REV_DEV_2 },
+        {
+          skill_id: "s-web",
+          revision_id: "11111111-1111-4111-8111-0000000000c2",
+          delivery: "full",
+        },
+      ],
+      review: ["11111111-1111-4111-8111-0000000000c2"],
+    });
+  });
+
+  it("adds a separate copy when a different skill has the name", async () => {
+    putResponses.push(() =>
+      json(409, {
+        code: "name_conflict",
+        message: "A different skill named web-testing already exists.",
         pin: 1,
       }),
     );
@@ -185,23 +246,24 @@ describe("Assign skills dialog", () => {
       screen.getByRole("button", { name: "Assign 2 skills to Claude" }),
     );
     const choice = await screen.findByRole("alertdialog");
-    expect(choice.textContent).toContain("has local changes");
+    expect(
+      within(choice).queryByRole("button", { name: "Keep my version" }),
+    ).toBeNull();
     await user.click(
-      within(choice).getByRole("button", { name: "Keep my version" }),
+      within(choice).getByRole("button", { name: "Add as web-testing-2" }),
     );
     await user.click(
       screen.getByRole("button", { name: "Assign 2 skills to Claude" }),
     );
     await waitFor(() => expect(onAssigned).toHaveBeenCalled());
     const puts = api.calls.filter((call) => call.method === "PUT");
-    expect(puts).toHaveLength(2);
     expect((puts[1]!.body as { pins: unknown[] }).pins[1]).toEqual({
       public: {
         source_id: "22222222-2222-4222-8222-000000000001",
         commit: "a".repeat(40),
         path: "skills/web-testing",
         preview_hash: "f".repeat(64),
-        keep_local: true,
+        copy_name: "web-testing-2",
       },
       delivery: "full",
     });

@@ -196,4 +196,5 @@ Decisions made during code review, beyond the sections above:
 - **Notices** are clipped to 2,048 bytes as JSON, the amount every size check reserves, so a delivered assignment never exceeds 64 KiB.
 - **Role files named `SKILL.md`** are kept in the converted skill as `role-SKILL.md` and listed in the upgrade log.
 - **Cross-room updates** refuse the whole update if any target room is archived.
-- **Public conflicts** return `{code, pin}`; the picker and the Add agent form both show the choice (Keep my version only for `local_changes`), and adding an agent creates nothing until the choice is made.
+- **Public conflicts** return `{code, pin}`, and for `local_changes` also the exact saved revision of the lead's copy (`local`). **Keep my version** replaces the public skill with that revision as an ordinary pin, shown for review (drafts excluded) and reviewed only by the confirmation; there is no server-side "keep" shortcut. Adding an agent creates nothing until the choice is made in the picker.
+- **Unmodified copy** means the current revision's content equals the revision first imported for its commit (saving copies provenance forward, so provenance alone is not enough).

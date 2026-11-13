@@ -176,7 +176,7 @@ describe("Add agent form", () => {
   };
   const posts = () => api.calls.filter((call) => call.url === "/api/agents");
 
-  it("asks to keep the local version of a changed public skill, then adds the agent", async () => {
+  it("on a changed public skill, reopens the picker to review my saved version, then adds the agent with it", async () => {
     agentResponse = () =>
       posts().length === 1
         ? json(409, {
@@ -184,34 +184,45 @@ describe("Add agent form", () => {
             message:
               "web-testing has local changes. Keep your version, or add the upstream skill as a separate skill.",
             pin: 0,
+            local: {
+              skill_id: "s-web",
+              revision_id: "11111111-1111-4111-8111-0000000000c2",
+              name: "web-testing",
+              number: 2,
+              reviewed: true,
+              draft: false,
+            },
           })
         : json(201, { ok: true });
     const { user, onAdded } = setup();
     await choosePublic(user);
+    // No agent was added; the picker opens with the choice.
     const choice = await screen.findByRole("alertdialog");
-    expect(choice.textContent).toContain("has local changes");
-    expect(
-      (screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect(onAdded).not.toHaveBeenCalled();
     await user.click(
       within(choice).getByRole("button", { name: "Keep my version" }),
     );
     expect(
-      screen.getByText(/web-testing · full text · your local version/),
+      (await screen.findByLabelText("web-testing rev 2")).textContent,
+    ).toContain("line from c2");
+    await user.click(screen.getByRole("button", { name: "Use these 1 skill" }));
+    expect(
+      screen.getByText(/web-testing · full text · your saved version, rev 2/),
     ).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Add agent" }));
     await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
-    const pin = (
-      posts()[1]!.body as {
-        assignment: { pins: Array<{ public: Record<string, unknown> }> };
-      }
-    ).assignment.pins[0]!;
-    expect(pin.public).toMatchObject({
-      path: "skills/web-testing",
-      keep_local: true,
+    expect(posts()[1]!.body).toMatchObject({
+      assignment: {
+        pins: [
+          {
+            skill_id: "s-web",
+            revision_id: "11111111-1111-4111-8111-0000000000c2",
+            delivery: "full",
+          },
+        ],
+        review: [],
+      },
     });
-    expect(pin.public.copy_name).toBeUndefined();
   });
 
   it("offers only a separate copy when a different skill has the name, then adds the agent", async () => {
@@ -233,6 +244,7 @@ describe("Add agent form", () => {
     await user.click(
       within(choice).getByRole("button", { name: "Add as web-testing-2" }),
     );
+    await user.click(screen.getByRole("button", { name: "Use these 1 skill" }));
     expect(screen.getByText(/added as web-testing-2/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Add agent" }));
     await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));

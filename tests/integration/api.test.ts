@@ -280,8 +280,7 @@ describe("page API", () => {
   });
 
   /** Serves one public skill from a fake GitHub source and returns its picker pin. */
-  const publicSkill = async (manifest: string) => {
-    const commit = "a".repeat(40);
+  const publicSkill = async (manifest: string, commit = "a".repeat(40)) => {
     const hash = createHash("sha1")
       .update(`blob ${Buffer.byteLength(manifest)}\0`)
       .update(manifest)
@@ -367,6 +366,96 @@ describe("page API", () => {
       service.roomState(room.id).agents.find((agent) => agent.id === "invoicer")
         ?.assignment.label,
     ).toBe("public-sample-2 rev 1");
+  });
+
+  it("names the exact saved revision when a public skill has local changes, and assigns only that revision", async () => {
+    const room = service.createRoom("keep-local", "", ["codex"]);
+    const url = `/api/rooms/${room.id}/members/codex/assignment`;
+    const upstream = await publicSkill(
+      "---\nname: public-sample\ndescription: Invoice workflow\n---\nupstream",
+    );
+    expect(
+      (
+        await call("PUT", url, {
+          base_revision: 0,
+          pins: [{ public: upstream }],
+        })
+      ).statusCode,
+    ).toBe(200);
+    const library = new SkillLibrary(db);
+    const imported = (await call("GET", url)).json().skills[0] as {
+      skill_id: string;
+      revision_id: string;
+    };
+    const id = imported.skill_id;
+    // The lead edits their copy and saves it as rev 2 (not reviewed yet).
+    library.writeFile(
+      id,
+      "notes.md",
+      Buffer.from("mine"),
+      imported.revision_id,
+      library.detail(id).draft_hash!,
+    );
+    const mine = library.save(
+      id,
+      imported.revision_id,
+      library.detail(id).draft_hash!,
+    );
+    const clash = await call("PUT", url, {
+      base_revision: 1,
+      pins: [{ public: upstream }],
+    });
+    expect(clash.statusCode).toBe(409);
+    expect(clash.json()).toMatchObject({
+      code: "local_changes",
+      pin: 0,
+      local: {
+        skill_id: id,
+        revision_id: mine,
+        name: "public-sample",
+        number: 2,
+        reviewed: false,
+        draft: false,
+      },
+    });
+    // The old silent "keep" request field is ignored: it still asks.
+    expect(
+      (
+        await call("PUT", url, {
+          base_revision: 1,
+          pins: [{ public: { ...upstream, keep_local: true } }],
+        })
+      ).statusCode,
+    ).toBe(409);
+    // Keeping it is an ordinary pin to the exact revision shown: unreviewed, it needs review.
+    const pin = { skill_id: id, revision_id: mine };
+    expect(
+      (await call("PUT", url, { base_revision: 1, pins: [pin] })).statusCode,
+    ).toBe(409);
+    // Meanwhile the lead saves rev 3. Confirming assigns exactly rev 2, as shown.
+    library.writeFile(
+      id,
+      "notes.md",
+      Buffer.from("newer"),
+      mine,
+      library.detail(id).draft_hash!,
+    );
+    const newer = library.save(id, mine, library.detail(id).draft_hash!);
+    const kept = await call("PUT", url, {
+      base_revision: 1,
+      pins: [pin],
+      review: [mine],
+    });
+    expect(kept.statusCode).toBe(200);
+    expect(kept.json().skills[0]).toMatchObject({
+      revision_id: mine,
+      number: 2,
+      reviewed: true,
+      latest: { id: newer, number: 3 },
+    });
+    expect(
+      (await call("GET", `/api/library/skills/${id}`)).json().reviewed_at,
+    ).toBeNull();
   });
 
   it("discovers, previews and assigns a pinned public skill without persisting the search", async () => {

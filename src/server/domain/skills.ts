@@ -1841,7 +1841,7 @@ export class SkillLibrary {
       licence: string | null;
       provenance: Record<string, unknown>;
     },
-    choice?: { keep?: boolean; name?: string },
+    choice?: { name?: string },
   ): {
     skill_id: string;
     revision_id: string;
@@ -1897,12 +1897,6 @@ export class SkillLibrary {
           revision_id: existing.current_revision_id,
           created: "none",
         };
-      if (choice?.keep)
-        return {
-          skill_id: existing.id,
-          revision_id: existing.current_revision_id,
-          created: "none",
-        };
       let draft: boolean;
       try {
         draft =
@@ -1916,15 +1910,39 @@ export class SkillLibrary {
         string,
         unknown
       >;
+      // Saving copies provenance forward, so an unmodified copy is one whose
+      // content still equals the revision first imported for that commit.
+      const imported = this.db
+        .prepare(
+          "SELECT content_hash FROM skill_revisions WHERE skill_id = ? AND provenance_json = ? ORDER BY number LIMIT 1",
+        )
+        .get(existing.id, existing.provenance_json) as
+        { content_hash: string } | undefined;
       if (
         draft ||
         !sameSource(existing.provenance_json) ||
-        provenance.customized
+        provenance.customized ||
+        imported?.content_hash !== existing.content_hash
       )
-        throw new SkillError(
-          "local_changes",
-          409,
-          `${existing.folder_name} has local changes. Keep your version, or add the upstream skill as a separate skill.`,
+        // Name the exact saved revision, so the page can show it for review if the lead keeps it.
+        throw Object.assign(
+          new SkillError(
+            "local_changes",
+            409,
+            `${existing.folder_name} has local changes. Keep your version, or add the upstream skill as a separate skill.`,
+          ),
+          {
+            local: {
+              skill_id: existing.id,
+              revision_id: existing.current_revision_id,
+              name: existing.folder_name,
+              number: existing.number,
+              reviewed: !!this.db
+                .prepare("SELECT 1 FROM skill_reviews WHERE revision_id = ?")
+                .get(existing.current_revision_id),
+              draft,
+            },
+          },
         );
       const metadata = skillMetadata(pack.files);
       const revision = randomUUID();

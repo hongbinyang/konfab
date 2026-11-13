@@ -58,6 +58,8 @@ export type Pick =
       source: string;
       latest: { id: string; number: number } | null;
       bytes: number | null;
+      /** Shown for review when the lead kept their own saved version of a public skill. */
+      kept?: { content: string | null; draft: boolean };
     }
   | {
       kind: "public";
@@ -69,7 +71,6 @@ export type Pick =
       delivery: Delivery;
       source: string;
       bytes: number;
-      keep_local?: boolean;
       copy_name?: string;
     };
 export type Selection = { instructions: string; pins: Pick[] };
@@ -126,6 +127,15 @@ export type PublicConflict = {
   index: number;
   message: string;
   code: "local_changes" | "name_conflict";
+  /** For local changes: the exact saved revision of the lead's copy. */
+  local?: {
+    skill_id: string;
+    revision_id: string;
+    name: string;
+    number: number;
+    reviewed: boolean;
+    draft: boolean;
+  };
 };
 
 /** Reads a server conflict about one selected public skill, if that is what the error is. */
@@ -133,7 +143,14 @@ export function publicConflict(error: unknown): PublicConflict | null {
   return error instanceof RequestError &&
     (error.code === "local_changes" || error.code === "name_conflict") &&
     typeof error.details.pin === "number"
-    ? { index: error.details.pin, message: error.message, code: error.code }
+    ? {
+        index: error.details.pin,
+        message: error.message,
+        code: error.code,
+        ...(error.details.local
+          ? { local: error.details.local as PublicConflict["local"] }
+          : {}),
+      }
     : null;
 }
 
@@ -151,7 +168,7 @@ export function PublicChoice({
   code: PublicConflict["code"];
   message: string;
   name: string;
-  onChoose: (choice: { keep_local?: boolean; copy_name?: string }) => void;
+  onChoose: (choice: { keep: true } | { copy_name: string }) => void;
 }) {
   const copy = suggestName(`${name}-2`);
   return (
@@ -163,17 +180,11 @@ export function PublicChoice({
       <p>{message}</p>
       <div className="row">
         {code === "local_changes" && (
-          <button
-            type="button"
-            onClick={() => onChoose({ keep_local: true, copy_name: undefined })}
-          >
+          <button type="button" onClick={() => onChoose({ keep: true })}>
             Keep my version
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => onChoose({ keep_local: false, copy_name: copy })}
-        >
+        <button type="button" onClick={() => onChoose({ copy_name: copy })}>
           Add as {copy}
         </button>
       </div>
@@ -196,7 +207,6 @@ export function requestPins(pins: Pick[]) {
             commit: pin.commit,
             path: pin.path,
             preview_hash: pin.preview_hash,
-            ...(pin.keep_local ? { keep_local: true } : {}),
             ...(pin.copy_name ? { copy_name: pin.copy_name } : {}),
           },
           delivery: pin.delivery,
@@ -222,6 +232,7 @@ export function AssignSkills({
   agentId,
   agentName,
   initial,
+  initialConflict,
   onChoose,
   onClose,
   onAssigned,
@@ -230,6 +241,8 @@ export function AssignSkills({
   agentId?: string;
   agentName: string;
   initial?: Selection;
+  /** A conflict from an earlier request, to resolve when the dialog opens. */
+  initialConflict?: PublicConflict | null;
   onChoose?: (selection: Selection) => void;
   onClose: () => void;
   onAssigned?: () => void;
@@ -261,7 +274,9 @@ export function AssignSkills({
   const [diffs, setDiffs] = useState<
     Record<string, ReturnType<typeof lineDiff> | "loading">
   >({});
-  const [conflict, setConflict] = useState<null | PublicConflict>(null);
+  const [conflict, setConflict] = useState<null | PublicConflict>(
+    initialConflict ?? null,
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -604,6 +619,57 @@ export function AssignSkills({
     }
   };
 
+  /**
+   * Keeping the lead's own version replaces the public skill with the exact
+   * saved revision of their copy, shown here for review; it is assigned (and,
+   * if needed, reviewed) only when the lead confirms. Unsaved drafts are never
+   * included.
+   */
+  const resolve = async (
+    found: PublicConflict,
+    choice: { keep: true } | { copy_name: string },
+  ) => {
+    setConflict(null);
+    if ("copy_name" in choice) {
+      update(found.index, { copy_name: choice.copy_name });
+      return;
+    }
+    const local = found.local;
+    if (!local) return;
+    const pin = pins[found.index];
+    let content: string | null = null;
+    try {
+      content = decode(
+        (
+          await request<{ content_base64: string }>(
+            `/api/library/skills/${encodeURIComponent(local.skill_id)}/revisions/${local.revision_id}/files?path=SKILL.md`,
+          )
+        ).content_base64,
+      );
+    } catch {
+      content = null;
+    }
+    setPins((current) =>
+      current.map((item, i) =>
+        i === found.index
+          ? {
+              kind: "local",
+              skill_id: local.skill_id,
+              revision_id: local.revision_id,
+              name: local.name,
+              number: local.number,
+              delivery: pin?.delivery ?? "full",
+              reviewed: local.reviewed,
+              source: "Your saved version",
+              latest: null,
+              bytes: null,
+              kept: { content, draft: local.draft },
+            }
+          : item,
+      ),
+    );
+  };
+
   const items: Result[] = [
     ...results,
     ...publicItems.map((item): Result => ({ kind: "public", public: item })),
@@ -909,6 +975,21 @@ export function AssignSkills({
                         </span>
                       )}
                     </div>
+                    {pin.kind === "local" && pin.kept && (
+                      <div className="kept-version">
+                        <p className="muted">
+                          Your saved version, rev {pin.number}, instead of the
+                          upstream skill you previewed. Review it below
+                          {pin.kept.draft
+                            ? "; unsaved changes in its folder are not included (save them in Manage library first if you want them)"
+                            : ""}
+                          .
+                        </p>
+                        <pre aria-label={`${pin.name} rev ${pin.number}`}>
+                          {pin.kept.content ?? "Unable to load this revision."}
+                        </pre>
+                      </div>
+                    )}
                     {pin.kind === "local" && pin.latest && (
                       <div className="row">
                         <span className="chip warning">
@@ -990,10 +1071,7 @@ export function AssignSkills({
           code={conflict.code}
           message={conflict.message}
           name={conflictPin.name}
-          onChoose={(choice) => {
-            update(conflict.index, choice);
-            setConflict(null);
-          }}
+          onChoose={(choice) => void resolve(conflict, choice)}
         />
       )}
       <footer>
@@ -1009,7 +1087,7 @@ export function AssignSkills({
         </button>
         <button
           type="button"
-          disabled={busy || over || baseRevision === undefined}
+          disabled={busy || over || !!conflict || baseRevision === undefined}
           onClick={() => void submit()}
         >
           {onChoose

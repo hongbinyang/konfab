@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 import { request, type Overview } from "./api";
 import {
   AssignSkills,
-  PublicChoice,
   publicConflict,
   requestPins,
   reviewIds,
@@ -90,7 +89,9 @@ export function AddAgentForm({
       // The server adds nothing when a public skill clashes; ask, then the lead submits again.
       const choice = publicConflict(error);
       if (choice) {
+        // Resolve it in the picker, where the lead can review what will be used.
         setConflict(choice);
+        setChoosing(true);
         return;
       }
       setAgentError(
@@ -189,8 +190,8 @@ export function AddAgentForm({
                 <li key={`${pin.kind}:${pin.name}`}>
                   {pin.name} ·{" "}
                   {pin.delivery === "full" ? "full text" : "summary"}
-                  {pin.kind === "public" && pin.keep_local
-                    ? " · your local version"
+                  {pin.kind === "local" && pin.kept
+                    ? ` · your saved version, rev ${pin.number}`
                     : pin.kind === "public" && pin.copy_name
                       ? ` · added as ${pin.copy_name}`
                       : ""}
@@ -211,27 +212,22 @@ export function AddAgentForm({
           roomId={roomId}
           agentName={newName.trim() || "new agent"}
           initial={selection}
-          onChoose={setSelection}
+          initialConflict={conflict}
+          onChoose={(next) => {
+            setSelection(next);
+            setConflict(null);
+          }}
           onClose={() => setChoosing(false)}
         />
       )}
-      {conflict && selection.pins[conflict.index]?.kind === "public" && (
-        <PublicChoice
-          code={conflict.code}
-          message={conflict.message}
-          name={selection.pins[conflict.index]!.name}
-          onChoose={(choice) => {
-            setSelection((current) => ({
-              ...current,
-              pins: current.pins.map((pin, index) =>
-                index === conflict.index && pin.kind === "public"
-                  ? { ...pin, ...choice }
-                  : pin,
-              ),
-            }));
-            setConflict(null);
-          }}
-        />
+      {conflict && !choosing && (
+        <p role="alert" className="warning-text">
+          {selection.pins[conflict.index]?.name ?? "A skill"} needs a choice
+          before the agent can be added.{" "}
+          <button type="button" onClick={() => setChoosing(true)}>
+            Choose
+          </button>
+        </p>
       )}
       {agentError && (
         <p role="alert" className="warning-text">
