@@ -304,7 +304,8 @@ export function LocalImport({
       </div>
       <p className="muted">
         Any file name works; Konfab saves the skill file as SKILL.md in a folder
-        named after the skill.
+        named after the skill. In the folder dialog, select the folder itself;
+        the files inside are shown greyed out.
       </p>
       {result?.folder === "pending" && result.pending_reason && (
         <>
