@@ -23,6 +23,8 @@ import {
   folderHash,
   KEPT_ROOT,
   SkillWorkspace,
+  targetIdentity,
+  workspaceHooks,
   WRITING_MARKER,
   type PendingCode,
   type PendingReason,
@@ -1070,7 +1072,21 @@ export class SkillLibrary {
   }
 
   save(id: string, baseRevision: string, baseDraftHash: string): string {
-    this.assertWritable(id);
+    return this.saveDraft(id, baseRevision, baseDraftHash, false);
+  }
+
+  /**
+   * Saves the folder as a new revision. With `finishingPendingFolder`, the
+   * skill's pending folder operation (an edited folder) is completed in the
+   * same transaction, so a crash leaves either both or neither.
+   */
+  private saveDraft(
+    id: string,
+    baseRevision: string,
+    baseDraftHash: string,
+    finishingPendingFolder: boolean,
+  ): string {
+    if (!finishingPendingFolder) this.assertWritable(id);
     this.recoverRenames(id);
     const row = this.db
       .prepare(
@@ -1147,6 +1163,20 @@ export class SkillLibrary {
       this.db
         .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
         .run(revision, id);
+      if (finishingPendingFolder) {
+        const done = this.db
+          .prepare(
+            "UPDATE skill_workspace_operations SET state = 'complete', step = 'done', reason_json = NULL WHERE skill_id = ? AND state = 'pending'",
+          )
+          .run(id);
+        if (done.changes !== 1)
+          throw new SkillError(
+            "import_changed",
+            409,
+            "This changed; review again.",
+          );
+        workspaceHooks.inSaveEdits?.(id);
+      }
     })();
     return revision;
   }
@@ -2308,22 +2338,20 @@ export class SkillLibrary {
         400,
         "This folder is a partial copy Konfab was writing; move it aside instead.",
       );
-    // The edited folder becomes the newest revision; the import stays in History.
-    this.db
-      .prepare(
-        "UPDATE skill_workspace_operations SET state = 'complete', step = 'done', reason_json = NULL WHERE skill_id = ?",
-      )
-      .run(skillId);
-    try {
-      this.save(skillId, row.current_revision_id, folderHash(folder));
-    } catch (error) {
-      this.db
-        .prepare(
-          "UPDATE skill_workspace_operations SET state = 'pending', reason_json = ? WHERE skill_id = ?",
-        )
-        .run(JSON.stringify(reason), skillId);
-      throw error;
-    }
+    // The edited folder becomes the newest revision and the pending operation
+    // completes in the same transaction; the import stays in History. The
+    // folder must still be exactly what the lead was shown.
+    if (
+      !reason.target ||
+      reason.target !== expectedTarget ||
+      targetIdentity(folder) !== reason.target
+    )
+      throw new SkillError(
+        "import_changed",
+        409,
+        "This changed; review again.",
+      );
+    this.saveDraft(skillId, row.current_revision_id, folderHash(folder), true);
     return { folder: "ready" };
   }
 

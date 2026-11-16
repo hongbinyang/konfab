@@ -103,6 +103,8 @@ interface Operation {
 /** Test seam: called after each step, so tests can simulate a crash or a race there. */
 export const workspaceHooks: {
   afterStep?: (step: Step, skillId: string) => void;
+  /** Called inside the Save-my-edits transaction, before it commits. */
+  inSaveEdits?: (skillId: string) => void;
   /** Called right after each file system change, before the journal records what follows. */
   afterFs?: (label: string, skillId: string) => void;
   beforeFile?: (path: string, skillId: string) => void;

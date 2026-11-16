@@ -307,7 +307,7 @@ export function Library({
                       <PendingFolder
                         skillId={s.id}
                         reason={s.workspace_reason}
-                        onResolved={() => void run(async () => undefined)}
+                        onResolved={() => void refresh()}
                       />
                     ) : (
                       <p role="alert">

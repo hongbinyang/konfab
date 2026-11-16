@@ -899,4 +899,87 @@ describe("importing a local skill", () => {
       "folder_exists",
     );
   });
+
+  it("saves edits and completes the pending folder in one step, or neither, across a restart", () => {
+    const path = join(home, "konfab.db");
+    const first = commit(upload({ "SKILL.md": manifest("both") }), "both");
+    const u = upload({ "SKILL.md": manifest("both", "license: MIT\n") });
+    const expected = preview(u).expected;
+    workspaceHooks.afterStep = (step) => {
+      if (step === "aside")
+        writeFileSync(join(root, "both", "late.md"), "late edit");
+    };
+    const result = library.importLocal(
+      libraryId,
+      u,
+      "both",
+      "replace",
+      expected,
+    );
+    workspaceHooks.afterStep = undefined;
+    const reason = library.workspaceReason(first.skill_id);
+    expect(reason?.code).toBe("folder_edited");
+    // A crash inside the save: nothing of it is kept.
+    workspaceHooks.inSaveEdits = () => {
+      throw new Error("crash");
+    };
+    expect(() =>
+      library.resolveWorkspace(
+        first.skill_id,
+        "save_edits",
+        "folder_edited",
+        reason?.target ?? null,
+      ),
+    ).toThrow("crash");
+    workspaceHooks.inSaveEdits = undefined;
+    db.close();
+    db = openDatabase(path);
+    library = new SkillLibrary(db);
+    expect(library.revisions(first.skill_id)).toHaveLength(2);
+    expect(library.detail(first.skill_id).current_revision_id).toBe(
+      result.revision_id,
+    );
+    expect(library.workspaceReason(first.skill_id)?.code).toBe("folder_edited");
+    expect(readFileSync(join(root, "both", "late.md"), "utf8")).toBe(
+      "late edit",
+    );
+    // A save that fails validation leaves the pending state as it was, too.
+    writeFileSync(join(root, "both", "SKILL.md"), "no front matter");
+    const changed = library.workspaceReason(first.skill_id);
+    expect(() =>
+      library.resolveWorkspace(
+        first.skill_id,
+        "save_edits",
+        "folder_edited",
+        changed?.target ?? null,
+      ),
+    ).toThrow("This changed");
+    expect(library.workspaceReason(first.skill_id)?.code).toBe("folder_edited");
+    library.finishWorkspaces();
+    const fresh = library.workspaceReason(first.skill_id);
+    expect(() =>
+      library.resolveWorkspace(
+        first.skill_id,
+        "save_edits",
+        "folder_edited",
+        fresh?.target ?? null,
+      ),
+    ).toThrow();
+    expect(library.workspaceReason(first.skill_id)?.code).toBe("folder_edited");
+    expect(library.revisions(first.skill_id)).toHaveLength(2);
+    // Fixed, the save completes both together.
+    writeFileSync(join(root, "both", "SKILL.md"), manifest("both"));
+    library.finishWorkspaces();
+    const ready = library.workspaceReason(first.skill_id);
+    expect(
+      library.resolveWorkspace(
+        first.skill_id,
+        "save_edits",
+        "folder_edited",
+        ready?.target ?? null,
+      ),
+    ).toEqual({ folder: "ready" });
+    expect(library.revisions(first.skill_id)).toHaveLength(3);
+    expect(library.workspaceReason(first.skill_id)).toBeNull();
+  });
 });

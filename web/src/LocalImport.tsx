@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { request } from "./api";
+import { RequestError, request } from "./api";
 
 type Upload = {
   source_name: string;
@@ -122,6 +122,22 @@ export function PendingFolder({
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "That didn't work");
+      // The folder changed since this was shown: show what is there now, so
+      // the lead decides again on the current state.
+      if (e instanceof RequestError && e.code === "import_changed")
+        try {
+          onResolved(
+            await request(`/api/library/skills/${skillId}/workspace/resolve`, {
+              method: "POST",
+              body: { action: "retry", expected_reason: reason.code },
+            }),
+          );
+          setError(
+            "The folder changed since this was shown. Here is what's there now; choose again.",
+          );
+        } catch {
+          /* Keep the first message. */
+        }
     }
   };
   return (
