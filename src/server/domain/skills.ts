@@ -19,7 +19,21 @@ import { dirname, isAbsolute } from "node:path";
 import { parseDocument } from "yaml";
 import { join } from "node:path";
 import type { Db } from "../db/index.js";
-import { SkillWorkspace, type WorkspaceResult } from "./skill-workspace.js";
+import {
+  folderHash,
+  KEPT_ROOT,
+  SkillWorkspace,
+  WRITING_MARKER,
+  type PendingCode,
+  type PendingReason,
+  type WorkspaceResult,
+} from "./skill-workspace.js";
+import {
+  manifestLicence,
+  normalizeUpload,
+  renameManifest,
+  type LocalUpload,
+} from "./local-import.js";
 import {
   packageHash,
   readSkillFiles,
@@ -618,7 +632,14 @@ export class SkillLibrary {
       WHERE s.library_id = ? AND (s.trashed_at IS NOT NULL) = ? ORDER BY s.folder_name`,
         )
         .all(libraryId, trash ? 1 : 0) as Record<string, unknown>[]
-    ).map((skill) => {
+    ).map((row) => {
+      const skill = {
+        ...row,
+        workspace_reason:
+          row.workspace_state === "pending"
+            ? this.workspace.reason(String(row.id))
+            : null,
+      } as Record<string, unknown>;
       try {
         return {
           ...skill,
@@ -1800,23 +1821,7 @@ export class SkillLibrary {
           400,
           invalidNameMessage(choice.name),
         );
-      files = files.map((file) => {
-        if (file.path !== "SKILL.md") return file;
-        const text = file.content.toString("utf8");
-        const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-        if (!match?.[1]) return file;
-        const doc = parseDocument(match[1], {
-          uniqueKeys: true,
-          customTags: [],
-        });
-        doc.set("name", choice.name);
-        return {
-          ...file,
-          content: Buffer.from(
-            `---\n${doc.toString()}---\n${text.slice(match[0].length)}`,
-          ),
-        };
-      });
+      files = renameManifest(files, choice.name);
     }
     const metadata = skillMetadata(files);
     if (
@@ -1834,28 +1839,15 @@ export class SkillLibrary {
       );
     const id = randomUUID();
     const revision = randomUUID();
-    this.db
-      .prepare(
-        "INSERT INTO skills(id, library_id, folder_name, current_revision_id, created_at) VALUES (?, ?, ?, NULL, ?)",
-      )
-      .run(id, libraryId, metadata.name, this.now());
-    this.insertRevisionRows(
+    this.addSkillRows(
+      libraryId,
       id,
       revision,
-      1,
       files,
       metadata,
       pack.provenance,
       pack.licence,
     );
-    this.db
-      .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
-      .run(revision, id);
-    this.db
-      .prepare(
-        "INSERT INTO skill_workspace_operations(skill_id, revision_id, state, created_at) VALUES (?, ?, 'pending', ?)",
-      )
-      .run(id, revision, this.now());
     return { skill_id: id, revision_id: revision, created: "skill" };
   }
 
@@ -1894,6 +1886,515 @@ export class SkillLibrary {
       blob.run(blobHash, file.content);
       ref.run(revision, file.path, blobHash, file.mode);
     }
+  }
+
+  private libraryRoot(libraryId: string): string {
+    const library = this.db
+      .prepare("SELECT root_path FROM skill_libraries WHERE id = ?")
+      .get(libraryId) as { root_path: string } | undefined;
+    if (!library || !existsSync(library.root_path))
+      throw new SkillError("unavailable", 404, "Skill library unavailable");
+    return library.root_path;
+  }
+
+  /**
+   * Previews a skill chosen on the lead's computer: the package it becomes,
+   * its name and folder, and any collision in this library. Writes nothing.
+   */
+  prepareLocalImport(libraryId: string, upload: LocalUpload, name?: string) {
+    const root = this.libraryRoot(libraryId);
+    const normalized = normalizeUpload(upload);
+    const errors = [...normalized.errors];
+    let files = normalized.files;
+    let manifestName: string | null = null;
+    let description = "";
+    if (normalized.skill_file) {
+      try {
+        manifestName = skillMetadata(files).name;
+      } catch (error) {
+        // A name problem can be fixed by typing a name; anything else is reported.
+        const text = files
+          .find((file) => file.path === "SKILL.md")
+          ?.content.toString("utf8");
+        const declared = text && /^---\r?\n[\s\S]*?^name:\s*(.+)$/m.exec(text);
+        manifestName =
+          declared?.[1]?.trim().replace(/^["']|["']$/g, "") ?? null;
+        if (!name) errors.push((error as Error).message);
+      }
+    } else if (!normalized.errors.length)
+      errors.push(
+        normalized.candidates.length
+          ? "Choose which file is the skill file."
+          : "No skill file found: add front matter with name: and description: to one file.",
+      );
+    if (normalized.destination_clash)
+      errors.push(
+        `${normalized.destination_clash} would also become SKILL.md (the Mac ignores letter case). Choose it as the skill file, or leave it out.`,
+      );
+    const chosenName = name ?? manifestName ?? "";
+    if (normalized.skill_file && chosenName && chosenName !== manifestName)
+      files = renameManifest(files, chosenName);
+    if (normalized.skill_file && chosenName) {
+      try {
+        description = skillMetadata(files).description;
+      } catch (error) {
+        errors.push((error as Error).message);
+      }
+    }
+    if (chosenName && !validSkillName(chosenName))
+      errors.push(invalidNameMessage(chosenName));
+    let collision:
+      | null
+      | {
+          kind: "tracked";
+          skill_id: string;
+          number: number;
+          revision_id: string;
+          draft: boolean;
+          draft_hash: string | null;
+          used_by: string[];
+        }
+      | { kind: "trashed" | "untracked" } = null;
+    if (chosenName && validSkillName(chosenName)) {
+      const row = this.db
+        .prepare(
+          `SELECT s.id, s.trashed_at, s.current_revision_id, r.number, r.content_hash
+           FROM skills s JOIN skill_revisions r ON r.id = s.current_revision_id
+           WHERE s.library_id = ? AND s.folder_name = ?`,
+        )
+        .get(libraryId, chosenName) as
+        | {
+            id: string;
+            trashed_at: number | null;
+            current_revision_id: string;
+            number: number;
+            content_hash: string;
+          }
+        | undefined;
+      if (row && row.trashed_at !== null) collision = { kind: "trashed" };
+      else if (row) {
+        this.purgeStaleUsages();
+        let draftHash: string | null;
+        try {
+          draftHash = folderHash(join(root, chosenName));
+        } catch {
+          draftHash = null;
+        }
+        collision = {
+          kind: "tracked",
+          skill_id: row.id,
+          number: row.number,
+          revision_id: row.current_revision_id,
+          draft: draftHash !== null && draftHash !== row.content_hash,
+          draft_hash: draftHash,
+          used_by: (
+            this.db
+              .prepare("SELECT label FROM skill_usages WHERE skill_id = ?")
+              .all(row.id) as Array<{ label: string }>
+          ).map((use) => use.label),
+        };
+      } else {
+        try {
+          lstatSync(join(root, chosenName));
+          collision = { kind: "untracked" };
+        } catch {
+          /* The name is free. */
+        }
+      }
+    }
+    const manifest = files.find((file) => file.path === "SKILL.md");
+    return {
+      name: chosenName,
+      manifest_name: manifestName,
+      rename:
+        manifestName && chosenName && manifestName !== chosenName
+          ? { from: manifestName, to: chosenName }
+          : null,
+      description,
+      licence: manifestLicence(files),
+      folder: chosenName,
+      skill_file: normalized.skill_file,
+      skill_file_candidates: normalized.candidates,
+      auto_chosen: normalized.auto_chosen,
+      destination_clash: normalized.destination_clash,
+      broken_links: normalized.broken_links,
+      missing_references: normalized.missing_references,
+      manifest_text: manifest?.content.toString("utf8") ?? "",
+      files: files.map((file) => ({
+        path: file.path,
+        size: file.content.length,
+      })),
+      excluded: normalized.excluded,
+      errors,
+      builtin_name: !!this.db
+        .prepare(
+          "SELECT 1 FROM skills WHERE library_id = 'builtin' AND folder_name = ?",
+        )
+        .get(chosenName),
+      collision,
+      expected: {
+        package_hash: packageHash(files),
+        collision_revision_id:
+          collision?.kind === "tracked" ? collision.revision_id : null,
+        collision_draft_hash:
+          collision?.kind === "tracked" ? collision.draft_hash : null,
+      },
+      /** Internal: the package to save. */
+      package: files,
+    };
+  }
+
+  /**
+   * Saves a previewed local import as a new skill, or as a new revision of the
+   * skill with that name, then writes its folder. The revision is the commit
+   * point; the folder may stay pending, and the result says so.
+   */
+  importLocal(
+    libraryId: string,
+    upload: LocalUpload,
+    name: string,
+    action: "create" | "replace",
+    expected: {
+      package_hash: string;
+      collision_revision_id: string | null;
+      collision_draft_hash: string | null;
+    },
+  ): {
+    skill_id: string;
+    revision_id: string;
+    number: number;
+  } & WorkspaceResult {
+    const preview = this.prepareLocalImport(libraryId, upload, name);
+    if (preview.errors.length)
+      throw new SkillError("invalid_skill", 400, preview.errors[0] as string);
+    const changed = () =>
+      new SkillError(
+        "import_changed",
+        409,
+        "This changed since you previewed it; review again.",
+      );
+    if (
+      preview.expected.package_hash !== expected.package_hash ||
+      preview.expected.collision_revision_id !==
+        expected.collision_revision_id ||
+      preview.expected.collision_draft_hash !== expected.collision_draft_hash
+    )
+      throw changed();
+    const files = preview.package;
+    const metadata = skillMetadata(files);
+    const provenance: Record<string, unknown> = {
+      local_import: {
+        source_name: upload.source_name,
+        skill_file: preview.skill_file,
+        imported_at: this.now(),
+        ...(preview.rename ? { renamed_from: preview.rename.from } : {}),
+      },
+    };
+    let skillId: string;
+    const revisionId = randomUUID();
+    let number = 1;
+    if (action === "create") {
+      if (preview.collision)
+        throw new SkillError(
+          "name_conflict",
+          409,
+          `A skill or folder named ${name} already exists. Choose another name.`,
+        );
+      skillId = randomUUID();
+      const id = skillId;
+      this.db
+        .transaction(() => {
+          this.addSkillRows(
+            libraryId,
+            id,
+            revisionId,
+            files,
+            metadata,
+            provenance,
+            preview.licence,
+          );
+        })
+        .immediate();
+    } else {
+      const collision = preview.collision;
+      if (collision?.kind !== "tracked")
+        throw new SkillError(
+          "name_conflict",
+          409,
+          `There is no saved skill named ${name} to replace.`,
+        );
+      if (collision.draft)
+        throw new SkillError(
+          "draft_conflict",
+          409,
+          `${name} has unsaved edits. Save or discard them first, or use another name.`,
+        );
+      skillId = collision.skill_id;
+      const id = skillId;
+      this.db
+        .transaction(() => {
+          const current = this.db
+            .prepare(
+              "SELECT s.current_revision_id, s.trashed_at, r.number FROM skills s JOIN skill_revisions r ON r.id = s.current_revision_id WHERE s.id = ?",
+            )
+            .get(id) as
+            | {
+                current_revision_id: string;
+                trashed_at: number | null;
+                number: number;
+              }
+            | undefined;
+          if (
+            !current ||
+            current.trashed_at !== null ||
+            current.current_revision_id !== collision.revision_id
+          )
+            throw changed();
+          number = current.number + 1;
+          this.insertRevisionRows(
+            id,
+            revisionId,
+            number,
+            files,
+            metadata,
+            provenance,
+            preview.licence,
+          );
+          this.db
+            .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
+            .run(revisionId, id);
+          this.db
+            .prepare(
+              "INSERT OR REPLACE INTO skill_workspace_operations(skill_id, revision_id, state, created_at, previous_revision_id) VALUES (?, ?, 'pending', ?, ?)",
+            )
+            .run(id, revisionId, this.now(), current.current_revision_id);
+        })
+        .immediate();
+    }
+    return {
+      skill_id: skillId,
+      revision_id: revisionId,
+      number,
+      ...this.workspace.run(skillId),
+    };
+  }
+
+  /** Adds a new skill with its first revision and queues its folder. Call inside a transaction. */
+  private addSkillRows(
+    libraryId: string,
+    id: string,
+    revision: string,
+    files: SkillFile[],
+    metadata: { name: string; description: string },
+    provenance: Record<string, unknown>,
+    licence: string | null,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO skills(id, library_id, folder_name, current_revision_id, created_at) VALUES (?, ?, ?, NULL, ?)",
+      )
+      .run(id, libraryId, metadata.name, this.now());
+    this.insertRevisionRows(
+      id,
+      revision,
+      1,
+      files,
+      metadata,
+      provenance,
+      licence,
+    );
+    this.db
+      .prepare("UPDATE skills SET current_revision_id = ? WHERE id = ?")
+      .run(revision, id);
+    this.db
+      .prepare(
+        "INSERT INTO skill_workspace_operations(skill_id, revision_id, state, created_at) VALUES (?, ?, 'pending', ?)",
+      )
+      .run(id, revision, this.now());
+  }
+
+  /** Why a skill's folder is pending, or null when it is written. */
+  workspaceReason(skillId: string): PendingReason | null {
+    return this.workspace.reason(skillId);
+  }
+
+  /**
+   * Acts on a pending folder: retry, move the conflicting or edited folder
+   * aside into a kept folder, or save the edits as a new revision first.
+   * `expected` must still be the current reason.
+   */
+  resolveWorkspace(
+    skillId: string,
+    action: "retry" | "move_aside" | "save_edits",
+    expected: PendingCode,
+  ): WorkspaceResult {
+    const reason = this.workspace.reason(skillId);
+    if (!reason || reason.code !== expected)
+      throw new SkillError(
+        "import_changed",
+        409,
+        "This changed; review again.",
+      );
+    if (action === "retry") return this.workspace.run(skillId);
+    if (action === "move_aside") {
+      if (expected === "write_failed")
+        throw new SkillError("invalid_action", 400, "Nothing to move aside");
+      try {
+        return this.workspace.moveAside(skillId, expected);
+      } catch (error) {
+        if ((error as { code?: string }).code === "import_changed")
+          throw new SkillError(
+            "import_changed",
+            409,
+            "This changed; review again.",
+          );
+        throw error;
+      }
+    }
+    if (expected !== "folder_edited")
+      throw new SkillError("invalid_action", 400, "No edits to save");
+    const row = this.db
+      .prepare(
+        "SELECT s.current_revision_id, s.folder_name, l.root_path FROM skills s JOIN skill_libraries l ON l.id = s.library_id WHERE s.id = ?",
+      )
+      .get(skillId) as
+      | { current_revision_id: string; folder_name: string; root_path: string }
+      | undefined;
+    if (!row) throw new SkillError("unavailable", 404, "Skill unavailable");
+    const folder = join(row.root_path, row.folder_name);
+    if (existsSync(join(folder, WRITING_MARKER)))
+      throw new SkillError(
+        "invalid_action",
+        400,
+        "This folder is a partial copy Konfab was writing; move it aside instead.",
+      );
+    // The edited folder becomes the newest revision; the import stays in History.
+    this.db
+      .prepare(
+        "UPDATE skill_workspace_operations SET state = 'complete', step = 'done', reason_json = NULL WHERE skill_id = ?",
+      )
+      .run(skillId);
+    try {
+      this.save(skillId, row.current_revision_id, folderHash(folder));
+    } catch (error) {
+      this.db
+        .prepare(
+          "UPDATE skill_workspace_operations SET state = 'pending', reason_json = ? WHERE skill_id = ?",
+        )
+        .run(JSON.stringify(reason), skillId);
+      throw error;
+    }
+    return { folder: "ready" };
+  }
+
+  /** Previous and moved-aside folders Konfab keeps until the lead removes them. */
+  keptFolders(libraryId: string) {
+    const rows = this.db
+      .prepare(
+        `SELECT k.id, k.skill_id, k.revision_id, k.path, k.kind, k.created_at, s.folder_name, r.number, r.content_hash, l.root_path
+         FROM skill_kept_folders k JOIN skills s ON s.id = k.skill_id JOIN skill_libraries l ON l.id = k.library_id
+         LEFT JOIN skill_revisions r ON r.id = k.revision_id
+         WHERE k.library_id = ? ORDER BY k.created_at`,
+      )
+      .all(libraryId) as Array<{
+      id: string;
+      skill_id: string;
+      revision_id: string | null;
+      path: string;
+      kind: "previous" | "edits" | "other";
+      created_at: number;
+      folder_name: string;
+      number: number | null;
+      content_hash: string | null;
+      root_path: string;
+    }>;
+    return rows.map((row) => {
+      let size = 0;
+      let edited = false;
+      let present = true;
+      try {
+        const files = readSkillFiles(row.path);
+        size = files.reduce((sum, file) => sum + file.content.length, 0);
+        edited =
+          row.kind === "previous" &&
+          row.content_hash !== null &&
+          packageHash(files) !== row.content_hash;
+      } catch {
+        present = existsSync(row.path);
+      }
+      return {
+        id: row.id,
+        skill_id: row.skill_id,
+        skill: row.folder_name,
+        kind: row.kind,
+        revision: row.number,
+        path: row.path,
+        size,
+        edited,
+        present,
+        created_at: row.created_at,
+      };
+    });
+  }
+
+  /** File-level differences between a kept folder and the revision it was moved aside from. */
+  keptDifferences(id: string) {
+    const row = this.db
+      .prepare("SELECT path, revision_id FROM skill_kept_folders WHERE id = ?")
+      .get(id) as { path: string; revision_id: string | null } | undefined;
+    if (!row) throw new SkillError("unavailable", 404, "Kept folder not found");
+    const kept = new Map(
+      readSkillFiles(row.path).map((file) => [file.path, file.content]),
+    );
+    const saved = new Map(
+      (row.revision_id
+        ? (this.db
+            .prepare(
+              "SELECT f.path, b.content FROM skill_revision_files f JOIN skill_blobs b ON b.hash = f.blob_hash WHERE f.revision_id = ?",
+            )
+            .all(row.revision_id) as Array<{ path: string; content: Buffer }>)
+        : []
+      ).map((file) => [file.path, file.content]),
+    );
+    const changes: Array<{
+      path: string;
+      change: "added" | "removed" | "changed";
+    }> = [];
+    for (const [path, content] of kept)
+      if (!saved.has(path)) changes.push({ path, change: "added" });
+      else if (!saved.get(path)?.equals(content))
+        changes.push({ path, change: "changed" });
+    for (const path of saved.keys())
+      if (!kept.has(path)) changes.push({ path, change: "removed" });
+    return changes.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /** Deletes a kept folder; only ever inside the library's private holding folder. */
+  removeKept(id: string): void {
+    const row = this.db
+      .prepare(
+        "SELECT k.path, l.root_path FROM skill_kept_folders k JOIN skill_libraries l ON l.id = k.library_id WHERE k.id = ?",
+      )
+      .get(id) as { path: string; root_path: string } | undefined;
+    if (!row) throw new SkillError("unavailable", 404, "Kept folder not found");
+    const holder = dirname(row.path);
+    if (
+      dirname(holder) !== join(row.root_path, KEPT_ROOT) ||
+      lstatSync(join(row.root_path, KEPT_ROOT)).isSymbolicLink()
+    )
+      throw new SkillError("invalid_path", 400, "Not a kept folder");
+    if (existsSync(row.path)) {
+      const stat = lstatSync(row.path);
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new SkillError("invalid_path", 400, "Not a kept folder");
+      rmSync(row.path, { recursive: true });
+    }
+    try {
+      if (readdirSync(holder).length === 0) rmSync(holder, { recursive: true });
+    } catch {
+      /* Already gone. */
+    }
+    this.db.prepare("DELETE FROM skill_kept_folders WHERE id = ?").run(id);
   }
 
   adopt(

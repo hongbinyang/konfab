@@ -826,6 +826,103 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   const skillId = z.object({ id: z.string().uuid() });
+  const localUpload = z.object({
+    scope: z.enum(["personal", "project"]),
+    room_id: z.number().int().positive().optional(),
+    source_name: z.string().min(1).max(512),
+    single_file: z.boolean(),
+    files: z
+      .array(
+        z.object({
+          path: z.string().min(1).max(1024),
+          content_base64: z.string().max(1_000_000),
+        }),
+      )
+      .min(1)
+      .max(1100),
+    skill_file: z.string().max(512).optional(),
+    leave_out: z.array(z.string().max(512)).max(1100).optional(),
+    name: z.string().max(128).optional(),
+  });
+  const importLibrary = (scope: "personal" | "project", roomId?: number) => {
+    const { library, libraryId } = skillScope(scope, roomId, true);
+    if (!libraryId)
+      throw new KonfabError("unavailable", 404, "Library unavailable");
+    return { library, libraryId };
+  };
+  app.post(
+    "/api/library/import/preview",
+    { bodyLimit: 4_000_000 },
+    async (request) => {
+      const body = localUpload.parse(request.body);
+      const { library, libraryId } = importLibrary(body.scope, body.room_id);
+      return skillAction(() => {
+        const preview: Partial<ReturnType<typeof library.prepareLocalImport>> =
+          library.prepareLocalImport(libraryId, body, body.name || undefined);
+        delete preview.package;
+        return preview;
+      });
+    },
+  );
+  app.post("/api/library/import", { bodyLimit: 4_000_000 }, async (request) => {
+    const body = localUpload
+      .extend({
+        name: z.string().min(1).max(128),
+        action: z.enum(["create", "replace"]),
+        expected: z.object({
+          package_hash: z.string().regex(/^[a-f0-9]{64}$/),
+          collision_revision_id: z.string().uuid().nullable(),
+          collision_draft_hash: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .nullable(),
+        }),
+      })
+      .parse(request.body);
+    const { library, libraryId } = importLibrary(body.scope, body.room_id);
+    return skillAction(() =>
+      library.importLocal(
+        libraryId,
+        body,
+        body.name,
+        body.action,
+        body.expected,
+      ),
+    );
+  });
+  app.post("/api/library/skills/:id/workspace/resolve", async (request) => {
+    const { id } = skillId.parse(request.params);
+    const body = z
+      .object({
+        action: z.enum(["retry", "move_aside", "save_edits"]),
+        expected_reason: z.enum([
+          "folder_exists",
+          "folder_edited",
+          "write_failed",
+        ]),
+      })
+      .parse(request.body);
+    return skillAction(() =>
+      skillService().resolveWorkspace(id, body.action, body.expected_reason),
+    );
+  });
+  app.get("/api/library/kept", async (request) => {
+    const query = scopeQuery.parse(request.query);
+    const { library, libraryId } = skillScope(query.scope, query.room_id);
+    return { kept: libraryId ? library.keptFolders(libraryId) : [] };
+  });
+  app.get("/api/library/kept/:id/differences", async (request) => {
+    const { id } = skillId.parse(request.params);
+    return skillAction(() => ({
+      changes: skillService().keptDifferences(id),
+    }));
+  });
+  app.delete("/api/library/kept/:id", async (request) => {
+    const { id } = skillId.parse(request.params);
+    skillAction(() => skillService().removeKept(id));
+    return { ok: true };
+  });
+
   const skillRevisionId = z.object({
     id: z.string().uuid(),
     revisionId: z.string().uuid(),
