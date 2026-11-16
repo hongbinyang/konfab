@@ -140,7 +140,7 @@ An import has one commit point: the transaction that adds the revision. Before i
 | `folder_exists`                    | An untracked folder with this name appeared before writing | **Move the other folder aside**: Konfab renames it to `<name>-moved-<n>` (it then shows as Untracked) and writes the import. Or **Rename this skill** (the existing rename) to write it under another name. Or **Move to Trash** to drop the import, offered only for a newly created skill.      |
 | `folder_edited`                    | Replace: the existing folder was edited after the check    | **Save my edits first**: saves the folder as a new revision on top. The import stays in History and the folder is then current, so the operation completes. Or **Use the import, keep my edits aside**: Konfab renames the edited folder to `<name>-edits-<n>` (untracked) and writes the import. |
 | `write_failed`                     | Disk full, permissions, library folder missing             | Shows the error code and the folder path (**Copy path**). **Retry** after fixing it; Konfab also retries at every start.                                                                                                                                                                          |
-| `edits_kept` (notice, not pending) | A kept copy was found edited at cleanup                    | The notice says where the edits were kept (`<name>-edits-<n>`) and offers **Open**. Nothing is pending.                                                                                                                                                                                           |
+| `edits_kept` (notice, not pending) | A kept previous folder differs from rev N                  | The notice names the kept folder and offers **Open**, **Show differences** and **Remove**. Nothing is pending and nothing is moved automatically.                                                                                                                                                 |
 
 All actions go through one route, `POST /api/library/skills/:id/workspace/resolve { action, expected_reason }`, with `retry` for **Retry**. It re-checks that the reason is unchanged (409 `import_changed` otherwise), performs the action and re-runs the folder write.
 
@@ -154,13 +154,20 @@ Today the journal moves the old folder aside **before** writing the new one, so 
 4. **Claim the name exclusively.** `mkdir <name>` with no `recursive` option, which fails with `EEXIST` if anything is there. If it fails, something appeared in the gap: stop with `folder_exists`, and the old copy stays in `.konfab-previous`.
 5. **Promote.** Rename staging onto the empty folder Konfab just created. POSIX `rename` replaces a directory only when it is **empty**, and fails with `ENOTEMPTY` otherwise. So if someone wrote into the claimed folder between steps 4 and 5, the rename fails, nothing is replaced, and the result is `folder_exists`. Their files and the claimed folder stay as they are.
 
-**Kept copies are cleaned up later, never at swap time.** At startup, a copy in `.konfab-previous` is deleted only if it is older than 7 days **and** its hash still equals rev N. The bytes then also exist in the database as rev N, so nothing is lost. If its hash differs, it was edited after the swap. It is renamed to `<name>-edits-<n>/` (untracked, never deleted) and shown in Manage library as "Edits made while Konfab replaced <name> were kept in <name>-edits-<n>." Manage library also lists kept copies with **Open** and **Remove now**, for a lead who wants the space back sooner.
+**Kept copies are never deleted automatically.** A kept copy stays in `.konfab-previous` until the lead removes it. Konfab can't prove that no open handle will write to it later, so deleting it is the lead's call. Manage library lists kept copies per skill, with the size, **Open**, **Show differences** (against rev N) and **Remove**. Remove asks for confirmation and names the folder. When a kept copy's hash differs from rev N, the list says "Edited after Konfab replaced it". No automatic action follows, so the edits stay where they were written. A one-line notice appears in Manage library while kept copies exist ("2 previous folders kept, 340 KB").
 
-**Practical limits, stated in the user guide:**
+**What promotion guarantees, precisely.** Node exposes no no-replace rename for directories. macOS has `renamex_np(RENAME_EXCL)`, but Node doesn't call it, and Konfab has no native add-on. So the guarantee is the one POSIX `rename` gives, plus the exclusive claim:
 
-- Node has no exclusive rename (macOS `renamex_np(RENAME_EXCL)` isn't exposed). Steps 4–5 get the same guarantee from an exclusive `mkdir` plus `rename`'s "only replaces an empty directory" rule. The one thing that can be replaced is the **empty** folder Konfab itself just made.
-- An editor that saves by **path** after step 5, which is what most editors do (write a temp file, then rename), writes into the new folder. That shows up as an ordinary **Draft** against the imported revision, so it isn't lost.
-- An editor writing through a handle opened **before** step 3 writes into the kept copy. That is detected at cleanup (as above), up to 7 days later. Konfab can't detect such a write the instant it happens.
+- **Never replaced:** a file, a symbolic link, or a non-empty folder at the target. `rename` of a directory fails with `ENOTDIR` or `ENOTEMPTY` there, and Konfab reports `folder_exists`.
+- **Can be replaced:** an **empty** directory at the target. That covers Konfab's own claim from step 4, and also an empty directory another process created after removing that claim. It holds no files, so no content can be lost, but its own metadata (permissions, extended attributes) would be. The user guide says this plainly.
+- **Afterwards:** Konfab checks that the folder at the target holds exactly the new revision. If it doesn't (another process won a later race), the operation stays pending as `folder_exists`, and nothing else is touched.
+
+A verified no-replace primitive would need a native helper (`renamex_np` with `RENAME_EXCL`, macOS 10.12+), which this design doesn't add. If we later add native code for another reason, promotion should switch to it; the note records that as future work.
+
+**Practical limits, also in the user guide:**
+
+- An editor that saves by **path** after promotion, which is what most editors do (write a temp file, then rename), writes into the new folder. That shows up as an ordinary **Draft** against the imported revision, so it isn't lost.
+- An editor writing through a handle opened **before** step 3 writes into the kept copy, which is never deleted automatically. Konfab notices it the next time it hashes kept copies (each start, and whenever Manage library opens), not the instant it happens.
 
 **Restart at each boundary** (`recoverAssignedWorkspaces`):
 
@@ -199,9 +206,15 @@ The operation row records which step it reached and the kept copy's path, so rec
   - replacing a public copy makes a later public import report `local_changes`;
   - `import_changed` for a changed package, revision or folder;
   - `draft_conflict`.
-- **Gaps between check and rename:** with a test hook, create a non-empty folder between steps 3 and 4, and write a file into the claimed folder between steps 4 and 5. Both end `folder_exists`, with nothing replaced and the other files intact. An empty directory created in that gap is the only thing that may be replaced; assert that.
-- **Open handle:** open a file in the old folder before step 3 and write through the handle after step 5. The kept copy then differs, and the cleanup run (with the clock advanced 7 days) turns it into `<name>-edits-<n>`, byte for byte. An unchanged kept copy is deleted only after 7 days.
-- **Swap boundaries:** simulate a crash after each step (test hooks that throw) for replace and create. After each, reopen with a new runtime and check that a folder for rev N or the new revision always exists, `.konfab-*` leftovers are cleaned up, and an edit injected between steps 2 and 3 stays in the kept copy and later ends up in `<name>-edits-<n>`, byte for byte. The same tests run for a public update.
+- **Gaps between check and rename:** with test hooks:
+  - create a non-empty folder, a file and a symbolic link between steps 3 and 4;
+  - write a file into the claim between steps 4 and 5;
+  - remove the claim and put a non-empty folder there between steps 4 and 5.
+
+  Each ends `folder_exists`, with nothing replaced. The documented limit case, an empty directory substituted between steps 4 and 5, is asserted too: it is replaced, the post-check passes, and no files are lost.
+
+- **Kept copies:** open a file in the old folder before step 3 and write through the handle after step 5. The kept copy is never deleted, whatever the clock says, and is listed as "Edited after Konfab replaced it". **Remove** deletes it only after confirmation. An unchanged kept copy also stays until removed.
+- **Swap boundaries:** simulate a crash after each step (test hooks that throw) for replace and create. After each, reopen with a new runtime and check that a folder for rev N or the new revision always exists, `.konfab-*` leftovers are cleaned up, and an edit injected between steps 2 and 3 stays in the kept copy byte for byte. The same tests run for a public update.
 - **Resolve actions:** each `code` and action, including a 409 when the reason changed meanwhile.
 - **Saved versus ready:** force a write failure after commit (library folder made read-only), then check `folder: "pending"` with the reason, no "Imported" message, Retry succeeding once writable, and the row notice clearing. Do the same for a concurrent edit after confirmation: create the target folder, or edit the replaced skill's folder, between the commit and `finishWorkspaces` (test hook). The result is pending, nothing is overwritten, and the edit is kept.
 - **Restart (integration):** commit an import, close before `finishWorkspaces`, then reopen with `createRuntime` + `buildApp`. The folder is written and the API lists the skill. A folder created in between is left alone and the operation stays pending.
