@@ -128,10 +128,39 @@ An import has one commit point: the transaction that adds the revision. Before i
   - "A folder named X appeared before Konfab could write it."
   - "X was edited after the check, so Konfab didn't replace it."
   - "Couldn't write to the library folder: <error code>."
-- **The page never reports completion early.** On `pending` it shows: "Saved as rev N, but its folder isn't written yet: <reason>. The import is safe in History. Fix the cause, then press Retry; Konfab also retries at every start."
-- **Retry** calls a new `POST /api/library/skills/:id/workspace/retry`. It runs `finishWorkspaces()` and returns the same `folder` and `pending_reason`.
-- **The Manage library row** gets the same reason and a **Retry** button. This replaces today's generic "could not be created … restart to retry" notice (Library.tsx), which also benefits public imports.
-- **Replace:** while pending, the previous folder stays exactly as it was. It is moved aside only if it still equals rev N, and restored on a failed write by the existing journal.
+- **The page never reports completion early.** On `pending` it shows "Saved as rev N, but its folder isn't written yet", the reason, and the actions for that reason (table below). The library row shows the same, replacing today's generic "could not be created … restart to retry" notice. That also helps public imports, which use the same journal.
+- **The reason is a code**, so the page can offer real fixes. `pending` carries `pending_reason: { code, folder, detail }`. Retry alone is offered only where waiting or fixing access can help.
+
+| `code`               | Cause                                                       | Actions (each one explicit, nothing deleted)                                                                                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `folder_exists`      | An untracked folder with this name appeared before writing  | **Move the other folder aside**: Konfab renames it to `<name>-moved-<n>` (it then shows as Untracked) and writes the import. Or **Rename this skill** (the existing rename) to write it under another name. Or **Move to Trash** to drop the import, offered only for a newly created skill.      |
+| `folder_edited`      | Replace: the existing folder was edited after the check     | **Save my edits first**: saves the folder as a new revision on top. The import stays in History and the folder is then current, so the operation completes. Or **Use the import, keep my edits aside**: Konfab renames the edited folder to `<name>-edits-<n>` (untracked) and writes the import. |
+| `write_failed`       | Disk full, permissions, library folder missing              | Shows the error code and the folder path (**Copy path**). **Retry** after fixing it; Konfab also retries at every start.                                                                                                                                                                          |
+| `edited_during_swap` | An edit landed in the moment between the check and the swap | Handled automatically (below); the notice says where the edits were kept, and offers **Open** on that folder.                                                                                                                                                                                     |
+
+All actions go through one route, `POST /api/library/skills/:id/workspace/resolve { action, expected_reason }`, with `retry` for **Retry**. It re-checks that the reason is unchanged (409 `import_changed` otherwise), performs the action and re-runs the folder write.
+
+### Replacing a folder without losing it at any step
+
+Today the journal moves the old folder aside **before** writing the new one, so a failure in between leaves no folder until a later start. For the import (and therefore public updates too), the write order changes so the old folder stays in place until the new one is complete:
+
+1. **Write staging.** Write `.konfab-pending-<id>/` with its owner marker and verify its hash equals the new revision. The old folder is untouched. A failure or crash here leaves the old folder in place; marked staging is removed and rewritten on retry.
+2. **Check.** Check that the folder still equals rev N. If not, stop with `folder_edited`. Staging is removed and the folder is untouched.
+3. **Swap.** Rename the folder to `.konfab-replaced-<id>`, then rename staging to the folder name. These are two `rename` calls in one directory, each atomic.
+4. **Verify the old copy.** Hash `.konfab-replaced-<id>`. If it still equals rev N, delete it and mark the operation complete. If it doesn't, an edit landed between steps 2 and 3. Konfab renames it to `<name>-edits-<n>` (untracked, never deleted), marks the operation complete and reports `edited_during_swap` with that folder.
+
+**Restart at each boundary** (`recoverAssignedWorkspaces`):
+
+| State found                                                               | Recovery                                                                                                  |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Folder = rev N, partial or marked staging                                 | Remove staging (marked only), start again at step 1.                                                      |
+| Folder missing, `.konfab-replaced` present, staging complete and verified | Crash inside step 3: rename staging into place, continue at step 4.                                       |
+| Folder missing, `.konfab-replaced` present, staging missing or unverified | Put `.konfab-replaced` back as the folder, then start again at step 1. The previous folder is never lost. |
+| Folder = new revision, `.konfab-replaced` present                         | Crash before step 4: do step 4.                                                                           |
+| Folder neither rev N nor new                                              | `folder_edited`; nothing moved.                                                                           |
+
+A new skill (no previous folder) uses steps 1 and 3 without the first rename. If the name is taken at step 3, the result is `folder_exists`.
+
 - **Agents are unaffected:** they read revisions from the database, not the folder, and assignments are pinned anyway.
 
 ## Page
@@ -156,6 +185,8 @@ An import has one commit point: the transaction that adds the revision. Before i
   - replacing a public copy makes a later public import report `local_changes`;
   - `import_changed` for a changed package, revision or folder;
   - `draft_conflict`.
+- **Swap boundaries:** simulate a crash after each step (test hooks that throw) for replace and create. After each, reopen with a new runtime and check that a folder for rev N or the new revision always exists, `.konfab-*` leftovers are cleaned up, and an edit injected between steps 2 and 3 ends up in `<name>-edits-<n>` byte for byte. The same tests run for a public update.
+- **Resolve actions:** each `code` and action, including a 409 when the reason changed meanwhile.
 - **Saved versus ready:** force a write failure after commit (library folder made read-only), then check `folder: "pending"` with the reason, no "Imported" message, Retry succeeding once writable, and the row notice clearing. Do the same for a concurrent edit after confirmation: create the target folder, or edit the replaced skill's folder, between the commit and `finishWorkspaces` (test hook). The result is pending, nothing is overwritten, and the edit is kept.
 - **Restart (integration):** commit an import, close before `finishWorkspaces`, then reopen with `createRuntime` + `buildApp`. The folder is written and the API lists the skill. A folder created in between is left alone and the operation stays pending.
 - **API:** the routes, body limit, cookie auth and an unavailable project library.
