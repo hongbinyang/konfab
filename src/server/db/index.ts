@@ -535,6 +535,7 @@ const MIGRATIONS: readonly Migration[] = [
   ALTER TABLE skill_workspace_operations ADD COLUMN kept_path TEXT;
   ALTER TABLE skill_workspace_operations ADD COLUMN created_dirs_json TEXT;
   ALTER TABLE skill_workspace_operations ADD COLUMN reason_json TEXT;
+  ALTER TABLE skill_workspace_operations ADD COLUMN writing_file TEXT;
   CREATE TABLE skill_kept_folders (
     id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id), library_id TEXT NOT NULL REFERENCES skill_libraries(id),
     revision_id TEXT REFERENCES skill_revisions(id), path TEXT NOT NULL,

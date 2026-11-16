@@ -84,7 +84,12 @@ export function normalizeUpload(upload: LocalUpload): NormalizedUpload {
   const leaveOut = new Set(upload.leave_out ?? []);
   const files: SkillFile[] = [];
   for (const file of upload.files) {
-    const raw = file.path.replace(/^\/+/, "");
+    // Check the path exactly as sent, before taking off the chosen folder's name.
+    if (unsafe(file.path)) {
+      errors.push(`Unsafe file path: ${JSON.stringify(file.path)}.`);
+      continue;
+    }
+    const raw = file.path;
     let path: string;
     if (upload.single_file) path = raw.split("/").pop() ?? "";
     else {
@@ -143,14 +148,15 @@ export function normalizeUpload(upload: LocalUpload): NormalizedUpload {
     .map((file) => file.path);
   let skillFile: string | null = null;
   let auto = false;
+  // The lead's explicit choice comes first, then a top-level SKILL.md.
   if (upload.single_file) skillFile = files[0]?.path ?? null;
-  else if (files.some((file) => file.path === "SKILL.md"))
-    skillFile = "SKILL.md";
   else if (
     upload.skill_file &&
     files.some((file) => file.path === upload.skill_file)
   )
     skillFile = upload.skill_file;
+  else if (files.some((file) => file.path === "SKILL.md"))
+    skillFile = "SKILL.md";
   else if (candidates.length === 1) {
     skillFile = candidates[0] ?? null;
     auto = true;
@@ -180,6 +186,11 @@ export function normalizeUpload(upload: LocalUpload): NormalizedUpload {
     const manifest = files.find((file) => file.path === chosen);
     if (manifest && upload.single_file)
       missing = relativeReferences(manifest.content.toString("utf8"));
+    // An unresolved clash blocks the import; meanwhile it must not shadow the chosen file.
+    if (clash) {
+      const index = files.findIndex((file) => file.path === clash);
+      files.splice(index, 1);
+    }
     for (let i = 0; i < files.length; i += 1)
       if (files[i]?.path === chosen)
         files[i] = { ...(files[i] as SkillFile), path: "SKILL.md" };

@@ -2308,7 +2308,30 @@ export class SkillLibrary {
       content_hash: string | null;
       root_path: string;
     }>;
-    return rows.map((row) => {
+    // A kept row whose folder and holding folder never came to exist is a
+    // journal entry from a crash before the move; drop it unless still in use.
+    const inUse = new Set(
+      (
+        this.db
+          .prepare(
+            "SELECT kept_path FROM skill_workspace_operations WHERE state = 'pending' AND kept_path IS NOT NULL",
+          )
+          .all() as Array<{ kept_path: string }>
+      ).map((row) => row.kept_path),
+    );
+    const live = rows.filter((row) => {
+      if (
+        existsSync(row.path) ||
+        existsSync(dirname(row.path)) ||
+        inUse.has(row.path)
+      )
+        return true;
+      this.db
+        .prepare("DELETE FROM skill_kept_folders WHERE id = ?")
+        .run(row.id);
+      return false;
+    });
+    return live.map((row) => {
       let size = 0;
       let edited = false;
       let present = true;

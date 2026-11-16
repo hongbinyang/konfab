@@ -7,11 +7,12 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
   type Stats,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Db } from "../db/index.js";
 import { packageHash, readSkillFiles, type SkillFile } from "./skill-files.js";
 
@@ -54,6 +55,7 @@ interface Operation {
   claim_ino: string | null;
   kept_path: string | null;
   created_dirs_json: string | null;
+  writing_file: string | null;
   folder_name: string;
   library_id: string;
   root_path: string;
@@ -64,6 +66,8 @@ interface Operation {
 /** Test seam: called after each step, so tests can simulate a crash or a race there. */
 export const workspaceHooks: {
   afterStep?: (step: Step, skillId: string) => void;
+  /** Called right after each file system change, before the journal records what follows. */
+  afterFs?: (label: string, skillId: string) => void;
   beforeFile?: (path: string, skillId: string) => void;
 } = {};
 
@@ -99,7 +103,7 @@ export class SkillWorkspace {
     return this.db
       .prepare(
         `SELECT o.skill_id, o.revision_id, o.previous_revision_id, o.step, o.claim_dev, o.claim_ino, o.kept_path,
-           o.created_dirs_json, s.folder_name, s.library_id, l.root_path, r.content_hash, p.content_hash AS previous_hash
+           o.created_dirs_json, o.writing_file, s.folder_name, s.library_id, l.root_path, r.content_hash, p.content_hash AS previous_hash
          FROM skill_workspace_operations o JOIN skills s ON s.id = o.skill_id JOIN skill_libraries l ON l.id = s.library_id
          JOIN skill_revisions r ON r.id = o.revision_id LEFT JOIN skill_revisions p ON p.id = o.previous_revision_id
          WHERE o.skill_id = ? AND o.state = 'pending'`,
@@ -240,6 +244,9 @@ export class SkillWorkspace {
       }
     };
 
+    // Journal first: every file system change is recorded before it is made,
+    // so a crash between the two leaves a state the next run recognises.
+    const fs = (label: string) => workspaceHooks.afterFs?.(label, op.skill_id);
     let step: Step = op.step ?? "check";
     if (step === "check") {
       if (!exists(folder)) set("claim");
@@ -254,70 +261,121 @@ export class SkillWorkspace {
     }
     if (step === "aside") {
       const keptRoot = join(op.root_path, KEPT_ROOT);
+      if (!exists(keptRoot)) {
+        mkdirSync(keptRoot, { mode: 0o700 });
+        fs("kept-root");
+      }
+      if (!realDirectory(keptRoot))
+        throw new Pending({
+          code: "write_failed",
+          folder: op.folder_name,
+          detail: `${KEPT_ROOT} in the library isn't a real folder.`,
+        });
       let kept = op.kept_path;
       if (!kept) {
-        if (!exists(keptRoot)) mkdirSync(keptRoot, { mode: 0o700 });
-        if (!realDirectory(keptRoot))
-          throw new Pending({
-            code: "write_failed",
-            folder: op.folder_name,
-            detail: `${KEPT_ROOT} in the library isn't a real folder.`,
-          });
-        const holder = join(keptRoot, randomUUID());
-        mkdirSync(holder, { mode: 0o700 });
-        kept = join(holder, op.folder_name);
+        kept = join(keptRoot, randomUUID(), op.folder_name);
+        const path = kept;
+        this.db.transaction(() => {
+          this.record(op.skill_id, { kept_path: path });
+          this.db
+            .prepare(
+              "INSERT INTO skill_kept_folders(id, skill_id, library_id, revision_id, path, kind, created_at) VALUES (?, ?, ?, ?, ?, 'previous', ?)",
+            )
+            .run(
+              randomUUID(),
+              op.skill_id,
+              op.library_id,
+              op.previous_revision_id,
+              path,
+              this.now(),
+            );
+        })();
         op.kept_path = kept;
-        this.record(op.skill_id, { kept_path: kept });
       }
+      const holder = dirname(kept);
+      if (!exists(holder)) {
+        mkdirSync(holder, { mode: 0o700 });
+        fs("holder");
+      }
+      if (!realDirectory(holder))
+        throw new Pending({
+          code: "write_failed",
+          folder: op.folder_name,
+          detail: `Konfab's holding folder for ${op.folder_name} isn't a real folder.`,
+        });
       if (exists(folder) && !exists(kept)) {
-        if (hashOf(folder) !== op.previous_hash) throw edited();
+        if (hashOf(folder) !== op.previous_hash) {
+          // Nothing was moved: forget the planned kept copy.
+          this.db.transaction(() => {
+            this.db
+              .prepare("DELETE FROM skill_kept_folders WHERE path = ?")
+              .run(kept);
+            this.record(op.skill_id, { kept_path: null, step: "check" });
+          })();
+          try {
+            rmdirSync(holder);
+          } catch {
+            /* Not empty or already gone: leave it. */
+          }
+          throw edited();
+        }
         renameSync(folder, kept);
+        fs("aside");
+      } else if (!exists(folder) && !exists(kept))
+        // The old folder was removed by someone else: there is nothing to keep.
         this.db
-          .prepare(
-            "INSERT INTO skill_kept_folders(id, skill_id, library_id, revision_id, path, kind, created_at) VALUES (?, ?, ?, ?, ?, 'previous', ?)",
-          )
-          .run(
-            randomUUID(),
-            op.skill_id,
-            op.library_id,
-            op.previous_revision_id,
-            kept,
-            this.now(),
-          );
-      }
+          .prepare("DELETE FROM skill_kept_folders WHERE path = ?")
+          .run(kept);
       set("claim");
       step = "claim";
     }
     if (step === "claim") {
       const stat = realDirectory(folder);
-      if (
+      const claimed =
         stat &&
+        op.claim_ino !== null &&
         String(stat.ino) === op.claim_ino &&
-        String(stat.dev) === op.claim_dev &&
-        !exists(join(folder, WRITING_MARKER)) &&
-        readdirSync(folder).length === 0
-      )
-        // Crashed between claiming and marking: the empty folder is the one this operation created.
+        String(stat.dev) === op.claim_dev;
+      if (claimed && !exists(join(folder, WRITING_MARKER))) {
+        if (readdirSync(folder).length !== 0) throw exists_();
+        // Crashed between recording the claim and marking it.
         writeFileSync(join(folder, WRITING_MARKER), opId, {
           flag: "wx",
           mode: 0o600,
         });
-      else if (exists(folder)) {
+        fs("marker");
+      } else if (claimed) {
         if (!ours()) throw exists_();
+      } else if (exists(folder)) {
+        if (stat && op.claim_ino === null && readdirSync(folder).length === 0)
+          throw new Pending({
+            code: "folder_exists",
+            folder: op.folder_name,
+            detail: `An empty folder named ${op.folder_name} is in the library. Konfab may have created it just before it stopped, but can't prove it, so it didn't use it. Move it aside to continue.`,
+          });
+        throw exists_();
       } else {
+        this.record(op.skill_id, {
+          claim_dev: null,
+          claim_ino: null,
+          created_dirs_json: "[]",
+          writing_file: null,
+        });
         mkdirSync(folder, { mode: 0o755 });
-        const stat = lstatSync(folder);
-        op.claim_dev = String(stat.dev);
-        op.claim_ino = String(stat.ino);
+        fs("claim");
+        const made = lstatSync(folder);
+        op.claim_dev = String(made.dev);
+        op.claim_ino = String(made.ino);
+        op.created_dirs_json = "[]";
         this.record(op.skill_id, {
           claim_dev: op.claim_dev,
           claim_ino: op.claim_ino,
-          created_dirs_json: "[]",
         });
         writeFileSync(join(folder, WRITING_MARKER), opId, {
           flag: "wx",
           mode: 0o600,
         });
+        fs("marker");
       }
       set("write");
       step = "write";
@@ -336,11 +394,13 @@ export class SkillWorkspace {
           const relative = parts.slice(0, i).join("/");
           const path = join(folder, relative);
           if (!exists(path)) {
-            mkdirSync(path, { mode: 0o755 });
             created.add(relative);
+            op.created_dirs_json = JSON.stringify([...created]);
             this.record(op.skill_id, {
-              created_dirs_json: JSON.stringify([...created]),
+              created_dirs_json: op.created_dirs_json,
             });
+            mkdirSync(path, { mode: 0o755 });
+            fs("mkdir");
           } else if (!realDirectory(path) || !created.has(relative))
             throw edited(
               `${op.folder_name}/${relative} changed while Konfab was writing it, so Konfab stopped.`,
@@ -349,34 +409,65 @@ export class SkillWorkspace {
         const destination = join(folder, file.path);
         if (exists(destination)) {
           const stat = lstatSync(destination);
+          const current = stat.isFile() ? readFileSync(destination) : null;
           if (
-            !stat.isFile() ||
-            !readFileSync(destination).equals(file.content) ||
-            (stat.mode & 0o777) !== file.mode
+            current?.equals(file.content) &&
+            (stat.mode & 0o777) === file.mode
           )
-            throw edited(
-              `${op.folder_name}/${file.path} changed while Konfab was writing it, so Konfab stopped.`,
-            );
-          continue;
+            continue;
+          // The file this operation was writing when it stopped: finish it.
+          if (
+            op.writing_file === file.path &&
+            current !== null &&
+            file.content.subarray(0, current.length).equals(current)
+          ) {
+            if (current.length === file.content.length)
+              chmodSync(destination, file.mode);
+            else {
+              unlinkSync(destination);
+              this.writeFile(destination, file, fs);
+            }
+            continue;
+          }
+          throw edited(
+            `${op.folder_name}/${file.path} changed while Konfab was writing it, so Konfab stopped.`,
+          );
         }
-        writeFileSync(destination, file.content, {
-          flag: "wx",
-          mode: file.mode,
-        });
-        chmodSync(destination, file.mode); // not narrowed by the umask
+        op.writing_file = file.path;
+        this.record(op.skill_id, { writing_file: file.path });
+        this.writeFile(destination, file, fs);
       }
-      set("verify");
+      set("verify", { writing_file: null });
       step = "verify";
     }
     if (step === "verify") {
-      if (!ours()) throw exists_();
+      const stat = realDirectory(folder);
+      const claimed =
+        stat &&
+        String(stat.ino) === op.claim_ino &&
+        String(stat.dev) === op.claim_dev;
+      if (!claimed) throw exists_();
       if (hashOf(folder) !== op.content_hash)
         throw edited(
           `${op.folder_name} changed while Konfab was writing it, so Konfab stopped.`,
         );
-      unlinkSync(join(folder, WRITING_MARKER));
+      // Without the marker, a matching claimed folder means only the final journal write was lost.
+      if (ours()) {
+        unlinkSync(join(folder, WRITING_MARKER));
+        fs("unmark");
+      }
       return;
     }
+  }
+
+  private writeFile(
+    destination: string,
+    file: SkillFile,
+    fs: (label: string) => void,
+  ): void {
+    writeFileSync(destination, file.content, { flag: "wx", mode: file.mode });
+    fs("file");
+    chmodSync(destination, file.mode); // not narrowed by the umask
   }
 
   /**
@@ -396,16 +487,14 @@ export class SkillWorkspace {
     if (!existsSync(keptRoot)) mkdirSync(keptRoot, { mode: 0o700 });
     if (!realDirectory(keptRoot))
       throw new Error(`${KEPT_ROOT} isn't a folder`);
-    const holder = join(keptRoot, randomUUID());
-    mkdirSync(holder, { mode: 0o700 });
-    const kept = join(holder, op.folder_name);
-    renameSync(folder, kept);
+    const kept = join(keptRoot, randomUUID(), op.folder_name);
+    const id = randomUUID();
     this.db
       .prepare(
         "INSERT INTO skill_kept_folders(id, skill_id, library_id, revision_id, path, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
-        randomUUID(),
+        id,
         op.skill_id,
         op.library_id,
         op.previous_revision_id,
@@ -413,11 +502,24 @@ export class SkillWorkspace {
         expected === "folder_edited" ? "edits" : "other",
         this.now(),
       );
+    try {
+      mkdirSync(dirname(kept), { mode: 0o700 });
+      renameSync(folder, kept);
+    } catch (error) {
+      this.db.prepare("DELETE FROM skill_kept_folders WHERE id = ?").run(id);
+      try {
+        rmdirSync(dirname(kept));
+      } catch {
+        /* Not created or not empty. */
+      }
+      throw error;
+    }
     this.record(skillId, {
       step: "claim",
       claim_dev: null,
       claim_ino: null,
       created_dirs_json: null,
+      writing_file: null,
       reason_json: null,
     });
     return this.run(skillId);

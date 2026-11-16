@@ -72,7 +72,7 @@ async function readChosen(list: FileList, single: boolean): Promise<Upload> {
   const first = files[0];
   const source = single
     ? (first?.name ?? "file")
-    : (first?.webkitRelativePath.split("/")[0] ?? "folder");
+    : first?.webkitRelativePath.split("/")[0] || "folder";
   return {
     source_name: source,
     single_file: single,

@@ -89,3 +89,50 @@ test("import a skill folder with any file name, then replace it from a single fi
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("choose a clashing skill.md over SKILL.md, leaving the other out", async ({
+  page,
+}, testInfo) => {
+  const upper = `e2e-upper-${testInfo.project.name}`;
+  const lower = `e2e-lower-${testInfo.project.name}`;
+  const home = mkdtempSync(join(tmpdir(), "konfab-e2e-clash-"));
+  try {
+    await page.goto(loginUrl());
+    await page.getByRole("button", { name: "⚙ Manage library" }).click();
+    await page.getByRole("button", { name: "Import…" }).click();
+    const dialog = page.getByRole("region", { name: "Import a skill" });
+    // A Mac folder can't hold both names (it ignores letter case), but a
+    // case-sensitive volume can. Playwright only passes real directories to
+    // a folder input, so send the two files to it as a plain file list.
+    const chooser = dialog.getByLabel("Choose folder");
+    await chooser.evaluate((input) => input.removeAttribute("webkitdirectory"));
+    await chooser.setInputFiles([
+      {
+        name: "SKILL.md",
+        mimeType: "text/markdown",
+        buffer: Buffer.from(manifest(upper)),
+      },
+      {
+        name: "skill.md",
+        mimeType: "text/markdown",
+        buffer: Buffer.from(manifest(lower)),
+      },
+    ]);
+    await expect(
+      dialog.getByText(/skill\.md would also become SKILL\.md/),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "Import", exact: true }),
+    ).toBeDisabled();
+    await dialog
+      .getByRole("button", { name: "Use skill.md as the skill file" })
+      .click();
+    await expect(dialog.getByLabel("Name")).toHaveValue(lower);
+    await dialog.getByRole("button", { name: "Leave SKILL.md out" }).click();
+    await expect(dialog.getByText(/Not imported: SKILL\.md/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Import", exact: true }).click();
+    await expect(page.getByRole("heading", { name: lower })).toBeVisible();
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

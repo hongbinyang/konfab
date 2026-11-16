@@ -118,6 +118,54 @@ describe("normalizing a chosen skill", () => {
     ).toEqual(["big.bin is larger than 512 KB."]);
   });
 
+  it("rejects absolute paths as sent, before taking off the folder name", () => {
+    const result = normalizeUpload({
+      source_name: "x",
+      single_file: false,
+      files: [
+        {
+          path: "/etc/x/SKILL.md",
+          content_base64: Buffer.from(manifest("a")).toString("base64"),
+        },
+        { path: "x//y.md", content_base64: "" },
+      ],
+    });
+    expect(result.errors).toEqual([
+      'Unsafe file path: "/etc/x/SKILL.md".',
+      'Unsafe file path: "x//y.md".',
+      "No files were chosen.",
+    ]);
+  });
+
+  it("uses the lead's explicit choice over a top-level SKILL.md, and the clash it leaves", () => {
+    const files = {
+      "SKILL.md": manifest("upper"),
+      "skill.md": manifest("lower"),
+    };
+    const first = normalizeUpload(upload(files));
+    expect(first).toMatchObject({
+      skill_file: "SKILL.md",
+      destination_clash: "skill.md",
+    });
+    const chosen = normalizeUpload(upload(files, { skill_file: "skill.md" }));
+    // While the clash is unresolved, SKILL.md is the chosen file, never the other one.
+    expect(
+      chosen.files.map((file) => [file.path, file.content.toString()]),
+    ).toEqual([["SKILL.md", manifest("lower")]]);
+    expect(chosen).toMatchObject({
+      skill_file: "skill.md",
+      destination_clash: "SKILL.md",
+    });
+    const resolved = normalizeUpload(
+      upload(files, { skill_file: "skill.md", leave_out: ["SKILL.md"] }),
+    );
+    expect(resolved.destination_clash).toBeNull();
+    expect(resolved.excluded).toEqual(["SKILL.md"]);
+    expect(
+      resolved.files.map((file) => [file.path, file.content.toString()]),
+    ).toEqual([["SKILL.md", manifest("lower")]]);
+  });
+
   it("imports a single file of any name as SKILL.md and warns about files it links to", () => {
     const result = normalizeUpload(
       upload(
@@ -438,5 +486,130 @@ describe("importing a local skill", () => {
         library.resolveWorkspace(first.skill_id, "retry", "folder_edited"),
       ).toThrow("This changed");
     }
+  });
+
+  it("imports the file the lead chose over a clashing SKILL.md, end to end", () => {
+    const u = upload(
+      { "SKILL.md": manifest("upper"), "skill.md": manifest("lower") },
+      { skill_file: "skill.md", leave_out: ["SKILL.md"] },
+    );
+    expect(preview(u)).toMatchObject({
+      name: "lower",
+      destination_clash: null,
+      errors: [],
+    });
+    expect(commit(u, "lower").folder).toBe("ready");
+    expect(readdirSync(join(root, "lower"))).toEqual(["SKILL.md"]);
+    expect(readFileSync(join(root, "lower", "SKILL.md"), "utf8")).toBe(
+      manifest("lower"),
+    );
+  });
+
+  describe("a crash right after each file system change, before the journal catches up", () => {
+    const labels = [
+      "kept-root",
+      "holder",
+      "aside",
+      "marker",
+      "mkdir",
+      "file",
+      "unmark",
+    ];
+    for (const label of labels)
+      for (const action of ["create", "replace"] as const) {
+        if (
+          action === "create" &&
+          ["kept-root", "holder", "aside"].includes(label)
+        )
+          continue;
+        it(`${action}: after ${label}`, () => {
+          const path = join(home, "konfab.db");
+          const name = `b-${label}-${action}`;
+          if (action === "replace")
+            commit(upload({ "SKILL.md": manifest(name) }), name);
+          const u = upload({
+            "SKILL.md": manifest(name, "license: MIT\n"),
+            "x/y.md": "y".repeat(100),
+          });
+          const expected = preview(u).expected;
+          let fired = false;
+          workspaceHooks.afterFs = (at) => {
+            if (at !== label || fired) return;
+            if (at === "file" && existsSync(join(root, name, "x", "y.md")))
+              // A partial write of the file being written.
+              writeFileSync(join(root, name, "x", "y.md"), "y".repeat(40));
+            else if (at === "file") return;
+            fired = true;
+            throw new Error("crash");
+          };
+          const result = library.importLocal(
+            libraryId,
+            u,
+            name,
+            action,
+            expected,
+          );
+          workspaceHooks.afterFs = undefined;
+          expect(fired).toBe(true);
+          expect(result.folder).toBe("pending");
+          db.close();
+          db = openDatabase(path);
+          library = new SkillLibrary(db);
+          expect(library.workspaceReason(result.skill_id)).toBeNull();
+          expect(readFileSync(join(root, name, "SKILL.md"), "utf8")).toContain(
+            "MIT",
+          );
+          expect(readFileSync(join(root, name, "x", "y.md"), "utf8")).toBe(
+            "y".repeat(100),
+          );
+          expect(existsSync(join(root, name, ".konfab-writing"))).toBe(false);
+          if (action === "replace") {
+            const kept = library
+              .keptFolders(libraryId)
+              .filter((item) => item.skill === name);
+            expect(kept).toHaveLength(1);
+            expect(readFileSync(join(kept[0]!.path, "SKILL.md"), "utf8")).toBe(
+              manifest(name),
+            );
+          }
+        });
+      }
+
+    it("create: after making the folder but before recording it, the empty folder isn't used without the lead", () => {
+      const path = join(home, "konfab.db");
+      const u = upload({ "SKILL.md": manifest("unrecorded") });
+      const expected = preview(u).expected;
+      workspaceHooks.afterFs = (at) => {
+        if (at === "claim") throw new Error("crash");
+      };
+      const result = library.importLocal(
+        libraryId,
+        u,
+        "unrecorded",
+        "create",
+        expected,
+      );
+      workspaceHooks.afterFs = undefined;
+      db.close();
+      db = openDatabase(path);
+      library = new SkillLibrary(db);
+      expect(library.workspaceReason(result.skill_id)).toMatchObject({
+        code: "folder_exists",
+        detail: expect.stringContaining(
+          "may have created it just before it stopped",
+        ),
+      });
+      expect(readdirSync(join(root, "unrecorded"))).toEqual([]);
+      expect(
+        library.resolveWorkspace(
+          result.skill_id,
+          "move_aside",
+          "folder_exists",
+        ),
+      ).toEqual({ folder: "ready" });
+      expect(readFileSync(join(root, "unrecorded", "SKILL.md"), "utf8")).toBe(
+        manifest("unrecorded"),
+      );
+    });
   });
 });
