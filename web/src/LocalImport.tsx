@@ -16,6 +16,7 @@ type Collision =
       draft: boolean;
       draft_hash: string | null;
       used_by: string[];
+      pending: PendingReason | null;
     }
   | { kind: "trashed" | "untracked" };
 type Preview = {
@@ -498,15 +499,18 @@ export function LocalImport({
                   ? `, used by ${collision.used_by.join(", ")}`
                   : ", not used by any agent"}
                 ).{" "}
-                {collision.draft
-                  ? "It has unsaved edits. Save or discard them first, or use another name."
-                  : `Replace saves this import as rev ${collision.number + 1}. Rev ${collision.number} stays in History, and agents stay on it until you update them.`}
+                {collision.pending
+                  ? `Its folder from an earlier change isn't written yet (${collision.pending.detail}) Resolve that in Manage library first, or use another name.`
+                  : collision.draft
+                    ? "It has unsaved edits. Save or discard them first, or use another name."
+                    : `Replace saves this import as rev ${collision.number + 1}. Rev ${collision.number} stays in History, and agents stay on it until you update them.`}
               </p>
               <div className="actions">
                 <button onClick={() => setName(`${preview.name}-2`)}>
                   Use another name
                 </button>
                 {!collision.draft &&
+                  !collision.pending &&
                   (confirmReplace ? (
                     <button
                       className="danger"

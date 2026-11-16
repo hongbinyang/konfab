@@ -587,6 +587,7 @@ export class SkillLibrary {
 
   /** Built-in skills are read-only; duplicate one to change it. */
   private assertWritable(id: string): void {
+    this.assertNoPendingFolder(id);
     const row = this.db
       .prepare(
         "SELECT l.kind FROM skills s JOIN skill_libraries l ON l.id = s.library_id WHERE s.id = ?",
@@ -598,6 +599,32 @@ export class SkillLibrary {
         409,
         "Built-in skills are read-only. Duplicate it to make an editable copy.",
       );
+  }
+
+  /**
+   * A skill whose working folder is still being written (or waits for the
+   * lead) can't change until that is resolved: a new change would discard the
+   * pending operation's recovery state.
+   */
+  private assertNoPendingFolder(id: string): void {
+    if (
+      !this.db
+        .prepare(
+          "SELECT 1 FROM skill_workspace_operations WHERE skill_id = ? AND state = 'pending'",
+        )
+        .get(id)
+    )
+      return;
+    const reason = this.workspace.reason(id);
+    const name = (
+      this.db.prepare("SELECT folder_name FROM skills WHERE id = ?").get(id) as
+        { folder_name: string } | undefined
+    )?.folder_name;
+    throw new SkillError(
+      "folder_pending",
+      409,
+      `${name ?? "This skill"}'s folder from an earlier change isn't written yet${reason ? ` (${reason.detail})` : ""}. Resolve it in Manage library first.`,
+    );
   }
 
   /** Drops usage rows whose assignment or turn no longer holds that revision. */
@@ -1735,6 +1762,8 @@ export class SkillLibrary {
               .get(row.id, JSON.stringify(pack.provenance)),
         );
     if (existing) {
+      if (existing.content_hash !== hash)
+        this.assertNoPendingFolder(existing.id);
       if (existing.content_hash === hash)
         return {
           skill_id: existing.id,
@@ -1953,6 +1982,7 @@ export class SkillLibrary {
           draft: boolean;
           draft_hash: string | null;
           used_by: string[];
+          pending: PendingReason | null;
         }
       | { kind: "trashed" | "untracked" } = null;
     if (chosenName && validSkillName(chosenName)) {
@@ -1987,6 +2017,13 @@ export class SkillLibrary {
           revision_id: row.current_revision_id,
           draft: draftHash !== null && draftHash !== row.content_hash,
           draft_hash: draftHash,
+          pending: this.db
+            .prepare(
+              "SELECT 1 FROM skill_workspace_operations WHERE skill_id = ? AND state = 'pending'",
+            )
+            .get(row.id)
+            ? this.workspace.reason(row.id)
+            : null,
           used_by: (
             this.db
               .prepare("SELECT label FROM skill_usages WHERE skill_id = ?")
@@ -2123,6 +2160,7 @@ export class SkillLibrary {
           409,
           `There is no saved skill named ${name} to replace.`,
         );
+      this.assertNoPendingFolder(collision.skill_id);
       if (collision.draft)
         throw new SkillError(
           "draft_conflict",
@@ -2150,6 +2188,7 @@ export class SkillLibrary {
             current.current_revision_id !== collision.revision_id
           )
             throw changed();
+          this.assertNoPendingFolder(id);
           number = current.number + 1;
           this.insertRevisionRows(
             id,

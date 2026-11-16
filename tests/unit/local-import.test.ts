@@ -796,4 +796,107 @@ describe("importing a local skill", () => {
         );
       });
   });
+
+  it("blocks another change to a skill while its folder write is pending, across a restart", () => {
+    const path = join(home, "konfab.db");
+    const first = commit(upload({ "SKILL.md": manifest("held") }), "held");
+    const second = upload({ "SKILL.md": manifest("held", "license: MIT\n") });
+    // The second import's folder write is blocked by something in the way.
+    workspaceHooks.afterStep = (step) => {
+      if (step === "claim") {
+        mkdirSync(join(root, "held"));
+        writeFileSync(join(root, "held", "theirs.txt"), "theirs");
+      }
+    };
+    const pending = library.importLocal(
+      libraryId,
+      second,
+      "held",
+      "replace",
+      preview(second).expected,
+    );
+    workspaceHooks.afterStep = undefined;
+    expect(pending).toMatchObject({ folder: "pending", number: 2 });
+    const third = upload({
+      "SKILL.md": manifest("held", "license: Apache-2.0\n"),
+    });
+    expect(preview(third).collision).toMatchObject({
+      kind: "tracked",
+      pending: { code: "folder_exists" },
+    });
+    expect(() => commit(third, "held", "replace")).toThrow("isn't written yet");
+    expect(() =>
+      library.save(first.skill_id, pending.revision_id, "0".repeat(64)),
+    ).toThrow("isn't written yet");
+    db.close();
+    db = openDatabase(path);
+    library = new SkillLibrary(db);
+    // After a restart: rev 2 is still current, rev 1 is kept, and the pending reason is intact.
+    expect(library.revisions(first.skill_id)).toHaveLength(2);
+    expect(library.detail(first.skill_id).current_revision_id).toBe(
+      pending.revision_id,
+    );
+    const reason = library.workspaceReason(first.skill_id);
+    expect(reason?.code).toBe("folder_exists");
+    const kept = library
+      .keptFolders(libraryId)
+      .find((item) => item.kind === "previous");
+    expect(readFileSync(join(kept!.path, "SKILL.md"), "utf8")).toBe(
+      manifest("held"),
+    );
+    expect(() => commit(third, "held", "replace")).toThrow("isn't written yet");
+    // Once resolved, the next replace works.
+    expect(
+      library.resolveWorkspace(
+        first.skill_id,
+        "move_aside",
+        "folder_exists",
+        reason?.target ?? null,
+      ),
+    ).toEqual({ folder: "ready" });
+    expect(commit(third, "held", "replace")).toMatchObject({
+      folder: "ready",
+      number: 3,
+    });
+  });
+
+  it("blocks a public update of a skill whose folder write is pending", () => {
+    const pack = (commit: string, body: string) => ({
+      files: [
+        {
+          path: "SKILL.md",
+          content: Buffer.from(manifest("pub", body)),
+          mode: 0o644,
+        },
+      ],
+      licence: "MIT",
+      provenance: {
+        source: { owner: "o", repository: "r" },
+        path: "skills/pub",
+        commit,
+      },
+    });
+    const update = (commit: string, body: string) =>
+      db.transaction(() =>
+        library.importPublicForAssignment(libraryId, pack(commit, body)),
+      )();
+    const created = update("a".repeat(40), "");
+    library.finishWorkspaces();
+    // An update to commit b whose folder write is blocked stays pending.
+    expect(update("b".repeat(40), "x: 1\n").created).toBe("revision");
+    workspaceHooks.afterStep = (step) => {
+      if (step === "claim") mkdirSync(join(root, "pub"));
+    };
+    library.finishWorkspaces();
+    workspaceHooks.afterStep = undefined;
+    expect(library.workspaceReason(created.skill_id)?.code).toBe(
+      "folder_exists",
+    );
+    // A newer commit never replaces the pending operation.
+    expect(() => update("c".repeat(40), "x: 2\n")).toThrow("isn't written yet");
+    expect(library.revisions(created.skill_id)).toHaveLength(2);
+    expect(library.workspaceReason(created.skill_id)?.code).toBe(
+      "folder_exists",
+    );
+  });
 });
