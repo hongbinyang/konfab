@@ -88,7 +88,7 @@ Experimental parallel lead mentions are opt-in per room. They allow distinct age
 | ST1 | MUST | Agents can report a one-line working detail of 1–120 characters per session, separate from turn state and allowance warnings. The card shows elapsed time and warns after `turn_timeout_minutes` without an update. Posting or passing clears it; updates and clears appear in the timeline. |
 | A2 | MUST | Konfab provides tools to join a room, wait for a turn, post a message, pass on a turn, read history, report status, and request permission. |
 | A3 | MUST | One app conversation joins one room. To join another room, the user starts another conversation, which keeps each topic's context separate. |
-| A4 | MUST | A dropped agent can rejoin by pasting the join prompt again. It resumes from its last-seen message, without duplicate turns. |
+| A4 | MUST | A dropped agent can rejoin by pasting a short rejoin prompt into the same conversation, or the full join prompt into a new one. It resumes from its last-seen message, without duplicate turns. |
 | A5 | MUST | Within a room, one agent takes a turn at a time, except the lead's @mentions when a room enables parallel answers (TM4). |
 | A6 | MUST | When the user posts without a mention, each room member gets a turn in order and may reply or pass. |
 | A7 | MUST | An @mention gives a turn only to the named agents (by agent ID, or by room name per AN1–AN6). Agents can @mention each other and the lead (`@lead`). Mentioning the lead gives no agent a turn and is highlighted on the page. |

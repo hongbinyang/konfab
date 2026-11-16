@@ -59,6 +59,8 @@ If the assignment fails (for example someone changed it meanwhile), nothing it w
 
 Edit `SKILL.md` and its files in **⚙ Manage library**, or choose **Copy path** next to the working folder and use your own editor. Changes made outside Konfab appear as a **Draft** until you save. **Save revision** checks the format and stores rev 1, rev 2, and so on. **History** lets you view any revision or restore it as a new one. If someone else saved in between, Konfab shows a conflict instead of overwriting.
 
+**Adding a folder yourself.** Put it in `~/.konfab/skills/` (or the project's `.konfab/skills/`) and open **⚙ Manage library**: it is listed as **Untracked** with an **Adopt** button. The folder name must equal `name:` in its `SKILL.md`; if they differ, the row says which two names to match instead of offering **Adopt**.
+
 Built-in skills are read-only: **Duplicate** one to make an editable copy in your library.
 
 ### 4. Update members
@@ -101,11 +103,12 @@ Earlier versions had roles. On the first start of this version, Konfab:
 
 ## Troubleshooting
 
-| Message                                       | Meaning and fix                                                                                                           |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| "These skills total … KiB"                    | The assignment is too large to send. Switch a skill to **Summary** or remove one.                                         |
-| "… has local changes"                         | Your copy of a public skill was edited. Choose **Keep my version** or **Add as `name-2`**.                                |
-| "Skill in use: …"                             | An agent still uses it. Remove it from those assignments first.                                                           |
-| "This assignment changed since you opened it" | Someone changed it meanwhile. Reopen **Assign skills** and try again.                                                     |
-| "GitHub limit reached; resets at …"           | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#15-github-token-optional). |
-| "Project folder unavailable"                  | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                    |
+| Message                                            | Meaning and fix                                                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| "These skills total … KiB"                         | The assignment is too large to send. Switch a skill to **Summary** or remove one.                                         |
+| "… has local changes"                              | Your copy of a public skill was edited. Choose **Keep my version** or **Add as `name-2`**.                                |
+| "Skill in use: …"                                  | An agent still uses it. Remove it from those assignments first.                                                           |
+| "This assignment changed since you opened it"      | Someone changed it meanwhile. Reopen **Assign skills** and try again.                                                     |
+| "GitHub limit reached; resets at …"                | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#15-github-token-optional). |
+| "The folder is named …, but SKILL.md says name: …" | Rename the folder or change `name:` so they match, then reopen **⚙ Manage library** and **Adopt** it.                     |
+| "Project folder unavailable"                       | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                    |

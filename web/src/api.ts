@@ -129,6 +129,8 @@ export interface RoomAgent {
   saved_run_ms?: number | null;
   closes_at: number | null;
   join_prompt: string;
+  /** Short prompt for the conversation that already joined. */
+  rejoin_prompt: string;
   assignment: {
     label: string;
     skill_count: number;

@@ -16,6 +16,7 @@ const agent = (
   working: null,
   stats: { last_contact_at: at } as never,
   join_prompt: "Join Konfab room konfab",
+  rejoin_prompt: "Rejoin Konfab room konfab",
   ...overrides,
 });
 
@@ -79,22 +80,37 @@ describe("contact notice on agent cards", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("copies the rejoin prompt", async () => {
+  it("copies the short rejoin prompt, or the full prompt for a new conversation", async () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     render(<ContactNotice agent={agent({})} />);
+    expect(screen.getByText(/for the same conversation/)).toBeTruthy();
     await userEvent.click(
       screen.getByRole("button", { name: "Copy rejoin prompt" }),
     );
-    expect(writeText).toHaveBeenCalledWith("Join Konfab room konfab");
+    expect(writeText).toHaveBeenLastCalledWith("Rejoin Konfab room konfab");
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Copy full prompt" }),
+    );
+    expect(writeText).toHaveBeenLastCalledWith("Join Konfab room konfab");
   });
 });
 
 describe("notice after mentioning agents that can't hear", () => {
   const agents = [
-    { id: "claude", display_name: "Claude", join_prompt: "claude prompt" },
-    { id: "qa", display_name: "QA", join_prompt: "qa prompt" },
+    {
+      id: "claude",
+      display_name: "Claude",
+      join_prompt: "claude prompt",
+      rejoin_prompt: "claude rejoin",
+    },
+    {
+      id: "qa",
+      display_name: "QA",
+      join_prompt: "qa prompt",
+      rejoin_prompt: "qa rejoin",
+    },
   ];
 
   it("explains each unreachable agent and can be dismissed", async () => {
@@ -122,6 +138,10 @@ describe("notice after mentioning agents that can't hear", () => {
     expect(
       screen.getByRole("button", { name: "Copy join prompt" }),
     ).toBeTruthy();
+    // Only the agent that joined before is offered the short prompt.
+    expect(
+      screen.getAllByRole("button", { name: "Copy full prompt" }),
+    ).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(onDismiss).toHaveBeenCalled();
   });

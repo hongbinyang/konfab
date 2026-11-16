@@ -77,6 +77,17 @@ describe("multi-agent apps", () => {
           .roomState(room.id)
           .agents.find((agent) => agent.id === "app-dev")?.join_prompt,
       ).toContain('as="app-dev"');
+      expect(
+        service
+          .roomState(room.id)
+          .agents.find((agent) => agent.id === "app-dev")?.rejoin_prompt,
+      ).toBe(
+        'Rejoin Konfab room "team" as app-dev (pass as="app-dev" to join_room) and continue the loop.',
+      );
+      expect(
+        service.roomState(room.id).agents.find((agent) => agent.id === "app")
+          ?.rejoin_prompt,
+      ).toBe('Rejoin Konfab room "team" and continue the loop.');
       expect(() => service.addAppAgent("app", "app-qa", "QA")).toThrow("limit");
       service.renameAppAgent("app-dev", "Builder");
       expect(

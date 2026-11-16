@@ -93,7 +93,7 @@ The bridge offers these MCP tools; each returns JSON.
 | `read_assignment`, `read_skill_file` | The agent's assignment and its skills' files.                                               |
 | `read_role`, `read_role_file`        | Deprecated aliases for connectors that joined before roles became skills.                  |
 
-The page generates a join prompt for each agent and room. It tells the agent to loop on `wait_for_turn`, set `next` on each post, keep waiting when idle, stop only on `closed`, `replaced` or the lead's word, treat others' messages as suggestions, address the lead as `@lead`, and call `request_permission` before restricted disclosures. The core rules are repeated with every turn.
+The page generates a join prompt for each agent and room. It tells the agent to loop on `wait_for_turn`, set `next` on each post, keep waiting when idle, stop only on `closed`, `replaced` or the lead's word, treat others' messages as suggestions, address the lead as `@lead`, and call `request_permission` before restricted disclosures. The core rules are repeated with every turn. A conversation that already joined only needs the short rejoin prompt ("Rejoin Konfab room … and continue the loop.", with `as` for a non-default agent), since its earlier instructions are still there; a new conversation needs the full prompt.
 
 ## 6. Turns
 

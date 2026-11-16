@@ -542,6 +542,32 @@ describe("skill library adoption", () => {
     }
   });
 
+  it("names both values when a folder and its skill name differ", () => {
+    const home = mkdtempSync(join(tmpdir(), "konfab-mismatch-"));
+    try {
+      const library = new SkillLibrary(openDatabase(":memory:"));
+      const id = library.registerLibrary("personal", home);
+      mkdirSync(join(home, "guide-architect"));
+      writeFileSync(
+        join(home, "guide-architect", "SKILL.md"),
+        "---\nname: architect\ndescription: Designs things\n---\nbody",
+      );
+      const message =
+        "The folder is named guide-architect, but SKILL.md says name: architect. Rename the folder to architect, or change name: to guide-architect.";
+      expect(library.list(id).untracked_details).toEqual([
+        { folder: "guide-architect", diagnostic: message },
+      ]);
+      expect(() => library.adopt(id, "guide-architect")).toThrow(message);
+      renameSync(join(home, "guide-architect"), join(home, "architect"));
+      expect(library.list(id).untracked_details).toEqual([
+        { folder: "architect", diagnostic: null },
+      ]);
+      expect(library.adopt(id, "architect")).toBeTruthy();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a draft when its library folder is unavailable, and saves it once the folder is back", () => {
     const home = mkdtempSync(join(tmpdir(), "konfab-drafts-"));
     const root = join(home, "skills");

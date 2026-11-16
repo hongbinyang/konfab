@@ -308,7 +308,7 @@ export function Library({
                       untrackedDetails.find((item) => item.folder === folder)
                         ?.diagnostic
                     }{" "}
-                    · Fix the folder before adopting
+                    · Fix it, then reopen Manage library to adopt it.
                   </span>
                 ) : (
                   <button

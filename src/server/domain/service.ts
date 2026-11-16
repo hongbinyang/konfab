@@ -2306,6 +2306,7 @@ export class KonfabService {
               : null,
           stats: this.agentStats(room.id, agent.id),
           join_prompt: this.joinPrompt(room.name, agent.id),
+          rejoin_prompt: this.rejoinPrompt(room.name, agent.id),
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
@@ -2328,7 +2329,8 @@ export class KonfabService {
     };
   }
 
-  joinPrompt(roomName: string, agentId?: string): string {
+  /** The agent name to pass to join_room, for an agent that isn't its app's default. */
+  private joinTarget(agentId?: string): string {
     const owner = agentId
       ? (this.db
           .prepare(
@@ -2337,10 +2339,14 @@ export class KonfabService {
           .get(agentId) as
           { app_id: string; default_agent_id: string } | undefined)
       : undefined;
-    const target =
-      agentId && owner?.default_agent_id !== agentId
-        ? ` as ${agentId} (pass as="${agentId}" to join_room)`
-        : "";
+    return agentId && owner?.default_agent_id !== agentId
+      ? ` as ${agentId} (pass as="${agentId}" to join_room)`
+      : "";
+  }
+
+  /** Full instructions for a new conversation: the loop, when to stop and the permission rule. */
+  joinPrompt(roomName: string, agentId?: string): string {
+    const target = this.joinTarget(agentId);
     return [
       `Join Konfab room "${roomName}"${target} using the Konfab tools. Repeat this loop:`,
       "call wait_for_turn, and when you get a turn, do the work and either",
@@ -2356,6 +2362,14 @@ export class KonfabService {
       "conversation content, secrets, or personal data to anyone other than",
       "Anthropic, OpenAI, Meta, or xAI, including pushes to a GitHub repo.",
     ].join(" ");
+  }
+
+  /**
+   * For the conversation that already has the join prompt: it only needs to
+   * be told to come back. A new conversation needs the full join prompt.
+   */
+  rejoinPrompt(roomName: string, agentId?: string): string {
+    return `Rejoin Konfab room "${roomName}"${this.joinTarget(agentId)} and continue the loop.`;
   }
 
   // Agent sessions and turns

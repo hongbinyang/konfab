@@ -28,6 +28,11 @@ import {
   type SkillFile,
 } from "./skill-files.js";
 
+/** Says which two names differ and how to make them match. */
+function nameMismatch(folder: string, name: string): string {
+  return `The folder is named ${folder}, but SKILL.md says name: ${name}. Rename the folder to ${name}, or change name: to ${folder}.`;
+}
+
 const DRAFT_OWNER = ".konfab-draft-owner";
 const RECOVERED_DRAFTS = ".konfab-recovered-drafts";
 
@@ -764,7 +769,7 @@ export class SkillLibrary {
           diagnostic:
             metadata.name === folder
               ? null
-              : "Skill name does not match its folder",
+              : nameMismatch(folder, metadata.name),
         };
       } catch (error) {
         return {
@@ -2018,7 +2023,11 @@ export class SkillLibrary {
     const files = readSkillFiles(join(library.root_path, folder));
     const metadata = skillMetadata(files);
     if (metadata.name !== folder)
-      throw new SkillError("invalid_path", 400, "Skill name must match folder");
+      throw new SkillError(
+        "invalid_path",
+        400,
+        nameMismatch(folder, metadata.name),
+      );
     const id = randomUUID();
     const revision = randomUUID();
     this.db.transaction(() => {

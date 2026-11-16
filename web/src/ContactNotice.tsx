@@ -14,12 +14,20 @@ function clock(ms: number): string {
   });
 }
 
-function CopyPrompt({ prompt, label }: { prompt: string; label: string }) {
+function CopyPrompt({
+  prompt,
+  label,
+  link = false,
+}: {
+  prompt: string;
+  label: string;
+  link?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <button
       type="button"
-      className="secondary"
+      className={link ? "link" : "secondary"}
       onClick={() => {
         void navigator.clipboard.writeText(prompt).then(() => {
           setCopied(true);
@@ -33,6 +41,25 @@ function CopyPrompt({ prompt, label }: { prompt: string; label: string }) {
 }
 
 /**
+ * The short prompt brings back the conversation that already joined; a new
+ * conversation needs the full join prompt with the loop and permission rule.
+ */
+function RejoinPrompts({
+  agent,
+}: {
+  agent: Pick<RoomAgent, "join_prompt" | "rejoin_prompt">;
+}) {
+  return (
+    <span className="rejoin-prompts">
+      <CopyPrompt prompt={agent.rejoin_prompt} label="Copy rejoin prompt" />{" "}
+      <span className="muted">for the same conversation ·</span>{" "}
+      <CopyPrompt prompt={agent.join_prompt} label="Copy full prompt" link />{" "}
+      <span className="muted">for a new one</span>
+    </span>
+  );
+}
+
+/**
  * Shown on an agent card when Konfab has had no contact for longer than the
  * agent should take. It describes last contact rather than guessing a cause.
  */
@@ -41,7 +68,12 @@ export function ContactNotice({
 }: {
   agent: Pick<
     RoomAgent,
-    "state" | "working" | "stats" | "join_prompt" | "turn_quiet_since"
+    | "state"
+    | "working"
+    | "stats"
+    | "join_prompt"
+    | "rejoin_prompt"
+    | "turn_quiet_since"
   >;
 }) {
   if (agent.state === "working" && agent.turn_quiet_since != null)
@@ -54,7 +86,7 @@ export function ContactNotice({
           A long command may still be running. If its app shows it has stopped,
           paste the rejoin prompt into that app.
         </p>
-        <CopyPrompt prompt={agent.join_prompt} label="Copy rejoin prompt" />
+        <RejoinPrompts agent={agent} />
       </div>
     );
   if (agent.state !== "not_responding") return null;
@@ -69,7 +101,7 @@ export function ContactNotice({
         Its conversation may have stopped. Paste the rejoin prompt into that app
         to bring it back.
       </p>
-      <CopyPrompt prompt={agent.join_prompt} label="Copy rejoin prompt" />
+      <RejoinPrompts agent={agent} />
     </div>
   );
 }
@@ -90,7 +122,9 @@ export function UnreachableNotice({
   onDismiss,
 }: {
   items: Unreachable[];
-  agents: Array<Pick<RoomAgent, "id" | "display_name" | "join_prompt">>;
+  agents: Array<
+    Pick<RoomAgent, "id" | "display_name" | "join_prompt" | "rejoin_prompt">
+  >;
   onDismiss: () => void;
 }) {
   if (items.length === 0) return null;
@@ -104,16 +138,15 @@ export function UnreachableNotice({
           <p key={item.agent_id}>
             <strong>{agent?.display_name ?? item.agent_id}</strong>{" "}
             {reason(item)}, so your mention is waiting.{" "}
-            {agent && (
-              <CopyPrompt
-                prompt={agent.join_prompt}
-                label={
-                  item.state === "not_joined"
-                    ? "Copy join prompt"
-                    : "Copy rejoin prompt"
-                }
-              />
-            )}
+            {agent &&
+              (item.state === "not_joined" ? (
+                <CopyPrompt
+                  prompt={agent.join_prompt}
+                  label="Copy join prompt"
+                />
+              ) : (
+                <RejoinPrompts agent={agent} />
+              ))}
           </p>
         );
       })}
