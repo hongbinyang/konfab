@@ -2,18 +2,20 @@
 
 **Status:** proposed design for [REQUIREMENTS §19](../../REQUIREMENTS.md#19-import-a-local-skill) (LI1–LI6).
 
-The lead picks a skill folder or a single `SKILL.md` anywhere on their Mac. Konfab previews it, lets the lead choose the name, and creates the matching folder in the chosen library. It reuses the code paths that copy public skills, so there is one way to add a skill's rows and write its folder.
+The lead picks a skill folder or a single skill file (any name, e.g. `architect.md`) anywhere on their Mac. Konfab previews it, lets the lead choose the name, and creates the matching folder in the chosen library. It reuses the code paths that copy public skills, so there is one way to add a skill's rows and write its folder.
 
 ## User flow
 
-**⚙ Manage library** (My skills or Project) gets an **Import…** button with two choices: **Choose folder…** and **Choose SKILL.md…**.
+**⚙ Manage library** (My skills or Project) gets an **Import…** button with two choices: **Choose folder…** and **Choose file…**.
+
+**File and folder names are sorted out by Konfab** (lead, msg 1073). The skill file can have any name. The skill's `name:` (or the name the lead types) becomes the folder, and the manifest is always saved as `SKILL.md`. The chosen folder's own name never matters. The preview shows each change, e.g. `architect.md → SKILL.md` and `guide-robotics-architect/ → robotics-architect/`.
 
 The preview dialog shows:
 
 - **Name.** Editable and checked live: the format rule and whether the name is free in this library. When it differs from the manifest, a line shows the change, e.g. `name: guide-architect → architect`.
 - **Destination.** My skills, or the room's project library when it is available, plus the folder it will create (`~/.konfab/skills/<name>/`).
 - **Description and licence** from the manifest. Below them, the `SKILL.md` text and the file list with sizes.
-- **Not imported.** `.DS_Store` files and `.git/` folders, listed by path. A single-file import says "Only SKILL.md is imported; other files next to it are not included." It also warns about relative links in it that point to files it doesn't include (best effort, see below).
+- **Not imported.** `.DS_Store` files and `.git/` folders, listed by path. A single-file import says "Only this file is imported, as SKILL.md; other files next to it are not included." It also warns about relative links in it that point to files it doesn't include (best effort, see below).
 - **Errors.** Shown inline, using the same messages as **Save revision**. **Import** stays disabled until there are none.
 
 The collision box appears only when the chosen name is taken in this library:
@@ -34,7 +36,15 @@ After **Import** (or **Replace**), the dialog closes and the skill opens in the 
 The page reads the chosen files with the browser's own picker. Konfab never receives a path on the Mac and never reads outside its libraries.
 
 - **Folder:** `<input type="file" webkitdirectory>`. Each `File` has `webkitRelativePath` (`chosen-folder/sub/file.md`). The first segment is the chosen folder's name and is stripped. That name is kept as `source_name` for provenance.
-- **Single file:** `<input type="file" accept=".md">`. The file must be named `SKILL.md` (case-sensitive), otherwise it is refused before upload.
+- **Single file:** `<input type="file" accept=".md,text/markdown">`. Any file name is accepted, and it is saved as `SKILL.md`.
+- **Which file is the manifest in a folder:**
+  1. `SKILL.md` at the folder's top level, if present (also `skill.md` in any case, renamed to `SKILL.md`).
+  2. Otherwise, the single top-level `.md` file whose front matter has both `name:` and `description:`. It is renamed to `SKILL.md`. Links to it from other files aren't rewritten; the preview warns about each one by path.
+  3. Otherwise, if several top-level files qualify, the preview lists them and the lead picks one; the others stay as supporting files.
+  4. If none qualifies: "No skill file found: add front matter with name: and description: to one .md file."
+
+  If `SKILL.md` would collide with an existing supporting file of that name in another case, the import is refused with that message.
+
 - **Symbolic links.** The browser exposes only names and contents, not whether an entry was a link. In Chromium-based browsers and Safari a linked file is read through the link, and a linked folder may be followed or skipped. So Konfab can't detect links and doesn't claim to. The preview's file list is the safeguard: whatever arrives is shown before anything is saved. Nothing is written outside the library either way, because the server only receives contents. Before implementation I'll check what Chrome and Safari actually do on macOS and record the result in this note and in the user guide.
 - **File modes** aren't exposed. Imported files are saved as 0644, so scripts lose their executable bit. Konfab never runs them anyway, and the user guide says so.
 - **Limits** are checked in the page first, for fast feedback, and again on the server: 512 KiB per file, 2 MiB in total and fewer than 1,000 files, the same as `readSkillFiles`. Excluded files don't count.
@@ -45,8 +55,8 @@ Both calls are page-only (cookie-authenticated), like the other library routes. 
 
 ```
 POST /api/library/import/preview      bodyLimit 4 MB
-{ scope, room_id?, source_name, single_file, files: [{ path, content_base64 }], name? }
-→ { name, manifest_name, description, licence, folder, files: [{path, size}], excluded: [path],
+{ scope, room_id?, source_name, single_file, files: [{ path, content_base64 }], manifest?, name? }
+→ { name, manifest_name, manifest_from, manifest_candidates: [path], description, licence, folder, files: [{path, size}], excluded: [path],
     missing_references: [path], rename: { from, to } | null, errors: [message],
     builtin_name: boolean,
     collision: null | { kind: "tracked", skill_id, number, revision_id, draft: boolean,
@@ -74,10 +84,10 @@ A new `SkillLibrary.prepareLocalImport(libraryId, upload, name?)` returns the pr
 1. **Normalise.**
    - Decode the files and strip the folder prefix.
    - Drop `.DS_Store` (any depth) and anything under a `.git/` path segment, recording them as excluded.
-   - Reject absolute paths, `..`, empty segments, backslashes and NUL. Also reject duplicate paths after normalisation (including two that differ only in case, because the Mac file system usually ignores case), a missing `SKILL.md`, and anything over the size limits.
+   - Reject absolute paths, `..`, empty segments, backslashes and NUL. Also reject duplicate paths after normalisation (including two that differ only in case, because the Mac file system usually ignores case), and anything over the size limits. The manifest is chosen as described above and renamed to `SKILL.md` (`manifest_from` in the preview).
 2. **Rename.** Factor out the `name:` rewrite already in `importPublicForAssignment` into `renameManifest(files, name)`. It uses `yaml` `parseDocument`, so comments and other keys survive. Then validate with `skillMetadata`.
 3. **Licence.** Read `license` from the front matter, a string of 200 characters or fewer, else null. Store it in `skill_revisions.licence`.
-4. **Provenance.** `{"local_import": {"source_name": "<chosen folder or SKILL.md>", "imported_at": <ms>, "renamed_from": "<manifest name>" | absent}}`. A replacement records the same, so `sameSource` no longer matches a previous public source. A later public import of that skill then reports `local_changes` and asks Keep / Add as `-2` instead of updating silently.
+4. **Provenance.** `{"local_import": {"source_name": "<chosen folder or file name>", "manifest_from": "<original manifest path>", "imported_at": <ms>, "renamed_from": "<manifest name>" | absent}}`. A replacement records the same, so `sameSource` no longer matches a previous public source. A later public import of that skill then reports `local_changes` and asks Keep / Add as `-2` instead of updating silently.
 5. **Missing references** (single file only, best effort). Scan Markdown links `](relative/path)` and backtick spans that look like relative paths with an extension (`` `scripts/run.sh` ``). Ignore URLs, anchors and absolute paths, and report the ones that are not in the package. It is a warning only.
 6. **Collision check** in the chosen library. Read the `skills` row by `folder_name`, including trashed rows. If there is none, check whether a folder of that name exists on disk.
 7. **Write**, in one `BEGIN IMMEDIATE` transaction after re-checking `expected`:
@@ -111,6 +121,7 @@ The source files are only read, by the browser. Existing revisions are never cha
 - **Unit (`skill-library`):**
   - folder import with nested files;
   - single file, with the not-included notice and a missing-reference warning;
+  - any file name: `architect.md` alone, and a folder `guide-x/` holding `architect.md` + `notes/a.md` → folder `<name>/` with `SKILL.md`; several candidates → `manifest_candidates` and the chosen one used; none → the actionable error; `skill.md` → `SKILL.md`;
   - renaming with and without a collision (the manifest changes, comments are kept, the rest is byte-identical);
   - licence carried over;
   - `.DS_Store` and `.git` excluded;
