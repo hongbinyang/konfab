@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Import a local skill – mockup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #fff;
+        --surface: #f4f4f5;
+        --text: #18181b;
+        --muted: #5f5f67;
+        --border: #d4d4d8;
+        --accent: #1d4ed8;
+        --accent-text: #fff;
+        --error: #b91c1c;
+        --error-surface: #fee2e2;
+        --warn-surface: #fef3c7;
+        --good: #166534;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --background: #18181b;
+        --surface: #27272a;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --border: #3f3f46;
+        --accent: #93c5fd;
+        --accent-text: #18181b;
+        --error: #fca5a5;
+        --error-surface: #450a0a;
+        --warn-surface: #422006;
+        --good: #86efac;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--text);
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0;
+        flex: 1;
+      }
+      .note {
+        background: var(--surface);
+        padding: 8px 16px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      main {
+        padding: 16px;
+        max-width: 860px;
+      }
+      button {
+        font: inherit;
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-text);
+        border-color: var(--accent);
+      }
+      button.danger {
+        border-color: var(--error);
+        color: var(--error);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      button.link {
+        border: 0;
+        background: none;
+        color: var(--accent);
+        padding: 0;
+        text-decoration: underline;
+      }
+      select,
+      input[type="text"] {
+        font: inherit;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--background);
+        color: var(--text);
+      }
+      .library {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 16px;
+      }
+      .library h2 {
+        font-size: 15px;
+        margin: 0 0 8px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .library h2 span {
+        flex: 1;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .row {
+        padding: 6px 0;
+        border-top: 1px solid var(--border);
+      }
+      .dialog {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 16px;
+        box-shadow: 0 6px 24px rgb(0 0 0 / 0.12);
+      }
+      .dialog h3 {
+        margin: 0 0 12px;
+        font-size: 16px;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: 9em 1fr;
+        gap: 6px 12px;
+        margin: 0 0 12px;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+      }
+      code {
+        font-size: 13px;
+        background: var(--surface);
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+      .change {
+        color: var(--good);
+        font-size: 13px;
+      }
+      .box {
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+      .box.warn {
+        background: var(--warn-surface);
+      }
+      .box.error {
+        background: var(--error-surface);
+        color: var(--error);
+      }
+      .box.info {
+        background: var(--surface);
+      }
+      ul.files {
+        margin: 4px 0;
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      pre {
+        background: var(--surface);
+        padding: 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        max-height: 120px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .scenarios {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .scenarios button {
+        font-size: 13px;
+      }
+      .scenarios button[aria-pressed="true"] {
+        outline: 2px solid var(--accent);
+      }
+      @media (max-width: 600px) {
+        dl {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Import a local skill (mockup)</h1>
+      <button id="theme">Dark theme</button>
+    </header>
+    <p class="note">
+      Clickable mockup for REQUIREMENTS §19 and
+      docs/design/local-skill-import.md. Pick a scenario, then use the buttons.
+      Nothing is real: no files are read.
+    </p>
+    <main>
+      <div class="scenarios" id="scenarios"></div>
+      <section class="library">
+        <h2>
+          <span>⚙ Manage library · My skills</span>
+          <button id="new">New skill</button>
+          <button class="primary" id="import">Import…</button>
+        </h2>
+        <div id="menu" hidden class="muted">
+          <button id="pick-folder">Choose folder…</button>
+          <button id="pick-file">Choose file…</button>
+          <span>Any file name works; Konfab saves it as SKILL.md.</span>
+        </div>
+        <div id="rows"></div>
+      </section>
+      <section class="dialog" id="dialog" hidden></section>
+    </main>
+    <script>
+      const scenarios = {
+        folder: {
+          label: "Folder with SKILL.md",
+          source: "guide-robotics-architect/",
+          kind: "folder",
+          files: [
+            ["SKILL.md", "5.6 KB"],
+            ["references/ros2-notes.md", "3.1 KB"],
+            [".github/notes.md", "0.4 KB"],
+          ],
+          excluded: [".DS_Store", ".git/ (38 files)"],
+          candidates: ["SKILL.md"],
+          chosen: "SKILL.md",
+          manifestName: "robotics-architect",
+        },
+        anyname: {
+          label: "Folder, skill file named architect.md",
+          source: "guide-robotics-architect/",
+          kind: "folder",
+          files: [
+            ["architect.md", "5.6 KB"],
+            ["notes/a.md", "1.2 KB"],
+          ],
+          excluded: [".DS_Store"],
+          candidates: ["architect.md"],
+          others: ["notes/a.md"],
+          chosen: "architect.md",
+          auto: true,
+          manifestName: "robotics-architect",
+        },
+        ambiguous: {
+          label: "Folder, two possible skill files",
+          source: "robotics-guides/",
+          kind: "folder",
+          files: [
+            ["architect.md", "5.6 KB"],
+            ["product-manager.md", "4.4 KB"],
+          ],
+          excluded: [],
+          candidates: ["architect.md", "product-manager.md"],
+          chosen: null,
+          manifestName: "robotics-architect",
+        },
+        clash: {
+          label: "skill.md would clash with SKILL.md",
+          source: "mixed/",
+          kind: "folder",
+          files: [
+            ["architect.md", "5.6 KB"],
+            ["skill.md", "0.2 KB"],
+          ],
+          excluded: [],
+          candidates: ["architect.md"],
+          others: ["skill.md"],
+          chosen: "architect.md",
+          auto: true,
+          clash: "skill.md",
+          manifestName: "robotics-architect",
+        },
+        single: {
+          label: "Single file product-manager.txt",
+          source: "product-manager.txt",
+          kind: "file",
+          files: [["product-manager.txt", "4.4 KB"]],
+          excluded: [],
+          candidates: ["product-manager.txt"],
+          chosen: "product-manager.txt",
+          manifestName: "robotics-product-manager",
+          missing: ["checklists/acceptance.md"],
+        },
+        tracked: {
+          label: "Name taken by a saved skill",
+          source: "pm-v2/",
+          kind: "folder",
+          files: [["SKILL.md", "3.0 KB"]],
+          excluded: [],
+          candidates: ["SKILL.md"],
+          chosen: "SKILL.md",
+          manifestName: "pm",
+          collision: "tracked",
+        },
+        trashed: {
+          label: "Name of a skill in Trash",
+          source: "old-helper/",
+          kind: "folder",
+          files: [["SKILL.md", "1.0 KB"]],
+          excluded: [],
+          candidates: ["SKILL.md"],
+          chosen: "SKILL.md",
+          manifestName: "helper",
+          collision: "trashed",
+        },
+        untracked: {
+          label: "Name of an untracked folder",
+          source: "research/",
+          kind: "folder",
+          files: [["SKILL.md", "2.0 KB"]],
+          excluded: [],
+          candidates: ["SKILL.md"],
+          chosen: "SKILL.md",
+          manifestName: "notes",
+          collision: "untracked",
+        },
+        pending: {
+          label: "Saved, but folder pending",
+          source: "robotics/",
+          kind: "folder",
+          files: [["SKILL.md", "5.6 KB"]],
+          excluded: [],
+          candidates: ["SKILL.md"],
+          chosen: "SKILL.md",
+          manifestName: "robotics-architect",
+          pending: true,
+        },
+      };
+      const taken = { pm: 1, helper: 1, notes: 1 };
+      let state = {};
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) =>
+        String(s).replace(
+          /[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+        );
+      const validName = (n) =>
+        /^[a-z0-9]+(-[a-z0-9]+)*$/.test(n) && n.length <= 64;
+
+      function rows(extra = []) {
+        const list = [
+          ["konfab-dev", "rev 1 · Reviewed · used by 1"],
+          ["pm", "rev 3 · Reviewed · used by 2"],
+          ...extra,
+        ];
+        $("rows").innerHTML =
+          list
+            .map(
+              ([n, d]) =>
+                `<div class="row"><strong>${esc(n)}</strong> <span class="muted">${d}</span></div>`,
+            )
+            .join("") +
+          `<div class="row muted">notes · Untracked <button>Adopt</button></div>`;
+      }
+
+      function scenarioButtons() {
+        $("scenarios").innerHTML = Object.entries(scenarios)
+          .map(
+            ([k, s]) =>
+              `<button data-k="${k}" aria-pressed="${state.key === k}">${esc(s.label)}</button>`,
+          )
+          .join("");
+        for (const b of $("scenarios").querySelectorAll("button"))
+          b.onclick = () => start(b.dataset.k);
+      }
+
+      function start(key) {
+        const s = scenarios[key];
+        state = {
+          key,
+          s,
+          chosen: s.chosen,
+          name: s.manifestName,
+          leftOut: [],
+          confirmReplace: false,
+          result: null,
+        };
+        scenarioButtons();
+        rows();
+        $("menu").hidden = true;
+        render();
+      }
+
+      function collisionFor(name) {
+        if (name === state.s.manifestName && state.s.collision)
+          return state.s.collision;
+        if (taken[name]) return name === "pm" ? "tracked" : "untracked";
+        return null;
+      }
+
+      function render() {
+        const { s } = state;
+        const d = $("dialog");
+        d.hidden = false;
+        if (state.result) return renderResult(d);
+        const errors = [];
+        if (!validName(state.name))
+          errors.push(
+            "Name: use lowercase letters, digits and single hyphens (at most 64).",
+          );
+        const clash =
+          s.clash &&
+          !state.leftOut.includes(s.clash) &&
+          state.chosen !== s.clash
+            ? s.clash
+            : null;
+        const collision = validName(state.name)
+          ? collisionFor(state.name)
+          : null;
+        const ready =
+          state.chosen &&
+          !errors.length &&
+          !clash &&
+          (collision === null || collision === "tracked");
+        const renamed = state.name !== s.manifestName;
+        const files = s.files.filter(([p]) => !state.leftOut.includes(p));
+        let html = `<h3>Import a skill</h3>`;
+        if (s.kind === "folder")
+          html += `<div class="box warn">Your browser may leave out linked files and folders without telling Konfab. Check that this list has everything you expect.</div>`;
+        html += `<dl>
+          <dt>Chosen</dt><dd><code>${esc(s.source)}</code> <span class="muted">(${s.kind === "folder" ? `folder, ${files.length} files` : "single file"})</span></dd>
+          <dt>Skill file</dt><dd>${skillFilePicker()}</dd>
+          <dt>Name</dt><dd><input type="text" id="name" value="${esc(state.name)}" aria-label="Skill name" />
+            ${renamed && validName(state.name) ? `<div class="change">name: ${esc(s.manifestName)} → ${esc(state.name)} (changed in the imported copy only)</div>` : ""}
+          </dd>
+          <dt>Destination</dt><dd><select aria-label="Destination"><option>My skills</option><option>Project · konfab</option></select>
+            <div class="muted">Creates <code>~/.konfab/skills/${esc(state.name || "…")}/SKILL.md</code>${s.kind === "folder" && s.source.replace("/", "") !== state.name ? ` (your folder is named <code>${esc(s.source)}</code>; that doesn't matter)` : ""}</div></dd>
+          <dt>Description</dt><dd>Design a robotics learning project and mentor the junior developer…</dd>
+          <dt>Licence</dt><dd>MIT <span class="muted">(from license: in the file)</span></dd>
+          <dt>Files</dt><dd><ul class="files">${files
+            .map(
+              ([p, z]) =>
+                `<li><code>${esc(p)}</code>${p === state.chosen && p !== "SKILL.md" ? ` → <code>SKILL.md</code>` : ""} <span class="muted">${z}</span></li>`,
+            )
+            .join("")}</ul>
+            ${s.excluded.length ? `<div class="muted">Not imported: ${s.excluded.map((e) => `<code>${esc(e)}</code>`).join(", ")}</div>` : ""}
+            ${s.kind === "file" ? `<div class="muted">Only this file is imported, as SKILL.md; other files next to it are not included.</div>` : ""}
+          </dd>
+        </dl>`;
+        if (s.missing)
+          html += `<div class="box warn">This file links to files that aren't included: ${s.missing.map((m) => `<code>${esc(m)}</code>`).join(", ")}. Import the folder instead to bring them along.</div>`;
+        if (state.chosen && state.chosen !== "SKILL.md" && s.kind === "folder")
+          html += `<div class="box info">Links to <code>${esc(state.chosen)}</code> from other files aren't rewritten.</div>`;
+        if (clash)
+          html += `<div class="box error"><code>${esc(clash)}</code> would end up as SKILL.md too (the Mac ignores letter case). Choose it as the skill file, or leave it out.
+            <div class="actions"><button id="leave-out">Leave ${esc(clash)} out</button><button id="use-clash">Use ${esc(clash)} as the skill file</button></div></div>`;
+        html += errors
+          .map((e) => `<div class="box error">${esc(e)}</div>`)
+          .join("");
+        if (collision === "tracked")
+          html += `<div class="box warn"><strong>${esc(state.name)}</strong> already exists (rev 3, used by Room konfab-improvement · codex, Room robotics · pm).
+            <b>Replace</b> saves this import as rev 4. Rev 3 stays in History, and agents stay on it until you update them.
+            <div class="actions"><button id="other-name">Use another name</button>${state.confirmReplace ? `<button class="danger" id="replace">Replace ${esc(state.name)}</button>` : `<button id="replace-ask">Replace…</button>`}</div></div>`;
+        if (collision === "trashed")
+          html += `<div class="box error"><strong>${esc(state.name)}</strong> is in Trash. Restore it first to replace it, or use another name.<div class="actions"><button id="other-name">Use another name</button></div></div>`;
+        if (collision === "untracked")
+          html += `<div class="box error">A folder <code>${esc(state.name)}</code> already exists but isn't a saved skill. Adopt or move it first, or use another name.<div class="actions"><button id="other-name">Use another name</button></div></div>`;
+        if (state.name === "pm" && collision !== "tracked") void 0;
+        html += `<div class="actions"><button class="primary" id="go" ${ready && collision !== "tracked" ? "" : "disabled"}>Import</button><button id="cancel">Cancel</button></div>`;
+        d.innerHTML = html;
+        wire();
+      }
+
+      function skillFilePicker() {
+        const { s } = state;
+        if (s.kind === "file")
+          return `<code>${esc(s.source)}</code> → <code>SKILL.md</code>`;
+        if (s.candidates.length === 1 && s.chosen === "SKILL.md")
+          return `<code>SKILL.md</code>`;
+        const all = [
+          ...s.candidates.map((c) => [c, true]),
+          ...(s.others ?? []).map((c) => [c, false]),
+        ];
+        const opts = all
+          .map(
+            ([c, looks]) =>
+              `<option value="${esc(c)}" ${state.chosen === c ? "selected" : ""}>${esc(c)}${looks ? " · looks like a skill file" : ""}</option>`,
+          )
+          .join("");
+        let help = "";
+        if (!state.chosen)
+          help = `<div class="muted">Several files look like skill files. Choose one; the others stay as supporting files.</div>`;
+        else if (s.auto && state.chosen === s.chosen)
+          help = `<div class="muted">No SKILL.md in this folder. Using <code>${esc(state.chosen)}</code>, the only file with skill front matter. Change it if this is wrong.</div>`;
+        return `<select id="skillfile" aria-label="Skill file">${state.chosen ? "" : `<option value="" selected>Choose the skill file…</option>`}${opts}</select> → <code>SKILL.md</code>${help}`;
+      }
+
+      function wire() {
+        const on = (id, f) => {
+          const el = $(id);
+          if (el) el.onclick = f;
+        };
+        const name = $("name");
+        if (name)
+          name.oninput = () => {
+            state.name = name.value.trim();
+            state.confirmReplace = false;
+            const pos = name.selectionStart;
+            render();
+            $("name").focus();
+            $("name").setSelectionRange(pos, pos);
+          };
+        const sf = $("skillfile");
+        if (sf)
+          sf.onchange = () => {
+            state.chosen = sf.value || null;
+            render();
+          };
+        on("leave-out", () => {
+          state.leftOut.push(state.s.clash);
+          render();
+        });
+        on("use-clash", () => {
+          state.chosen = state.s.clash;
+          render();
+        });
+        on("other-name", () => {
+          state.name = `${state.name}-2`;
+          state.confirmReplace = false;
+          render();
+          $("name").focus();
+        });
+        on("replace-ask", () => {
+          state.confirmReplace = true;
+          render();
+        });
+        on("replace", () => {
+          state.result = { replaced: true };
+          render();
+        });
+        on("go", () => {
+          state.result = { pending: !!state.s.pending };
+          render();
+        });
+        on("cancel", () => {
+          $("dialog").hidden = true;
+        });
+      }
+
+      function renderResult(d) {
+        const { s } = state;
+        if (state.result.pending && !state.result.resolved) {
+          d.innerHTML = `<h3>Saved as rev 1, but its folder isn't written yet</h3>
+            <div class="box warn">A folder named <code>${esc(state.name)}</code> appeared in My skills before Konfab could write it. Nothing was replaced. Your import is safe in History.</div>
+            <div class="actions">
+              <button class="primary" id="aside">Move the other folder aside</button>
+              <button id="rename">Rename this skill…</button>
+              <button id="trash">Move to Trash</button>
+              <button id="close">Close</button>
+            </div>
+            <p class="muted">"Move aside" puts the other folder under <b>Kept copies</b> in Manage library, where you can open or remove it.</p>`;
+          $("aside").onclick = () => {
+            state.result.resolved = true;
+            render();
+          };
+          $("close").onclick = () => {
+            d.hidden = true;
+            rows([
+              [
+                state.name,
+                `rev 1 · Not reviewed · used by 0 · <span style="color:var(--error)">Folder pending: a folder with this name appeared. <button>Resolve…</button></span>`,
+              ],
+            ]);
+          };
+          return;
+        }
+        const replaced = state.result.replaced;
+        d.innerHTML = `<h3>${replaced ? `Replaced: ${esc(state.name)} is now rev 4` : `Imported ${esc(state.name)} as rev 1`}</h3>
+          <p>The folder <code>~/.konfab/skills/${esc(state.name)}/</code> is written and opens in the editor. The revision is <b>not reviewed</b> and not assigned to anyone yet.</p>
+          ${replaced ? `<p class="muted">Rev 3 is in History. Agents using pm stay on rev 3 until you update them (open the skill → Used by). The previous folder is kept under <b>Kept copies</b> until you remove it.</p>` : ""}
+          ${state.result.resolved ? `<p class="muted">The other folder was moved to Kept copies.</p>` : ""}
+          <div class="actions"><button class="primary" id="close">Open in editor</button></div>`;
+        $("close").onclick = () => {
+          d.hidden = true;
+          rows([
+            [
+              state.name,
+              `${replaced ? "rev 4" : "rev 1"} · Not reviewed · imported from ${esc(s.source)}`,
+            ],
+          ]);
+          if (replaced || state.result.resolved)
+            $("rows").insertAdjacentHTML(
+              "beforeend",
+              `<div class="row muted">Kept copies: 1 previous folder (${replaced ? "pm rev 3" : esc(state.name) + " (other)"}, 12 KB) <button>Open</button> <button>Show differences</button> <button class="danger">Remove…</button></div>`,
+            );
+        };
+      }
+
+      $("import").onclick = () => ($("menu").hidden = !$("menu").hidden);
+      $("pick-folder").onclick = () =>
+        start(state.s?.kind === "folder" ? state.key : "folder");
+      $("pick-file").onclick = () => start("single");
+      $("theme").onclick = () => {
+        const dark = document.documentElement.dataset.theme === "dark";
+        document.documentElement.dataset.theme = dark ? "light" : "dark";
+        $("theme").textContent = dark ? "Dark theme" : "Light theme";
+      };
+      state.key = "folder";
+      scenarioButtons();
+      rows();
+    </script>
+  </body>
+</html>

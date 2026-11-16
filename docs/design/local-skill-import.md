@@ -6,6 +6,8 @@ The lead picks a skill folder or a single skill file (any name, e.g. `architect.
 
 ## User flow
 
+Clickable mockup: [mockups/local-import.html](mockups/local-import.html).
+
 **⚙ Manage library** (My skills or Project) gets an **Import…** button with two choices: **Choose folder…** and **Choose file…**.
 
 **File and folder names are sorted out by Konfab** (lead, msg 1073). The skill file can have any name. The skill's `name:` (or the name the lead types) becomes the folder, and the manifest is always saved as `SKILL.md`. The chosen folder's own name never matters. The preview shows each change, e.g. `architect.md → SKILL.md` and `guide-robotics-architect/ → robotics-architect/`.
