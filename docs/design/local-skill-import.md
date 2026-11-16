@@ -1,6 +1,6 @@
 # Import a local skill
 
-**Status:** proposed design for [REQUIREMENTS §19](../../REQUIREMENTS.md#19-import-a-local-skill) (LI1–LI6).
+**Status:** proposed design for [REQUIREMENTS §19](../../REQUIREMENTS.md#19-import-a-local-skill) (LI1–LI6), as of requirements commit cba73e9.
 
 The lead picks a skill folder or a single skill file (any name, e.g. `architect.md`) anywhere on their Mac. Konfab previews it, lets the lead choose the name, and creates the matching folder in the chosen library. It reuses the code paths that copy public skills, so there is one way to add a skill's rows and write its folder.
 
@@ -12,6 +12,7 @@ The lead picks a skill folder or a single skill file (any name, e.g. `architect.
 
 The preview dialog shows:
 
+- **Skill file.** The chosen source file and its destination, e.g. `architect.md → SKILL.md`. For a folder this is a picker (see below).
 - **Name.** Editable and checked live: the format rule and whether the name is free in this library. When it differs from the manifest, a line shows the change, e.g. `name: guide-architect → architect`.
 - **Destination.** My skills, or the room's project library when it is available, plus the folder it will create (`~/.konfab/skills/<name>/`).
 - **Description and licence** from the manifest. Below them, the `SKILL.md` text and the file list with sizes.
@@ -29,23 +30,30 @@ The collision box appears only when the chosen name is taken in this library:
 
 **Replace…** turns into a second, explicit **Replace architect** button. A built-in skill with the same name isn't a collision: built-ins are a separate, read-only library. The preview just notes "Also a built-in skill; agents see each by its library."
 
-After **Import** (or **Replace**), the dialog closes and the skill opens in the editor at its new, unreviewed revision. No assignment changes.
+After **Import** (or **Replace**), the outcome is one of two states, and the dialog says which (see "Saved versus ready" below):
+
+- **Ready:** the revision is saved and its folder is written. The dialog closes, and the skill opens in the editor at its new, unreviewed revision.
+- **Saved, folder pending:** the revision is saved and safe in History, but its folder couldn't be written yet. The dialog stays open and doesn't say "Imported". It says why the folder is pending and offers **Retry** and **Close**.
+
+No assignment changes in either case.
 
 ## Getting the files from the browser
 
 The page reads the chosen files with the browser's own picker. Konfab never receives a path on the Mac and never reads outside its libraries.
 
 - **Folder:** `<input type="file" webkitdirectory>`. Each `File` has `webkitRelativePath` (`chosen-folder/sub/file.md`). The first segment is the chosen folder's name and is stripped. That name is kept as `source_name` for provenance.
-- **Single file:** `<input type="file" accept=".md,text/markdown">`. Any file name is accepted, and it is saved as `SKILL.md`.
-- **Which file is the manifest in a folder:**
-  1. `SKILL.md` at the folder's top level, if present (also `skill.md` in any case, renamed to `SKILL.md`).
-  2. Otherwise, the single top-level `.md` file whose front matter has both `name:` and `description:`. It is renamed to `SKILL.md`. Links to it from other files aren't rewritten; the preview warns about each one by path.
-  3. Otherwise, if several top-level files qualify, the preview lists them and the lead picks one; the others stay as supporting files.
-  4. If none qualifies: "No skill file found: add front matter with name: and description: to one .md file."
+- **Single file:** `<input type="file">` with no type filter. Any file name and extension is accepted. Its contents are validated (front matter with `name:` and `description:`, UTF-8 text, size), and it is saved as `SKILL.md`.
+- **Which file is the skill file in a folder.** Konfab never guesses silently.
+  1. If the folder has `SKILL.md` at its top level (exact name), it is used, and the preview shows "Skill file: SKILL.md".
+  2. Otherwise the preview shows a **Skill file** picker that lists every included file (any name, extension or depth), and **Import** stays disabled until one is chosen. Files whose contents parse as a skill (front matter with `name:` and `description:`) are listed first and marked "looks like a skill file". If exactly one file does, it is preselected and the preview names it: "Skill file: architect.md, the only file with skill front matter. Change it if this is wrong." With several, none is preselected.
+  3. The chosen file is moved to the top level as `SKILL.md`. Every other file keeps its path. If the chosen file was in a subfolder, or other files link to its old name, the preview warns about the links that may break, by path; links aren't rewritten.
+  4. **Destination clash.** If another included file would end up at `SKILL.md` in any case (e.g. a top-level `skill.md` or `Skill.md` that wasn't chosen; the Mac file system usually ignores case), the preview explains it and blocks **Import**. The lead resolves it by choosing that file as the skill file instead, or by ticking **Leave this file out**. Nothing is overwritten or renamed silently.
+  5. If no file is valid when chosen: "This file isn't a skill: add front matter with name: and description:."
 
-  If `SKILL.md` would collide with an existing supporting file of that name in another case, the import is refused with that message.
-
-- **Symbolic links.** The browser exposes only names and contents, not whether an entry was a link. In Chromium-based browsers and Safari a linked file is read through the link, and a linked folder may be followed or skipped. So Konfab can't detect links and doesn't claim to. The preview's file list is the safeguard: whatever arrives is shown before anything is saved. Nothing is written outside the library either way, because the server only receives contents. Before implementation I'll check what Chrome and Safari actually do on macOS and record the result in this note and in the user guide.
+- **Symbolic links: measured, not assumed.** The browser gives the page names and contents only; it doesn't say whether an entry was a link.
+  - **Chromium, measured on macOS (2026-11-16).** A probe used the Chromium bundled with this repo's Playwright, with `webkitdirectory` and the folder handed to the browser to enumerate. The folder held `SKILL.md`, `sub/a.md`, a link to a file outside, a link to a folder outside and a broken link. The page received only `SKILL.md` and `sub/a.md`. All three links were **left out silently**, with no error.
+  - **Not yet measured:** Safari and Firefox (their Playwright builds aren't installed here), and Chrome's native file dialog, which Playwright bypasses. I'll check Chrome and Safari with a small probe page and a prepared folder before the page change is merged, and record the results here and in the user guide. That check needs someone at the native dialog, so the lead or me with the lead's help.
+  - **Consequence for the design:** the preview never implies the package is complete. A folder import always shows "Your browser may leave out linked files and folders without telling Konfab. Check that this list has everything you expect." above the file list, with a count. Nothing can be written outside the library either way, because the server only receives contents.
 - **File modes** aren't exposed. Imported files are saved as 0644, so scripts lose their executable bit. Konfab never runs them anyway, and the user guide says so.
 - **Limits** are checked in the page first, for fast feedback, and again on the server: 512 KiB per file, 2 MiB in total and fewer than 1,000 files, the same as `readSkillFiles`. Excluded files don't count.
 
@@ -55,8 +63,9 @@ Both calls are page-only (cookie-authenticated), like the other library routes. 
 
 ```
 POST /api/library/import/preview      bodyLimit 4 MB
-{ scope, room_id?, source_name, single_file, files: [{ path, content_base64 }], manifest?, name? }
-→ { name, manifest_name, manifest_from, manifest_candidates: [path], description, licence, folder, files: [{path, size}], excluded: [path],
+{ scope, room_id?, source_name, single_file, files: [{ path, content_base64 }], skill_file?, leave_out?: [path], name? }
+→ { skill_file: path | null, skill_file_candidates: [path], destination_clash: path | null,
+    broken_links: [path], name, manifest_name, description, licence, folder, files: [{path, size}], excluded: [path],
     missing_references: [path], rename: { from, to } | null, errors: [message],
     builtin_name: boolean,
     collision: null | { kind: "tracked", skill_id, number, revision_id, draft: boolean,
@@ -66,7 +75,7 @@ POST /api/library/import/preview      bodyLimit 4 MB
 
 POST /api/library/import               bodyLimit 4 MB
 { ...same as preview, name, action: "create" | "replace", expected }
-→ { skill_id, revision_id }
+→ { skill_id, revision_id, number, folder: "ready" | "pending", pending_reason?: string }
 ```
 
 Errors on confirm:
@@ -84,10 +93,10 @@ A new `SkillLibrary.prepareLocalImport(libraryId, upload, name?)` returns the pr
 1. **Normalise.**
    - Decode the files and strip the folder prefix.
    - Drop `.DS_Store` (any depth) and anything under a `.git/` path segment, recording them as excluded.
-   - Reject absolute paths, `..`, empty segments, backslashes and NUL. Also reject duplicate paths after normalisation (including two that differ only in case, because the Mac file system usually ignores case), and anything over the size limits. The manifest is chosen as described above and renamed to `SKILL.md` (`manifest_from` in the preview).
+   - Reject absolute paths, `..`, empty segments, backslashes and NUL. Also reject duplicate paths after normalisation (including two that differ only in case, because the Mac file system usually ignores case), and anything over the size limits. The skill file is chosen as described above and moved to `SKILL.md`. Leave-out paths are removed and recorded as excluded. A remaining case-insensitive clash with `SKILL.md` is a `destination_clash` error.
 2. **Rename.** Factor out the `name:` rewrite already in `importPublicForAssignment` into `renameManifest(files, name)`. It uses `yaml` `parseDocument`, so comments and other keys survive. Then validate with `skillMetadata`.
 3. **Licence.** Read `license` from the front matter, a string of 200 characters or fewer, else null. Store it in `skill_revisions.licence`.
-4. **Provenance.** `{"local_import": {"source_name": "<chosen folder or file name>", "manifest_from": "<original manifest path>", "imported_at": <ms>, "renamed_from": "<manifest name>" | absent}}`. A replacement records the same, so `sameSource` no longer matches a previous public source. A later public import of that skill then reports `local_changes` and asks Keep / Add as `-2` instead of updating silently.
+4. **Provenance.** `{"local_import": {"source_name": "<chosen folder or file name>", "skill_file": "<original path of the skill file>", "imported_at": <ms>, "renamed_from": "<manifest name>" | absent}}`. A replacement records the same, so `sameSource` no longer matches a previous public source. A later public import of that skill then reports `local_changes` and asks Keep / Add as `-2` instead of updating silently.
 5. **Missing references** (single file only, best effort). Scan Markdown links `](relative/path)` and backtick spans that look like relative paths with an extension (`` `scripts/run.sh` ``). Ignore URLs, anchors and absolute paths, and report the ones that are not in the package. It is a warning only.
 6. **Collision check** in the chosen library. Read the `skills` row by `folder_name`, including trashed rows. If there is none, check whether a folder of that name exists on disk.
 7. **Write**, in one `BEGIN IMMEDIATE` transaction after re-checking `expected`:
@@ -100,15 +109,30 @@ A new `SkillLibrary.prepareLocalImport(libraryId, upload, name?)` returns the pr
 
 ## Failure and recovery
 
-| When                               | Result                                                                                                                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cancel, or close the dialog        | Nothing was written; the preview has no server state.                                                                                                                    |
-| Validation or `expected` fails     | 4xx before the transaction; nothing written.                                                                                                                             |
-| Crash inside the transaction       | SQLite rolls back; nothing written.                                                                                                                                      |
-| Crash after commit, before folder  | The revision is saved and the folder is written by the journal on the next start (`recoverAssignedWorkspaces`), or by Manage library's existing retry.                   |
-| Folder appeared meanwhile, or edit | The workspace operation stays pending and is never overwritten. Manage library shows the existing "working folder differs" state, and History has the imported revision. |
+| When                               | Result                                                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cancel, or close the dialog        | Nothing was written; the preview has no server state.                                                                                                  |
+| Validation or `expected` fails     | 4xx before the transaction; nothing written.                                                                                                           |
+| Crash inside the transaction       | SQLite rolls back; nothing written.                                                                                                                    |
+| Crash after commit, before folder  | The revision is saved and the folder is written by the journal on the next start (`recoverAssignedWorkspaces`), or by Manage library's existing retry. |
+| Folder write fails (disk, access)  | Saved, folder pending: the dialog shows the reason and **Retry**; the library row keeps the pending notice until a retry succeeds.                     |
+| Folder appeared meanwhile, or edit | Saved, folder pending; nothing is overwritten. The reason names the conflicting folder, or says the existing folder was edited after the check.        |
 
 The source files are only read, by the browser. Existing revisions are never changed or deleted.
+
+### Saved versus ready
+
+An import has one commit point: the transaction that adds the revision. Before it, a failure leaves nothing behind. After it, the revision exists and is never rolled back. The folder is a working copy of that revision, written afterwards through the journal. So there is never a partial _skill_, only a saved revision whose folder may still be pending.
+
+- **The response tells the truth.** `importLocal` runs `finishWorkspaces()` for that skill straight after the commit, then reads its `skill_workspace_operations.state`. The route returns `folder: "ready"` only when the state is `complete` and the folder's package hash equals the revision. Otherwise it returns `folder: "pending"` with a `pending_reason`:
+  - "A folder named X appeared before Konfab could write it."
+  - "X was edited after the check, so Konfab didn't replace it."
+  - "Couldn't write to the library folder: <error code>."
+- **The page never reports completion early.** On `pending` it shows: "Saved as rev N, but its folder isn't written yet: <reason>. The import is safe in History. Fix the cause, then press Retry; Konfab also retries at every start."
+- **Retry** calls a new `POST /api/library/skills/:id/workspace/retry`. It runs `finishWorkspaces()` and returns the same `folder` and `pending_reason`.
+- **The Manage library row** gets the same reason and a **Retry** button. This replaces today's generic "could not be created … restart to retry" notice (Library.tsx), which also benefits public imports.
+- **Replace:** while pending, the previous folder stays exactly as it was. It is moved aside only if it still equals rev N, and restored on a failed write by the existing journal.
+- **Agents are unaffected:** they read revisions from the database, not the folder, and assignments are pinned anyway.
 
 ## Page
 
@@ -132,10 +156,11 @@ The source files are only read, by the browser. Existing revisions are never cha
   - replacing a public copy makes a later public import report `local_changes`;
   - `import_changed` for a changed package, revision or folder;
   - `draft_conflict`.
+- **Saved versus ready:** force a write failure after commit (library folder made read-only), then check `folder: "pending"` with the reason, no "Imported" message, Retry succeeding once writable, and the row notice clearing. Do the same for a concurrent edit after confirmation: create the target folder, or edit the replaced skill's folder, between the commit and `finishWorkspaces` (test hook). The result is pending, nothing is overwritten, and the edit is kept.
 - **Restart (integration):** commit an import, close before `finishWorkspaces`, then reopen with `createRuntime` + `buildApp`. The folder is written and the API lists the skill. A folder created in between is left alone and the operation stays pending.
 - **API:** the routes, body limit, cookie auth and an unavailable project library.
 - **Browser (Playwright, both themes):** import a folder with `setInputFiles` (directory), rename, hit a collision → Replace → History shows both revisions; import a single file; check that the stale-preview message appears after an outside edit.
-- **Manual:** the symlink behaviour in Chrome and Safari, recorded here.
+- **Manual, before merge:** the symlink behaviour in Chrome's native dialog and in Safari, recorded here. A Playwright check keeps the measured Chromium behaviour from regressing, and keeps the warning always shown for folder imports.
 
 ## Out of scope
 
