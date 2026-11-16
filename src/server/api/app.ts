@@ -900,10 +900,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           "folder_edited",
           "write_failed",
         ]),
+        expected_target: z.string().max(200).nullable().optional(),
       })
       .parse(request.body);
     return skillAction(() =>
-      skillService().resolveWorkspace(id, body.action, body.expected_reason),
+      skillService().resolveWorkspace(
+        id,
+        body.action,
+        body.expected_reason,
+        body.expected_target ?? null,
+      ),
     );
   });
   app.get("/api/library/kept", async (request) => {

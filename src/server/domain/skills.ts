@@ -2227,6 +2227,7 @@ export class SkillLibrary {
     skillId: string,
     action: "retry" | "move_aside" | "save_edits",
     expected: PendingCode,
+    expectedTarget: string | null = null,
   ): WorkspaceResult {
     const reason = this.workspace.reason(skillId);
     if (!reason || reason.code !== expected)
@@ -2240,7 +2241,7 @@ export class SkillLibrary {
       if (expected === "write_failed")
         throw new SkillError("invalid_action", 400, "Nothing to move aside");
       try {
-        return this.workspace.moveAside(skillId, expected);
+        return this.workspace.moveAside(skillId, expected, expectedTarget);
       } catch (error) {
         if ((error as { code?: string }).code === "import_changed")
           throw new SkillError(

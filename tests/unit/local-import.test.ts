@@ -358,7 +358,12 @@ describe("importing a local skill", () => {
     expect(readdirSync(join(root, "fresh"))).toEqual(["theirs.txt"]);
     // Moving the other folder aside keeps it, and the import is then written.
     expect(
-      library.resolveWorkspace(result.skill_id, "move_aside", "folder_exists"),
+      library.resolveWorkspace(
+        result.skill_id,
+        "move_aside",
+        "folder_exists",
+        library.workspaceReason(result.skill_id)?.target ?? null,
+      ),
     ).toEqual({ folder: "ready" });
     expect(readFileSync(join(root, "fresh", "SKILL.md"), "utf8")).toBe(
       manifest("fresh"),
@@ -462,7 +467,12 @@ describe("importing a local skill", () => {
         "late edit",
       );
       expect(
-        library.resolveWorkspace(first.skill_id, action, "folder_edited"),
+        library.resolveWorkspace(
+          first.skill_id,
+          action,
+          "folder_edited",
+          library.workspaceReason(first.skill_id)?.target ?? null,
+        ),
       ).toEqual({ folder: "ready" });
       if (action === "save_edits") {
         // The edited folder became rev 3; the import is rev 2 in History.
@@ -506,15 +516,7 @@ describe("importing a local skill", () => {
   });
 
   describe("a crash right after each file system change, before the journal catches up", () => {
-    const labels = [
-      "kept-root",
-      "holder",
-      "aside",
-      "marker",
-      "mkdir",
-      "file",
-      "unmark",
-    ];
+    const labels = ["kept-root", "holder", "aside", "marker", "file", "unmark"];
     for (const label of labels)
       for (const action of ["create", "replace"] as const) {
         if (
@@ -605,11 +607,138 @@ describe("importing a local skill", () => {
           result.skill_id,
           "move_aside",
           "folder_exists",
+          library.workspaceReason(result.skill_id)?.target ?? null,
         ),
       ).toEqual({ folder: "ready" });
       expect(readFileSync(join(root, "unrecorded", "SKILL.md"), "utf8")).toBe(
         manifest("unrecorded"),
       );
+    });
+
+    for (const label of ["mkdir", "file-open"] as const)
+      it(`create: after ${label} but before its identity is recorded, Konfab stops instead of guessing`, () => {
+        const path = join(home, "konfab.db");
+        const name = `unproven-${label}`;
+        const u = upload({ "SKILL.md": manifest(name), "x/y.md": "y" });
+        const expected = preview(u).expected;
+        workspaceHooks.afterFs = (at) => {
+          if (at === label) throw new Error("crash");
+        };
+        const result = library.importLocal(
+          libraryId,
+          u,
+          name,
+          "create",
+          expected,
+        );
+        workspaceHooks.afterFs = undefined;
+        db.close();
+        db = openDatabase(path);
+        library = new SkillLibrary(db);
+        const reason = library.workspaceReason(result.skill_id);
+        expect(reason).toMatchObject({
+          code: "folder_edited",
+          detail: expect.stringContaining("can't prove it"),
+        });
+        // Moving the partial folder aside keeps it, and the import is written fresh.
+        expect(
+          library.resolveWorkspace(
+            result.skill_id,
+            "move_aside",
+            "folder_edited",
+            reason?.target ?? null,
+          ),
+        ).toEqual({ folder: "ready" });
+        expect(readFileSync(join(root, name, "x", "y.md"), "utf8")).toBe("y");
+      });
+
+    it("never takes over a directory or file someone else creates between the journal entry and the create", () => {
+      for (const [label, intruder] of [
+        ["journal-dir", "x"],
+        ["journal-file", "x/y.md"],
+      ] as const) {
+        const name = `intruder-${label}`;
+        const u = upload({ "SKILL.md": manifest(name), "x/y.md": "yyyy" });
+        const expected = preview(u).expected;
+        workspaceHooks.afterFs = (at) => {
+          if (at !== label) return;
+          const target = join(root, name, intruder);
+          // Wait for the journal entry of the file inside x/, not SKILL.md's.
+          if (label === "journal-file" && !existsSync(join(root, name, "x")))
+            return;
+          if (label === "journal-dir") mkdirSync(target);
+          // An empty file is a prefix of anything.
+          else writeFileSync(target, "");
+          workspaceHooks.afterFs = undefined;
+        };
+        const result = library.importLocal(
+          libraryId,
+          u,
+          name,
+          "create",
+          expected,
+        );
+        workspaceHooks.afterFs = undefined;
+        expect(result).toMatchObject({
+          folder: "pending",
+          pending_reason: { code: "folder_edited" },
+        });
+        // Nothing was written into or over it, and a restart doesn't change that.
+        if (label === "journal-dir")
+          expect(readdirSync(join(root, name, "x"))).toEqual([]);
+        else
+          expect(readFileSync(join(root, name, "x", "y.md"), "utf8")).toBe("");
+        library.finishWorkspaces();
+        expect(library.workspaceReason(result.skill_id)?.code).toBe(
+          "folder_edited",
+        );
+        if (label === "journal-file")
+          expect(readFileSync(join(root, name, "x", "y.md"), "utf8")).toBe("");
+      }
+    });
+
+    it("refuses Move aside when the target changed after the lead saw it", () => {
+      const u = upload({ "SKILL.md": manifest("moving") });
+      const expected = preview(u).expected;
+      workspaceHooks.afterStep = (step) => {
+        if (step === "write") {
+          rmSync(join(root, "moving"), { recursive: true });
+          mkdirSync(join(root, "moving"));
+          writeFileSync(join(root, "moving", "a.txt"), "first");
+        }
+      };
+      const result = library.importLocal(
+        libraryId,
+        u,
+        "moving",
+        "create",
+        expected,
+      );
+      workspaceHooks.afterStep = undefined;
+      const seen = library.workspaceReason(result.skill_id)?.target ?? null;
+      // Someone changes the folder after the lead was shown it.
+      writeFileSync(join(root, "moving", "b.txt"), "second");
+      expect(() =>
+        library.resolveWorkspace(
+          result.skill_id,
+          "move_aside",
+          "folder_exists",
+          seen,
+        ),
+      ).toThrow("This changed");
+      expect(readdirSync(join(root, "moving")).sort()).toEqual([
+        "a.txt",
+        "b.txt",
+      ]);
+      // A stale or missing confirmation is refused too.
+      expect(() =>
+        library.resolveWorkspace(
+          result.skill_id,
+          "move_aside",
+          "folder_exists",
+          null,
+        ),
+      ).toThrow("This changed");
     });
   });
 });

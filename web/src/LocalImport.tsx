@@ -47,6 +47,7 @@ export type PendingReason = {
   code: "folder_exists" | "folder_edited" | "write_failed";
   folder: string;
   detail: string;
+  target?: string | null;
 };
 type Result = {
   skill_id: string;
@@ -110,7 +111,11 @@ export function PendingFolder({
       onResolved(
         await request(`/api/library/skills/${skillId}/workspace/resolve`, {
           method: "POST",
-          body: { action, expected_reason: reason.code },
+          body: {
+            action,
+            expected_reason: reason.code,
+            expected_target: reason.target ?? null,
+          },
         }),
       );
       setError("");

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  openSync,
+  writeSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -27,6 +32,10 @@ import { packageHash, readSkillFiles, type SkillFile } from "./skill-files.js";
  * recorded, so a restart resumes where it stopped. See
  * docs/design/local-skill-import.md.
  *
+ * Inside its claim, every subfolder and file is journaled before it is
+ * created and identified (dev:ino) right after; recovery reuses only what it
+ * can identify, and anything else stays pending for the lead.
+ *
  * Remaining limit: Node has no openat, so between the inode check and a file
  * create, another process could swap the claimed folder for its own; Konfab
  * would then add (never replace) a file there, and verify reports it.
@@ -40,6 +49,33 @@ export interface PendingReason {
   code: PendingCode;
   folder: string;
   detail: string;
+  /** What was at the folder path when this was reported; Move aside requires it unchanged. */
+  target?: string | null;
+}
+
+/** The identity of whatever is at a path: kind, device, inode and contents. */
+export function targetIdentity(path: string): string | null {
+  let stat: Stats;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return null;
+  }
+  const kind = stat.isSymbolicLink()
+    ? "link"
+    : stat.isDirectory()
+      ? "dir"
+      : stat.isFile()
+        ? "file"
+        : "other";
+  let contents = `${stat.size}:${stat.mtimeMs}`;
+  if (kind === "dir")
+    try {
+      contents = folderHash(path);
+    } catch {
+      contents = "unreadable";
+    }
+  return `${kind}:${stat.dev}:${stat.ino}:${contents}`;
 }
 export type WorkspaceResult =
   { folder: "ready" } | { folder: "pending"; pending_reason: PendingReason };
@@ -56,6 +92,7 @@ interface Operation {
   kept_path: string | null;
   created_dirs_json: string | null;
   writing_file: string | null;
+  writing_id: string | null;
   folder_name: string;
   library_id: string;
   root_path: string;
@@ -103,7 +140,7 @@ export class SkillWorkspace {
     return this.db
       .prepare(
         `SELECT o.skill_id, o.revision_id, o.previous_revision_id, o.step, o.claim_dev, o.claim_ino, o.kept_path,
-           o.created_dirs_json, o.writing_file, s.folder_name, s.library_id, l.root_path, r.content_hash, p.content_hash AS previous_hash
+           o.created_dirs_json, o.writing_file, o.writing_id, s.folder_name, s.library_id, l.root_path, r.content_hash, p.content_hash AS previous_hash
          FROM skill_workspace_operations o JOIN skills s ON s.id = o.skill_id JOIN skill_libraries l ON l.id = s.library_id
          JOIN skill_revisions r ON r.id = o.revision_id LEFT JOIN skill_revisions p ON p.id = o.previous_revision_id
          WHERE o.skill_id = ? AND o.state = 'pending'`,
@@ -176,6 +213,8 @@ export class SkillWorkspace {
               folder: op.folder_name,
               detail: `Couldn't write to the library folder: ${(error as NodeJS.ErrnoException)?.code ?? (error as Error)?.message ?? "unknown error"}.`,
             };
+      if (reason.code !== "write_failed")
+        reason.target = targetIdentity(join(op.root_path, op.folder_name));
       this.record(skillId, { reason_json: JSON.stringify(reason) });
       return { folder: "pending", pending_reason: reason };
     }
@@ -358,15 +397,16 @@ export class SkillWorkspace {
         this.record(op.skill_id, {
           claim_dev: null,
           claim_ino: null,
-          created_dirs_json: "[]",
+          created_dirs_json: "{}",
           writing_file: null,
+          writing_id: null,
         });
         mkdirSync(folder, { mode: 0o755 });
         fs("claim");
         const made = lstatSync(folder);
         op.claim_dev = String(made.dev);
         op.claim_ino = String(made.ino);
-        op.created_dirs_json = "[]";
+        op.created_dirs_json = "{}";
         this.record(op.skill_id, {
           claim_dev: op.claim_dev,
           claim_ino: op.claim_ino,
@@ -382,9 +422,27 @@ export class SkillWorkspace {
     }
     if (step === "write") {
       if (!ours()) throw exists_();
-      const created = new Set<string>(
-        JSON.parse(op.created_dirs_json ?? "[]") as string[],
-      );
+      // What this operation created inside its claim, by identity: a path is
+      // recorded before it is created (null) and its dev:ino right after.
+      const parsed = JSON.parse(op.created_dirs_json ?? "{}") as unknown;
+      const created: Record<string, string | null> =
+        parsed && !Array.isArray(parsed)
+          ? (parsed as Record<string, string | null>)
+          : {};
+      const identity = (stat: Stats) => `${stat.dev}:${stat.ino}`;
+      const unproven = (path: string) =>
+        edited(
+          `${op.folder_name}/${path} is there, and Konfab may have created it just before it stopped, but can't prove it, so it didn't use it. Move the folder aside to continue.`,
+        );
+      const create = (file: SkillFile, destination: string) => {
+        try {
+          this.writeFile(op, destination, file, fs);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EEXIST")
+            throw unproven(file.path);
+          throw error;
+        }
+      };
       for (const file of this.files(op.revision_id)) {
         workspaceHooks.beforeFile?.(file.path, op.skill_id);
         if (!ours()) throw exists_();
@@ -394,17 +452,33 @@ export class SkillWorkspace {
           const relative = parts.slice(0, i).join("/");
           const path = join(folder, relative);
           if (!exists(path)) {
-            created.add(relative);
-            op.created_dirs_json = JSON.stringify([...created]);
+            created[relative] = null;
+            op.created_dirs_json = JSON.stringify(created);
             this.record(op.skill_id, {
               created_dirs_json: op.created_dirs_json,
             });
-            mkdirSync(path, { mode: 0o755 });
+            fs("journal-dir");
+            try {
+              mkdirSync(path, { mode: 0o755 });
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "EEXIST")
+                throw unproven(relative);
+              throw error;
+            }
             fs("mkdir");
-          } else if (!realDirectory(path) || !created.has(relative))
-            throw edited(
-              `${op.folder_name}/${relative} changed while Konfab was writing it, so Konfab stopped.`,
-            );
+            created[relative] = identity(lstatSync(path));
+            op.created_dirs_json = JSON.stringify(created);
+            this.record(op.skill_id, {
+              created_dirs_json: op.created_dirs_json,
+            });
+            continue;
+          }
+          const stat = realDirectory(path);
+          if (stat && created[relative] === identity(stat)) continue;
+          if (relative in created) throw unproven(relative);
+          throw edited(
+            `${op.folder_name}/${relative} changed while Konfab was writing it, so Konfab stopped.`,
+          );
         }
         const destination = join(folder, file.path);
         if (exists(destination)) {
@@ -415,29 +489,25 @@ export class SkillWorkspace {
             (stat.mode & 0o777) === file.mode
           )
             continue;
-          // The file this operation was writing when it stopped: finish it.
+          // The file this operation was writing when it stopped, proven by identity: finish it.
           if (
             op.writing_file === file.path &&
-            current !== null &&
-            file.content.subarray(0, current.length).equals(current)
+            op.writing_id !== null &&
+            op.writing_id === identity(stat) &&
+            current !== null
           ) {
-            if (current.length === file.content.length)
-              chmodSync(destination, file.mode);
-            else {
-              unlinkSync(destination);
-              this.writeFile(destination, file, fs);
-            }
+            unlinkSync(destination);
+            create(file, destination);
             continue;
           }
+          if (op.writing_file === file.path) throw unproven(file.path);
           throw edited(
             `${op.folder_name}/${file.path} changed while Konfab was writing it, so Konfab stopped.`,
           );
         }
-        op.writing_file = file.path;
-        this.record(op.skill_id, { writing_file: file.path });
-        this.writeFile(destination, file, fs);
+        create(file, destination);
       }
-      set("verify", { writing_file: null });
+      set("verify", { writing_file: null, writing_id: null });
       step = "verify";
     }
     if (step === "verify") {
@@ -460,14 +530,36 @@ export class SkillWorkspace {
     }
   }
 
+  /** Creates one file exclusively, recording its path first and its identity right after. */
   private writeFile(
+    op: Operation,
     destination: string,
     file: SkillFile,
     fs: (label: string) => void,
   ): void {
-    writeFileSync(destination, file.content, { flag: "wx", mode: file.mode });
-    fs("file");
-    chmodSync(destination, file.mode); // not narrowed by the umask
+    op.writing_file = file.path;
+    op.writing_id = null;
+    this.record(op.skill_id, { writing_file: file.path, writing_id: null });
+    fs("journal-file");
+    const fd = openSync(
+      destination,
+      constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_WRONLY |
+        constants.O_NOFOLLOW,
+      file.mode,
+    );
+    try {
+      fs("file-open");
+      const stat = fstatSync(fd);
+      op.writing_id = `${stat.dev}:${stat.ino}`;
+      this.record(op.skill_id, { writing_id: op.writing_id });
+      writeSync(fd, file.content);
+      fs("file");
+      fchmodSync(fd, file.mode); // not narrowed by the umask
+    } finally {
+      closeSync(fd);
+    }
   }
 
   /**
@@ -475,10 +567,21 @@ export class SkillWorkspace {
    * pending write can continue. Only for a pending operation whose reason is
    * still `expected`.
    */
-  moveAside(skillId: string, expected: PendingCode): WorkspaceResult {
+  moveAside(
+    skillId: string,
+    expected: PendingCode,
+    expectedTarget: string | null,
+  ): WorkspaceResult {
     const op = this.operation(skillId);
     const reason = this.reason(skillId);
-    if (!op || reason?.code !== expected)
+    // The lead confirmed moving a specific thing: it must still be exactly that.
+    if (
+      !op ||
+      reason?.code !== expected ||
+      !reason.target ||
+      reason.target !== expectedTarget ||
+      targetIdentity(join(op.root_path, op.folder_name)) !== reason.target
+    )
       throw Object.assign(new Error("This changed; review again."), {
         code: "import_changed",
       });
@@ -520,6 +623,7 @@ export class SkillWorkspace {
       claim_ino: null,
       created_dirs_json: null,
       writing_file: null,
+      writing_id: null,
       reason_json: null,
     });
     return this.run(skillId);
