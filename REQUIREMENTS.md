@@ -436,6 +436,7 @@ Skills are the assignment concept: a skill can describe an agent's responsibilit
 - **Order and conflicts:** room rules and the lead > room instructions > skills in list order; the earlier skill wins, and every full assignment tells the agent so.
 - **Upgrade:** converts every role revision in use (including active-turn snapshots) into reviewed personal skills, keeps the old `role` reply until an assignment changes, writes a fresh backup per attempt, and stops without writing if an assignment cannot fit.
 - **Updates:** per member from its card, or per skill across rooms for selected members; never automatic.
+
 ## 19. Import a local skill
 
 **Status:** Proposed; pending design and review.
