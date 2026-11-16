@@ -740,5 +740,49 @@ describe("importing a local skill", () => {
         ),
       ).toThrow("This changed");
     });
+
+    it("keeps a partly written file that was edited before recovery, and stays pending", () => {
+      const path = join(home, "konfab.db");
+      const u = upload({
+        "SKILL.md": manifest("edited-partial"),
+        "x/y.md": "y".repeat(100),
+      });
+      const expected = preview(u).expected;
+      const target = join(root, "edited-partial", "x", "y.md");
+      workspaceHooks.afterFs = (at) => {
+        if (at === "file" && existsSync(target)) {
+          writeFileSync(target, "y".repeat(40));
+          throw new Error("crash");
+        }
+      };
+      const result = library.importLocal(
+        libraryId,
+        u,
+        "edited-partial",
+        "create",
+        expected,
+      );
+      workspaceHooks.afterFs = undefined;
+      // The lead edits the same file (same inode) while Konfab is stopped.
+      const inode = lstatSync(target).ino;
+      writeFileSync(target, "my own words", { flag: "r+" });
+      expect(lstatSync(target).ino).toBe(inode);
+      db.close();
+      db = openDatabase(path);
+      library = new SkillLibrary(db);
+      expect(library.workspaceReason(result.skill_id)).toMatchObject({
+        code: "folder_edited",
+        detail: expect.stringContaining(
+          "was changed while Konfab's write was interrupted",
+        ),
+      });
+      expect(readFileSync(target, "utf8")).toBe(
+        "my own words" + "y".repeat(28),
+      );
+      library.finishWorkspaces();
+      expect(readFileSync(target, "utf8")).toBe(
+        "my own words" + "y".repeat(28),
+      );
+    });
   });
 });

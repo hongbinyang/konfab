@@ -489,15 +489,20 @@ export class SkillWorkspace {
             (stat.mode & 0o777) === file.mode
           )
             continue;
-          // The file this operation was writing when it stopped, proven by identity: finish it.
+          // The file this operation was writing when it stopped: proven by
+          // identity, and still holding only a beginning of Konfab's bytes.
+          // Finish it in place; any other content is kept and left pending.
           if (
             op.writing_file === file.path &&
             op.writing_id !== null &&
             op.writing_id === identity(stat) &&
             current !== null
           ) {
-            unlinkSync(destination);
-            create(file, destination);
+            if (!file.content.subarray(0, current.length).equals(current))
+              throw edited(
+                `${op.folder_name}/${file.path} was changed while Konfab's write was interrupted, so Konfab kept it and stopped.`,
+              );
+            this.finishFile(op, destination, file, current.length, fs);
             continue;
           }
           if (op.writing_file === file.path) throw unproven(file.path);
@@ -527,6 +532,31 @@ export class SkillWorkspace {
         fs("unmark");
       }
       return;
+    }
+  }
+
+  /** Writes the rest of a partly written file in place, after checking it is still the same file. */
+  private finishFile(
+    op: Operation,
+    destination: string,
+    file: SkillFile,
+    offset: number,
+    fs: (label: string) => void,
+  ): void {
+    const fd = openSync(destination, constants.O_WRONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd);
+      if (`${stat.dev}:${stat.ino}` !== op.writing_id || stat.size !== offset)
+        throw new Pending({
+          code: "folder_edited",
+          folder: op.folder_name,
+          detail: `${op.folder_name}/${file.path} was changed while Konfab's write was interrupted, so Konfab kept it and stopped.`,
+        });
+      writeSync(fd, file.content, offset, file.content.length - offset, offset);
+      fs("file");
+      fchmodSync(fd, file.mode);
+    } finally {
+      closeSync(fd);
     }
   }
 
