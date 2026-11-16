@@ -975,7 +975,7 @@ describe("database migration", () => {
         .run();
       old.close();
       const upgraded = openDatabase(file);
-      expect(upgraded.pragma("user_version", { simple: true })).toBe(33);
+      expect(upgraded.pragma("user_version", { simple: true })).toBe(34);
       expect(upgraded.prepare("SELECT name, brief FROM rooms").get()).toEqual({
         name: "existing",
         brief: "kept",
@@ -1018,7 +1018,7 @@ describe("database migration", () => {
       old.close();
 
       const db = openDatabase(file);
-      expect(db.pragma("user_version", { simple: true })).toBe(33);
+      expect(db.pragma("user_version", { simple: true })).toBe(34);
       expect(db.prepare("SELECT brief FROM rooms").get()).toEqual({
         brief: "",
       });

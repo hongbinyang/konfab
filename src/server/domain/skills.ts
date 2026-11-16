@@ -19,6 +19,7 @@ import { dirname, isAbsolute } from "node:path";
 import { parseDocument } from "yaml";
 import { join } from "node:path";
 import type { Db } from "../db/index.js";
+import { SkillWorkspace, type WorkspaceResult } from "./skill-workspace.js";
 import {
   packageHash,
   readSkillFiles,
@@ -93,10 +94,13 @@ export function builtinSkillId(name: string): string {
 
 /** Local library persistence. Filesystem operations are kept outside SQL transactions. */
 export class SkillLibrary {
+  private readonly workspace: SkillWorkspace;
+
   constructor(
     private readonly db: Db,
     private readonly now: () => number = Date.now,
   ) {
+    this.workspace = new SkillWorkspace(db, now);
     try {
       this.recoverRenames();
     } catch {
@@ -344,124 +348,12 @@ export class SkillLibrary {
   }
 
   private recoverAssignedWorkspaces(): void {
-    const rows = this.db
-      .prepare(
-        `SELECT o.skill_id, o.revision_id, s.folder_name, l.root_path, r.content_hash, p.content_hash AS previous_hash
-         FROM skill_workspace_operations o JOIN skills s ON s.id=o.skill_id JOIN skill_libraries l ON l.id=s.library_id
-         JOIN skill_revisions r ON r.id=o.revision_id LEFT JOIN skill_revisions p ON p.id=o.previous_revision_id
-         WHERE o.state='pending'`,
-      )
-      .all() as Array<{
-      skill_id: string;
-      revision_id: string;
-      folder_name: string;
-      root_path: string;
-      content_hash: string;
-      previous_hash: string | null;
-    }>;
-    for (const row of rows) {
-      try {
-        const root = lstatSync(row.root_path);
-        if (!root.isDirectory() || root.isSymbolicLink()) continue;
-        const folder = join(row.root_path, row.folder_name);
-        const staging = join(row.root_path, `.konfab-pending-${row.skill_id}`);
-        const marker = join(staging, ".konfab-workspace-owner");
-        const replaced = join(
-          row.root_path,
-          `.konfab-replaced-${row.skill_id}`,
-        );
-        // An unmodified folder at the previous revision is moved aside, then rewritten below.
-        if (existsSync(folder) && row.previous_hash) {
-          const target = lstatSync(folder);
-          if (
-            target.isDirectory() &&
-            !target.isSymbolicLink() &&
-            !existsSync(replaced) &&
-            packageHash(readSkillFiles(folder)) === row.previous_hash
-          )
-            renameSync(folder, replaced);
-        }
-        if (existsSync(folder)) {
-          const target = lstatSync(folder);
-          if (
-            target.isDirectory() &&
-            !target.isSymbolicLink() &&
-            packageHash(readSkillFiles(folder)) === row.content_hash
-          )
-            this.db
-              .prepare(
-                "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
-              )
-              .run(row.skill_id);
-          if (
-            existsSync(replaced) &&
-            packageHash(readSkillFiles(folder)) === row.content_hash
-          )
-            rmSync(replaced, { recursive: true });
-          continue;
-        }
-        if (existsSync(staging)) {
-          const stat = lstatSync(staging);
-          if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
-          if (existsSync(marker)) {
-            if (
-              lstatSync(marker).isSymbolicLink() ||
-              readFileSync(marker, "utf8") !== row.skill_id
-            )
-              continue;
-            rmSync(staging, { recursive: true });
-          } else if (readdirSync(staging).length === 0)
-            rmSync(staging, { recursive: true });
-          else if (packageHash(readSkillFiles(staging)) === row.content_hash) {
-            if (!existsSync(folder)) renameSync(staging, folder);
-            if (
-              existsSync(folder) &&
-              packageHash(readSkillFiles(folder)) === row.content_hash
-            )
-              this.db
-                .prepare(
-                  "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
-                )
-                .run(row.skill_id);
-            continue;
-          } else continue;
-        }
-        mkdirSync(staging, { mode: 0o700 });
-        writeFileSync(marker, row.skill_id, { flag: "wx", mode: 0o600 });
-        const files = this.db
-          .prepare(
-            "SELECT f.path, f.mode, b.content FROM skill_revision_files f JOIN skill_blobs b ON b.hash=f.blob_hash WHERE f.revision_id=? ORDER BY f.path",
-          )
-          .all(row.revision_id) as SkillFile[];
-        for (const file of files) {
-          const destination = join(staging, file.path);
-          mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
-          writeFileSync(destination, file.content, {
-            flag: "wx",
-            mode: file.mode & 0o777,
-          });
-        }
-        unlinkSync(marker);
-        if (
-          packageHash(readSkillFiles(staging)) !== row.content_hash ||
-          existsSync(folder)
-        )
-          continue;
-        // A concurrent rename can replace an empty directory, but cannot replace a non-empty one.
-        // A conflict remains pending and is shown in Manage library for the user to resolve.
-        renameSync(staging, folder);
-        this.db
-          .prepare(
-            "UPDATE skill_workspace_operations SET state='complete' WHERE skill_id=?",
-          )
-          .run(row.skill_id);
-        if (existsSync(replaced)) rmSync(replaced, { recursive: true });
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException)?.code;
-        if (code === "EEXIST" || code === "ENOTEMPTY") continue;
-        /* Leave other failures pending for a safe retry and visible diagnosis. */
-      }
-    }
+    this.workspace.runAll();
+  }
+
+  /** Writes or resumes one skill's working folder and says whether it is ready. */
+  finishWorkspace(skillId: string): WorkspaceResult {
+    return this.workspace.run(skillId);
   }
 
   private recoverImports(): void {

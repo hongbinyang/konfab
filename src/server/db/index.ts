@@ -9,6 +9,8 @@ export type Db = Database.Database;
 /** A migration is SQL, or a function for steps that SQL cannot express. Both run in one transaction. */
 type Migration = string | ((db: Db) => void);
 
+const ROLES_TO_SKILLS = (db: Db) => upgradeRolesToSkills(db);
+
 const MIGRATIONS: readonly Migration[] = [
   `
   CREATE TABLE agents (
@@ -525,11 +527,24 @@ const MIGRATIONS: readonly Migration[] = [
   CREATE INDEX room_agent_names_by_name ON room_agent_names(room_id, lower(name));
   ALTER TABLE messages ADD COLUMN mentioned TEXT;
   `,
-  (db) => upgradeRolesToSkills(db),
+  ROLES_TO_SKILLS,
+  `
+  ALTER TABLE skill_workspace_operations ADD COLUMN step TEXT;
+  ALTER TABLE skill_workspace_operations ADD COLUMN claim_dev TEXT;
+  ALTER TABLE skill_workspace_operations ADD COLUMN claim_ino TEXT;
+  ALTER TABLE skill_workspace_operations ADD COLUMN kept_path TEXT;
+  ALTER TABLE skill_workspace_operations ADD COLUMN created_dirs_json TEXT;
+  ALTER TABLE skill_workspace_operations ADD COLUMN reason_json TEXT;
+  CREATE TABLE skill_kept_folders (
+    id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id), library_id TEXT NOT NULL REFERENCES skill_libraries(id),
+    revision_id TEXT REFERENCES skill_revisions(id), path TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('previous','edits','other')), created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** The schema version at which roles were replaced by skill assignments. */
-export const SKILL_UPGRADE_VERSION = MIGRATIONS.length;
+export const SKILL_UPGRADE_VERSION = MIGRATIONS.indexOf(ROLES_TO_SKILLS) + 1;
 
 /** The backup written before the most recent role-to-skill upgrade attempt in this process. */
 export let lastUpgradeBackup: string | null = null;

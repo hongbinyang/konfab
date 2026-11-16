@@ -58,8 +58,9 @@ describe("upgrading roles to skills", () => {
     const fixture = buildOldDatabase(dir);
     const db = openDatabase(fixture.path);
     try {
+      // The skill upgrade, then the folder-journal columns after it.
       expect(db.pragma("user_version", { simple: true })).toBe(
-        SKILL_UPGRADE_VERSION,
+        SKILL_UPGRADE_VERSION + 1,
       );
       // The colliding names get suffixes; the unrelated skill and the stray folder stay.
       expect(pins(db, "claude")).toEqual([
