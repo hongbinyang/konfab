@@ -238,7 +238,8 @@ Importing several skills at once, `.zip` archives, drag-and-drop (a later additi
 - **Kept copies** are listed with **Copy path** rather than **Open**, because the page can't open Finder.
 - **Browsers:**
   - Playwright's Chromium is checked by `tests/e2e/local-import.spec.ts`: a linked file is left out without notice.
-  - Chrome's native dialog and Safari still need the manual check before merge.
+  - **Chrome 157, native dialog, macOS (lead, 2026-11-16):** of `SKILL.md`, `sub/a.md`, a link to a file outside, a link to a folder outside and a broken link, the page received only `SKILL.md` and `sub/a.md`. All links were left out without notice, the same as Playwright's Chromium.
+  - Safari: pending the lead's check.
 - **Ownership inside the claim:** every subfolder and file is recorded in the journal before it is created, and its `dev:ino` right after (`created_dirs_json`, `writing_file`/`writing_id`). Recovery uses something only if its recorded identity matches. A path that is recorded but has no identity (a crash in that instant, or something another process put there) is never taken over: the operation stays pending as `folder_edited` ("can't prove it"), and **Move the folder aside** resolves it without deleting anything.
 - **Move aside checks what it moves:** each pending reason stores the identity of what was at the folder path (kind, `dev:ino`, and contents hash or size and mtime). The page sends it back, and Move aside refuses (409) unless the path still holds exactly that.
 - **Interrupted files are never finished automatically.** A file with the recorded identity is accepted only if it is already complete. If only its mode wasn't set yet, the mode is set through a descriptor after re-checking its identity. An incomplete file is kept exactly as it is and the operation stays pending (`folder_edited`), because another writer could be appending to it. **Move the folder aside** keeps those bytes and writes the import fresh.
