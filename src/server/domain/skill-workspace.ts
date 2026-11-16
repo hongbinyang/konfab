@@ -489,21 +489,23 @@ export class SkillWorkspace {
             (stat.mode & 0o777) === file.mode
           )
             continue;
-          // The file this operation was writing when it stopped: proven by
-          // identity, and still holding only a beginning of Konfab's bytes.
-          // Finish it in place; any other content is kept and left pending.
+          // The file this operation was writing when it stopped. It is accepted
+          // only if already complete (above, or here when only its mode was not
+          // yet set); an incomplete file is never finished automatically, since
+          // another writer could be appending to it. The lead moves it aside.
           if (
             op.writing_file === file.path &&
             op.writing_id !== null &&
             op.writing_id === identity(stat) &&
             current !== null
           ) {
-            if (!file.content.subarray(0, current.length).equals(current))
-              throw edited(
-                `${op.folder_name}/${file.path} was changed while Konfab's write was interrupted, so Konfab kept it and stopped.`,
-              );
-            this.finishFile(op, destination, file, current.length, fs);
-            continue;
+            if (current.equals(file.content)) {
+              this.setMode(op, destination, file);
+              continue;
+            }
+            throw edited(
+              `${op.folder_name}/${file.path} is incomplete because Konfab's write was interrupted. Konfab kept it as it is; move the folder aside to write it again.`,
+            );
           }
           if (op.writing_file === file.path) throw unproven(file.path);
           throw edited(
@@ -535,25 +537,17 @@ export class SkillWorkspace {
     }
   }
 
-  /** Writes the rest of a partly written file in place, after checking it is still the same file. */
-  private finishFile(
-    op: Operation,
-    destination: string,
-    file: SkillFile,
-    offset: number,
-    fs: (label: string) => void,
-  ): void {
-    const fd = openSync(destination, constants.O_WRONLY | constants.O_NOFOLLOW);
+  /** Sets the mode of a complete file this operation created, after checking it is still that file. */
+  private setMode(op: Operation, destination: string, file: SkillFile): void {
+    const fd = openSync(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const stat = fstatSync(fd);
-      if (`${stat.dev}:${stat.ino}` !== op.writing_id || stat.size !== offset)
+      if (`${stat.dev}:${stat.ino}` !== op.writing_id)
         throw new Pending({
           code: "folder_edited",
           folder: op.folder_name,
-          detail: `${op.folder_name}/${file.path} was changed while Konfab's write was interrupted, so Konfab kept it and stopped.`,
+          detail: `${op.folder_name}/${file.path} changed while Konfab was writing it, so Konfab stopped.`,
         });
-      writeSync(fd, file.content, offset, file.content.length - offset, offset);
-      fs("file");
       fchmodSync(fd, file.mode);
     } finally {
       closeSync(fd);
