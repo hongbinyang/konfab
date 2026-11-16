@@ -437,3 +437,26 @@ Skills are the assignment concept: a skill can describe an agent's responsibilit
 - **Upgrade:** converts every role revision in use (including active-turn snapshots) into reviewed personal skills, keeps the old `role` reply until an assignment changes, writes a fresh backup per attempt, and stops without writing if an assignment cannot fit.
 - **Updates:** per member from its card, or per skill across rooms for selected members; never automatic.
 
+
+## 19. Import a local skill
+
+**Status:** Proposed; pending design and review.
+
+The lead can bring a skill from elsewhere on their computer into a personal or project library without manually creating a matching folder. Importing never assigns it to an agent.
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| LI1 | MUST | In **Manage library**, the lead can choose a single `SKILL.md` or a skill folder for import into the personal library or an available project library. A folder import includes its supporting files. A single-file import clearly states that other files are not included. |
+| LI2 | MUST | Before importing, show the skill name, instructions and file list, destination library and proposed folder. The name is editable for every import, including when there is no collision. Validate the chosen name and show errors before confirmation. |
+| LI3 | MUST | Create a local folder matching the chosen name. If renamed, update the `name:` field in the imported copy of `SKILL.md` to match and show that change in the preview; do not alter the selected source files. Save a revision and record local-import provenance. The imported revision starts unreviewed and is not assigned automatically. |
+| LI4 | MUST | On a name collision, warn before any replacement and offer a separately named copy or explicit replacement. A replacement imports the complete package as a new revision of the existing skill; its earlier revisions remain recoverable, and existing agent assignments stay pinned until explicitly updated. Show the affected skill and its current users. Do not silently overwrite unrelated folders, unsaved drafts or files. |
+| LI5 | MUST | Detect stale destination state or a changed draft between preview and confirmation and require the lead to review again; do not overwrite it. If the destination is an untracked folder or cannot be safely replaced, explain the conflict and offer a different name. Failure, cancellation or an interrupted import must not leave a partial skill or destroy source, existing revisions or drafts. |
+| LI6 | MUST | Validate the manifest, file paths and existing package-size limits before committing. Reject missing or invalid required fields, duplicate or unsafe paths and oversized packages with actionable errors. Copy scripts as files only; never execute them. The design must verify what the chosen browser input exposes about symbolic links and document any limitation rather than claiming detection the browser cannot provide. |
+
+**Acceptance checks**
+
+- Import a single manifest and a folder with nested supporting files; preview both, choose the destination and confirm the matching folder and saved, unreviewed revision. No agent assignment changes.
+- Rename an import with and without a collision; verify the preview and imported manifest agree, supporting files are intact, and the source files remain unchanged.
+- Replace a tracked skill after a warning; verify the old revision can be restored, existing assignments remain pinned, and an unsaved draft or concurrent destination change is not overwritten. A collision with an untracked folder must not replace it.
+- Cancel or force failure at each write stage, then restart the service and inspect the library: no partial import or loss of existing work. Exercise invalid manifests, duplicate or unsafe paths, package limits and unavailable project libraries.
+- Check the user flow in an isolated browser in both themes and run the repository's required checks, including browser tests for the page change.
