@@ -75,7 +75,11 @@ POST /api/library/import/preview      bodyLimit 4 MB
 
 POST /api/library/import               bodyLimit 4 MB
 { ...same as preview, name, action: "create" | "replace", expected }
-→ { skill_id, revision_id, number, folder: "ready" | "pending", pending_reason?: string }
+→ { skill_id, revision_id, number, folder: "ready" | "pending", pending_reason?: { code, folder, detail } }
+
+POST /api/library/skills/:id/workspace/resolve
+{ action: "retry" | "move_other_aside" | "save_edits" | "keep_edits_aside", expected_reason }
+→ same { folder, pending_reason? }
 ```
 
 Errors on confirm:
