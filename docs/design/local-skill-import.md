@@ -1,6 +1,6 @@
 # Import a local skill
 
-**Status:** proposed design for [REQUIREMENTS §19](../../REQUIREMENTS.md#19-import-a-local-skill) (LI1–LI6), as of requirements commit cba73e9.
+**Status:** implemented on `feature/local-skill-import` (see "Implementation notes" at the end); design for [REQUIREMENTS §19](../../REQUIREMENTS.md#19-import-a-local-skill) (LI1–LI6), as of requirements commit cba73e9.
 
 The lead picks a skill folder or a single skill file (any name, e.g. `architect.md`) anywhere on their Mac. Konfab previews it, lets the lead choose the name, and creates the matching folder in the chosen library. It reuses the code paths that copy public skills, so there is one way to add a skill's rows and write its folder.
 
@@ -225,3 +225,17 @@ A new skill runs steps 3–5. During steps 3–5 the folder is visibly partial: 
 ## Out of scope
 
 Importing several skills at once, `.zip` archives, drag-and-drop (a later addition that can feed the same preview), and keeping file modes.
+
+## Implementation notes
+
+- **Code:**
+  - `src/server/domain/local-import.ts`: normalising the upload, choosing the skill file, `renameManifest` (now shared with the public import) and the licence.
+  - `src/server/domain/skill-workspace.ts`: the create-only, journaled folder writer, used for every working-folder write.
+  - `SkillLibrary.prepareLocalImport`, `importLocal`, `resolveWorkspace`, and kept folders.
+  - `web/src/LocalImport.tsx`.
+  - Schema v34 adds the journal columns and `skill_kept_folders`.
+- **Resolve actions shipped:** **Move the other folder aside** (`folder_exists`), **Save my edits first** and **Use the import, keep my edits aside** (`folder_edited`), and **Retry**. Not shipped yet: **Rename this skill** and **Move to Trash** on a pending import, and **Put back** for a kept copy. Moving aside and Retry cover each case without them.
+- **Kept copies** are listed with **Copy path** rather than **Open**, because the page can't open Finder.
+- **Browsers:**
+  - Playwright's Chromium is checked by `tests/e2e/local-import.spec.ts`: a linked file is left out without notice.
+  - Chrome's native dialog and Safari still need the manual check before merge.

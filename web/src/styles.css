@@ -1261,3 +1261,70 @@ button.link {
   max-height: 12rem;
   overflow: auto;
 }
+
+/* Import a local skill */
+.local-import {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+.local-import h2 {
+  margin-top: 0;
+}
+.local-import .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.import-box {
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.import-box.warn {
+  background: var(--warning-surface);
+}
+.import-box.error {
+  background: var(--error-surface);
+  color: var(--error);
+}
+.import-preview {
+  display: grid;
+  grid-template-columns: 8em 1fr;
+  gap: 6px 12px;
+}
+.import-preview dd {
+  margin: 0;
+  min-width: 0;
+}
+.import-files {
+  margin: 0;
+  padding-left: 18px;
+}
+.import-manifest {
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--surface);
+  padding: 8px;
+  border-radius: 6px;
+}
+.kept-copies {
+  margin: 8px 0;
+}
+button.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+@media (max-width: 600px) {
+  .import-preview {
+    grid-template-columns: 1fr;
+  }
+}
+
+.local-import .error,
+.kept-copies .error {
+  color: var(--error);
+}

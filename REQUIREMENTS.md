@@ -439,7 +439,7 @@ Skills are the assignment concept: a skill can describe an agent's responsibilit
 
 ## 19. Import a local skill
 
-**Status:** Proposed; pending design and review.
+**Status:** Implemented on `feature/local-skill-import`; in review. Design: [local skill import](docs/design/local-skill-import.md).
 
 The lead can bring a skill from elsewhere on their computer into a personal or project library without manually creating a matching folder. Importing never assigns it to an agent.
 

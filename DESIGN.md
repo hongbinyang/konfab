@@ -66,7 +66,7 @@ Tables, grouped (see `src/server/db/index.ts` for the ordered migrations):
 | Rooms and messages    | `rooms`, `room_members` (position, edit permission, room instructions, delivery state), `messages`, `attachments`, `lead_seen_messages` |
 | Turns and sessions    | `sessions`, `turns`, `handoffs`, `automatic_continuations`, `format_runs`, `bridge_receipts`, `observed_waits` |
 | Assignments           | `room_member_skills` (ordered pins: skill revision, full or summary)                                          |
-| Skills                | `skill_libraries` (personal, project, built-in), `skills`, `skill_revisions`, `skill_revision_files`, `skill_blobs`, `skill_reviews`, `skill_usages`, plus journals for imports, renames and working folders |
+| Skills                | `skill_libraries` (personal, project, built-in), `skills`, `skill_revisions`, `skill_revision_files`, `skill_blobs`, `skill_reviews`, `skill_usages`, plus journals for imports, renames and working folders (`skill_workspace_operations` records each create-only step), and `skill_kept_folders` for previous folders kept until the lead removes them |
 | Public sources        | `skill_sources`; tables from the removed indexed-source flow (`source_generations`, `source_*`) remain only so old downloads can be deleted            |
 | Lead and oversight    | `permission_requests`, `decisions`, `decision_versions`, `agent_reports`, `write_locks`, `run_warnings`, `run_warning_state`, `events` |
 | Page and housekeeping | `login_codes`, `web_sessions`, `settings`, `pending_room_cleanup`                                              |

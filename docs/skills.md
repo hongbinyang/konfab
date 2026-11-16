@@ -55,6 +55,17 @@ Assigning a public skill copies only that skill's files into your library, verif
 
 If the assignment fails (for example someone changed it meanwhile), nothing it would have copied is kept. The same applies when adding an agent with skills: no agent is created until the choice is made.
 
+### Import a skill from elsewhere
+
+In **⚙ Manage library** (Mine or Project), select **Import…**, then **Choose folder…** or **Choose file…**. The file can have any name, for example `architect.md`. Konfab saves it as `SKILL.md` in a folder named after the skill's `name:`, so the name and the folder always match, and your own folder's name doesn't matter.
+
+- **Preview first.** You see the skill file, the name (which you can change; Konfab changes `name:` in its copy only), the destination, the licence and every file. `.DS_Store` files and `.git/` folders are left out and listed. If a folder has no `SKILL.md` and several files could be the skill file, you choose one.
+- **Linked files.** The browser may leave out linked files and folders without saying so (Chrome does), so check the file list. Scripts are copied as plain files, without their executable bit, and never run.
+- **Name already taken.** For a saved skill, **Replace…** saves the import as its next revision. The old revision stays in History, and agents stay on it until you update them. A skill in Trash, or a folder that isn't a saved skill, needs another name (or restore or adopt it first).
+- **Nothing is overwritten.** Konfab only ever creates the new folder and its files. A replaced folder is kept under **Kept copies** until you remove it. If something gets in the way, for example a folder with that name appears or you edit the folder meanwhile, the import is still saved in History and Konfab explains what to do: move the other folder aside, save your edits first, or retry.
+
+Imported skills aren't reviewed or assigned until you assign them.
+
 ### 3. Edit
 
 Edit `SKILL.md` and its files in **⚙ Manage library**, or choose **Copy path** next to the working folder and use your own editor. Changes made outside Konfab appear as a **Draft** until you save. **Save revision** checks the format and stores rev 1, rev 2, and so on. **History** lets you view any revision or restore it as a new one. If someone else saved in between, Konfab shows a conflict instead of overwriting.
@@ -103,12 +114,13 @@ Earlier versions had roles. On the first start of this version, Konfab:
 
 ## Troubleshooting
 
-| Message                                            | Meaning and fix                                                                                                           |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| "These skills total … KiB"                         | The assignment is too large to send. Switch a skill to **Summary** or remove one.                                         |
-| "… has local changes"                              | Your copy of a public skill was edited. Choose **Keep my version** or **Add as `name-2`**.                                |
-| "Skill in use: …"                                  | An agent still uses it. Remove it from those assignments first.                                                           |
-| "This assignment changed since you opened it"      | Someone changed it meanwhile. Reopen **Assign skills** and try again.                                                     |
-| "GitHub limit reached; resets at …"                | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#15-github-token-optional). |
-| "The folder is named …, but SKILL.md says name: …" | Rename the folder or change `name:` so they match, then reopen **⚙ Manage library** and **Adopt** it.                     |
-| "Project folder unavailable"                       | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                    |
+| Message                                            | Meaning and fix                                                                                                                                           |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "These skills total … KiB"                         | The assignment is too large to send. Switch a skill to **Summary** or remove one.                                                                         |
+| "… has local changes"                              | Your copy of a public skill was edited. Choose **Keep my version** or **Add as `name-2`**.                                                                |
+| "Skill in use: …"                                  | An agent still uses it. Remove it from those assignments first.                                                                                           |
+| "This assignment changed since you opened it"      | Someone changed it meanwhile. Reopen **Assign skills** and try again.                                                                                     |
+| "GitHub limit reached; resets at …"                | GitHub allows 60 requests an hour without a token. Wait, or add a [GitHub token](user-guide.md#15-github-token-optional).                                 |
+| "The folder is named …, but SKILL.md says name: …" | Rename the folder or change `name:` so they match, then reopen **⚙ Manage library** and **Adopt** it. Or use **Import…**, which names the folder for you. |
+| "… isn't written yet"                              | The import is saved, but its folder couldn't be created. Follow the buttons shown: move the other folder aside, save your edits first, or retry.          |
+| "Project folder unavailable"                       | The room's project folder moved or is missing. Set it again under the room's **Edit**.                                                                    |

@@ -3,6 +3,7 @@ import Markdown from "react-markdown";
 import { request } from "./api";
 import { NameField } from "./NameField";
 import { validName } from "./name-validation";
+import { LocalImport, PendingFolder, type PendingReason } from "./LocalImport";
 
 type Skill = {
   id: string;
@@ -13,7 +14,18 @@ type Skill = {
   provenance_json: string;
   usage_count: number;
   workspace_state?: "pending" | "complete" | null;
+  workspace_reason?: PendingReason | null;
   is_draft?: boolean | null;
+};
+type Kept = {
+  id: string;
+  skill: string;
+  kind: "previous" | "edits" | "other";
+  revision: number | null;
+  path: string;
+  size: number;
+  edited: boolean;
+  present: boolean;
 };
 type Detail = Skill & {
   current_revision_id: string;
@@ -44,6 +56,8 @@ export function Library({
   const [publicTab, setPublicTab] = useState(false);
   const builtin = scope === "builtin";
   const [trash, setTrash] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [loads, setLoads] = useState(0);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [untracked, setUntracked] = useState<string[]>([]);
   const [untrackedDetails, setUntrackedDetails] = useState<
@@ -78,6 +92,7 @@ export function Library({
         unavailable?: boolean;
       }>(builtin ? "/api/library/builtin" : `/api/library?${params}`);
       setSkills(result.skills);
+      setLoads((count) => count + 1);
       setUntracked(result.untracked);
       setUntrackedDetails(result.untracked_details ?? []);
       setError(
@@ -287,13 +302,20 @@ export function Library({
                   {s.reviewed_at ? "Reviewed" : "Not reviewed"} ·{" "}
                   {s.licence ?? "Licence not specified"} · used by{" "}
                   {s.usage_count}
-                  {s.workspace_state === "pending" && (
-                    <p role="alert">
-                      {s.name}: the working folder could not be created. Check
-                      for a conflicting folder or access problem, then restart
-                      to retry. The assigned revision remains available.
-                    </p>
-                  )}
+                  {s.workspace_state === "pending" &&
+                    (s.workspace_reason ? (
+                      <PendingFolder
+                        skillId={s.id}
+                        reason={s.workspace_reason}
+                        onResolved={() => void run(async () => undefined)}
+                      />
+                    ) : (
+                      <p role="alert">
+                        {s.name}: the working folder isn't written yet. Konfab
+                        retries at every start. The saved revision remains
+                        available.
+                      </p>
+                    ))}
                 </li>
               ))}
           </ul>
@@ -328,6 +350,35 @@ export function Library({
                 )}
               </p>
             ))}
+          {!trash && !builtin && (
+            <KeptCopies
+              key={loads}
+              params={
+                new URLSearchParams({
+                  scope: context.scope,
+                  ...(context.room_id
+                    ? { room_id: String(context.room_id) }
+                    : {}),
+                })
+              }
+            />
+          )}
+          {!trash && !builtin && !importing && (
+            <button onClick={() => setImporting(true)}>Import…</button>
+          )}
+          {!trash && !builtin && importing && (
+            <LocalImport
+              context={context}
+              onClose={() => {
+                setImporting(false);
+                void refresh();
+              }}
+              onImported={(id) => {
+                setImporting(false);
+                void run(() => open(id));
+              }}
+            />
+          )}
           {!trash && !builtin && (
             <form onSubmit={create} className="stack">
               <h2>New skill</h2>
@@ -1061,5 +1112,102 @@ function UsedBy({
         </button>
       )}
     </section>
+  );
+}
+
+/** Previous and moved-aside folders Konfab keeps until the lead removes them. */
+function KeptCopies({ params }: { params: URLSearchParams }) {
+  const [kept, setKept] = useState<Kept[]>([]);
+  const [changes, setChanges] = useState<
+    Record<string, Array<{ path: string; change: string }>>
+  >({});
+  const [error, setError] = useState("");
+  const query = params.toString();
+  const load = useCallback(() => {
+    request<{ kept: Kept[] }>(`/api/library/kept?${query}`)
+      .then((result) => setKept(result.kept))
+      .catch(() => setKept([]));
+  }, [query]);
+  useEffect(load, [load]);
+  if (!kept.length) return null;
+  const total = kept.reduce((sum, item) => sum + item.size, 0);
+  return (
+    <details className="kept-copies">
+      <summary>
+        Kept copies: {kept.length} folder{kept.length === 1 ? "" : "s"} (
+        {(total / 1024).toFixed(0)} KB)
+      </summary>
+      <p className="muted">
+        Konfab keeps a folder it moved aside until you remove it.
+      </p>
+      <ul>
+        {kept.map((item) => (
+          <li key={item.id}>
+            <strong>{item.skill}</strong>{" "}
+            {item.kind === "previous"
+              ? `previous folder (rev ${item.revision ?? "?"})`
+              : item.kind === "edits"
+                ? "your edits, kept aside"
+                : "another folder that was in the way"}
+            {item.edited && " · Edited after Konfab replaced it"}
+            {!item.present && " · Missing"} ·{" "}
+            <span className="muted">{(item.size / 1024).toFixed(1)} KB</span>{" "}
+            <button
+              className="secondary"
+              onClick={() => void navigator.clipboard.writeText(item.path)}
+            >
+              Copy path
+            </button>{" "}
+            {item.revision !== null && (
+              <button
+                className="secondary"
+                onClick={() =>
+                  void request<{
+                    changes: Array<{ path: string; change: string }>;
+                  }>(`/api/library/kept/${item.id}/differences`).then(
+                    (result) =>
+                      setChanges({ ...changes, [item.id]: result.changes }),
+                  )
+                }
+              >
+                Show differences
+              </button>
+            )}{" "}
+            <button
+              className="danger"
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `Remove the kept folder for ${item.skill}? This deletes ${item.path}.`,
+                  )
+                )
+                  return;
+                request(`/api/library/kept/${item.id}`, { method: "DELETE" })
+                  .then(load)
+                  .catch((e: unknown) =>
+                    setError(e instanceof Error ? e.message : "Remove failed"),
+                  );
+              }}
+            >
+              Remove…
+            </button>
+            {changes[item.id] && (
+              <ul className="muted">
+                {changes[item.id]?.length ? (
+                  changes[item.id]?.map((change) => (
+                    <li key={change.path}>
+                      {change.change}: <code>{change.path}</code>
+                    </li>
+                  ))
+                ) : (
+                  <li>Same as rev {item.revision}</li>
+                )}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && <p className="error">{error}</p>}
+    </details>
   );
 }

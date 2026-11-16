@@ -260,10 +260,11 @@ export class RequestError extends Error {
 
 export async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T> {
   const response = await fetch(path, {
     method: options.method ?? "GET",
+    ...(options.signal ? { signal: options.signal } : {}),
     ...(options.body !== undefined
       ? {
           headers: { "Content-Type": "application/json" },
