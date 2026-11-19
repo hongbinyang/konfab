@@ -39,7 +39,7 @@ Then:
 **Platforms:**
 
 - **macOS:** supported (checked on macOS arm64; see the [test plan](docs/test-plan.md)).
-- **Linux:** the fresh-install check passes on Ubuntu 24.04 and Debian 12 (x86-64 and arm64). Real agent apps on Linux are not verified yet. There is no Claude desktop app on Linux; use Codex or Claude Code.
+- **Linux:** the fresh-install check passes on Ubuntu 24.04 (arm64 and x86-64) and Debian 12 (arm64). Real agent apps on Linux are not verified yet. There is no Claude desktop app on Linux; use Codex or Claude Code.
 - **Windows:** not supported yet. Skill folder editing is disabled there.
 - Checks with real agent apps on each platform are recorded in the [test plan](docs/test-plan.md).
 
