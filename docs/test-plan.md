@@ -153,3 +153,52 @@ Bugs found by testing and review:
 Observed earlier on the development Mac (not a clean account): Claude desktop and Codex desktop both join and take turns.
 
 Constraints found on Linux: `better-sqlite3` had no prebuilt binary for Node 24.22 on Linux arm64 or x86-64, so `npm ci` compiles it and needs `build-essential` and `python3`. The README lists them as a Linux prerequisite, and quickstart warns before installing when they're missing. The containers ran as root with no agent app, so they cover install, setup, start, the bridge, a turn and restart persistence, but not a real signed-in agent.
+
+### How to run the real-agent checks
+
+Both checks leave your own Konfab untouched. Each one runs under a different home folder, so it has its own `~/.konfab`, `~/.codex` and `~/.claude.json`, and on its own port, so it never meets the Konfab you use. Record the OS, CPU, Node, minutes, steps and anything confusing in the table above.
+
+**Clean macOS user account (about 15 minutes)**
+
+1. Copy the code where another account can read it: `git -C <your checkout> archive -o /Users/Shared/konfab.tar <branch-or-main>`.
+2. In **System Settings → Users & Groups**, add a Standard user (for example `konfab-test`), then log in to it with fast user switching. Your own account and Konfab keep running.
+3. In the test account, install Node 24 for that account only: install nvm, then `nvm install 24`. Sign in to the Codex app and/or the Claude desktop app there.
+4. Run:
+
+   ```bash
+   mkdir ~/konfab && tar -xf /Users/Shared/konfab.tar -C ~/konfab && cd ~/konfab
+   mkdir -p ~/.konfab && printf 'server:\n  port: 8797\n' > ~/.konfab/config.yaml
+   npm run quickstart
+   ```
+
+   Port 8797 keeps it clear of your Konfab on 8787. This also checks that a setting in `config.yaml` is honoured.
+
+5. Restart the agent app, create a room, paste the join prompt, and wait for **Waiting for a turn**. Post a message and check that the agent replies.
+6. Press Ctrl+C, run `npm start`, and check the room is still there. Then log out and delete the test user (and `/Users/Shared/konfab.tar`).
+
+**Signed-in agent on Linux (container; about 20 minutes)**
+
+1. Start Ubuntu with no folders shared:
+
+   ```bash
+   docker run -it --name konfab-linux ubuntu:24.04 bash
+   ```
+
+   Inside it:
+
+   ```bash
+   apt-get update && apt-get install -y curl git ca-certificates build-essential python3
+   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && . ~/.nvm/nvm.sh && nvm install 24
+   ```
+
+2. From the Mac, copy the code in:
+
+   ```bash
+   docker cp /Users/Shared/konfab.tar konfab-linux:/root/
+   ```
+
+   Then inside: `mkdir ~/konfab && tar -xf ~/konfab.tar -C ~/konfab`.
+
+3. Install the agent CLI inside the container (`npm install -g @openai/codex` or `npm install -g @anthropic-ai/claude-code`) and run it once to sign in, following its login instructions. You do this step yourself; your credentials stay inside the container.
+4. In `~/konfab`, run `npm run quickstart -- --no-open` in the background. The page isn't reachable from the Mac browser, because Konfab listens only inside the container. Create a room and post with the API, or let the developer drive this part over `docker exec` without touching your credentials. Paste the join prompt into the CLI and check that the agent joins and replies.
+5. Restart the server and check the room is still there. Afterwards, `docker rm -f konfab-linux` removes everything, including the sign-in.
