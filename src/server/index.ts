@@ -11,6 +11,9 @@ const { db, service, skills, sources } = createRuntime(
   databasePath(home),
   config,
   (() => {
+    // An isolated run (the get-started check) never reads stored credentials.
+    if (process.env.KONFAB_ISOLATED === "1")
+      return { token: undefined, tokenSource: "unavailable" as const };
     const resolved = resolveGithubToken(process.env.KONFAB_GITHUB_TOKEN);
     return { token: resolved.token, tokenSource: resolved.source };
   })(),

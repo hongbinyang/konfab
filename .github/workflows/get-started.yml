@@ -1,0 +1,26 @@
+name: Get started
+
+# From a fresh checkout: quickstart's isolated end-to-end check, then the full
+# checks. macOS and Linux are required; Windows runs for information only.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  get-started:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Quickstart check (isolated; no real homes or credentials)
+        run: npm run quickstart -- --check --no-open
+      - name: Full checks
+        run: npm run check

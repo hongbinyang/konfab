@@ -22,6 +22,8 @@ import type { Db } from "../db/index.js";
 import {
   folderHash,
   KEPT_ROOT,
+  SKILL_WRITES_SUPPORTED,
+  SKILL_WRITES_UNSUPPORTED,
   SkillWorkspace,
   targetIdentity,
   workspaceHooks,
@@ -48,6 +50,11 @@ import {
 /** Says which two names differ and how to make them match. */
 function nameMismatch(folder: string, name: string): string {
   return `The folder is named ${folder}, but SKILL.md says name: ${name}. Rename the folder to ${name}, or change name: to ${folder}.`;
+}
+
+function assertSkillWritesSupported(): void {
+  if (!SKILL_WRITES_SUPPORTED)
+    throw new SkillError("unsupported_platform", 501, SKILL_WRITES_UNSUPPORTED);
 }
 
 const DRAFT_OWNER = ".konfab-draft-owner";
@@ -589,6 +596,7 @@ export class SkillLibrary {
 
   /** Built-in skills are read-only; duplicate one to change it. */
   private assertWritable(id: string): void {
+    assertSkillWritesSupported();
     this.assertNoPendingFolder(id);
     const row = this.db
       .prepare(
@@ -1706,6 +1714,7 @@ export class SkillLibrary {
   }
 
   create(libraryId: string, name: string, description: string): string {
+    assertSkillWritesSupported();
     if (!validSkillName(name))
       throw new SkillError("invalid_skill", 400, invalidNameMessage(name));
     if (!description.trim() || [...description].length > 1024)

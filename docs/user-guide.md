@@ -12,9 +12,9 @@ How to set up Konfab, run rooms with your AI apps day to day, and look after it.
 
 ## 1. Start Konfab
 
-Follow the setup steps in the [README](../README.md), then run `npm start` and open the sign-in link it prints. Each link works once and expires after 10 minutes; run `npm run login-link` for a new one. To start Konfab automatically at login, run `npm run login-item -- install` (`uninstall` to turn it off).
+Run `npm run quickstart` as in the [README](../README.md); later, `npm start` starts Konfab. Open the sign-in link it prints. Each link works once and expires after 10 minutes; run `npm run login-link` for a new one. `npm run doctor` checks the install and prints a fix for each problem, and changes nothing. On macOS, to start Konfab automatically at login, run `npm run login-item -- install` (`uninstall` to turn it off); on Linux use your own service manager.
 
-Keep your Mac awake and the apps open while agents are in a room.
+Keep your computer awake and the apps open while agents are in a room.
 
 ## 2. Connect your apps
 
@@ -234,7 +234,18 @@ To uninstall: run `npm run login-item -- uninstall` if you turned it on, delete 
 
 ## Configuration
 
-Settings live in `~/.konfab/config.yaml`; restart Konfab after changing them.
+Nothing needs configuring: every setting has a default, and the first start writes `~/.konfab/config.yaml` with them. To change one, edit that file and restart Konfab. The server always listens on `127.0.0.1` only.
+
+Environment variables (all optional):
+
+| Variable              | Default          | What it does                                                                          |
+| --------------------- | ---------------- | ------------------------------------------------------------------------------------- |
+| `KONFAB_HOME`         | `~/.konfab`      | Where rooms, skills, the database and `config.yaml` live                              |
+| `CODEX_HOME`          | `~/.codex`       | Where setup finds Codex's `config.toml`                                               |
+| `CLAUDE_CONFIG_DIR`   | your home folder | Where setup finds Claude Code's `.claude.json`                                        |
+| `KONFAB_GITHUB_TOKEN` | none             | GitHub token for public skill search (on macOS it can also be stored in the Keychain) |
+
+Settings in `config.yaml`:
 
 | Setting                                   | Default   | What it does                                                      |
 | ----------------------------------------- | --------- | ----------------------------------------------------------------- |

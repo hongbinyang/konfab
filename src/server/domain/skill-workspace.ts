@@ -42,6 +42,16 @@ import { packageHash, readSkillFiles, type SkillFile } from "./skill-files.js";
  */
 
 export const WRITING_MARKER = ".konfab-writing";
+
+/**
+ * Skill folders are written only where the platform can refuse to follow a
+ * link when opening (O_NOFOLLOW). Elsewhere (Windows) writes fail closed
+ * rather than use a weaker check.
+ */
+export const SKILL_WRITES_SUPPORTED =
+  typeof (constants as Record<string, unknown>).O_NOFOLLOW === "number";
+export const SKILL_WRITES_UNSUPPORTED =
+  "Skill folder writes aren't supported on this platform yet.";
 export const KEPT_ROOT = ".konfab-previous";
 
 export type PendingCode = "folder_exists" | "folder_edited" | "write_failed";
@@ -223,6 +233,12 @@ export class SkillWorkspace {
   }
 
   private advance(op: Operation): void {
+    if (!SKILL_WRITES_SUPPORTED)
+      throw new Pending({
+        code: "write_failed",
+        folder: op.folder_name,
+        detail: SKILL_WRITES_UNSUPPORTED,
+      });
     if (!realDirectory(op.root_path))
       throw new Pending({
         code: "write_failed",

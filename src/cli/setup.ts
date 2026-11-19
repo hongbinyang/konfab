@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import {
   databasePath,
   ensureHome,
@@ -54,8 +54,10 @@ if (args.includes("--github-token")) {
   const bridge = resolve(import.meta.dirname, "../bridge/index.js");
   const nodePath =
     (process.env.PATH ?? "")
-      .split(":")
-      .map((part) => join(part || ".", "node"))
+      .split(delimiter)
+      .map((part) =>
+        join(part || ".", process.platform === "win32" ? "node.exe" : "node"),
+      )
       .find((candidate) => {
         try {
           accessSync(candidate, constants.X_OK);
@@ -127,8 +129,21 @@ if (args.includes("--github-token")) {
       }
       const tokens: Record<string, string> = {};
       const changed: string[] = [];
+      // Write an app's connector only where the app has left its own folder or
+      // file, so setup never creates configuration for an app that isn't here.
+      const present = {
+        codex: existsSync(dirname(paths.codex)),
+        claude:
+          existsSync(paths.claude) ||
+          existsSync(join(dirname(paths.claude), ".claude")),
+      };
+      const skipped: string[] = [];
       for (const id of ["claude", "codex"] as const) {
         if (!(id in config.agents)) continue;
+        if (!manual && !present[id]) {
+          skipped.push(id);
+          continue;
+        }
         const existing = candidates[id]!.find(
           (token) => service.authenticateAgent(token) === id,
         );
@@ -175,6 +190,10 @@ if (args.includes("--github-token")) {
         console.log(
           "User-level connector setup complete. Reload the desktop clients to use changes.",
         );
+        for (const id of skipped)
+          console.log(
+            `${id === "codex" ? "Codex" : "Claude Code"} not found (no ${id === "codex" ? dirname(paths.codex) : paths.claude}); its connector was not written. Start the app once and run setup again, or use \`npm run setup -- --manual\` for the entry to add by hand.`,
+          );
         for (const backup of backups) console.log(`Secret backup: ${backup}`);
         console.log(
           "Existing project connector entries are unchanged; migrate a known project only after verifying the user-level connection.",

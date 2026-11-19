@@ -11,6 +11,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-skill-assets.mjs && vite build",
     "start": "npm run build && node dist/server/index.js",
+    "quickstart": "node scripts/quickstart.mjs",
+    "doctor": "npm run build --silent && node dist/cli/doctor.js",
     "setup": "npm run build && node dist/cli/setup.js",
     "login-link": "npm run build --silent && node dist/cli/login-link.js",
     "login-item": "npm run build --silent && node dist/cli/login-item.js",

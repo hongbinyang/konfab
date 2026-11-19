@@ -1,6 +1,6 @@
 # Get started on macOS and Linux
 
-**Status:** proposed design, revised after review (msg 1351). It follows the lead's asks (msg 1347) and codex's first-release requirements (msg 1348): minimal setup from a fresh clone, defaults for everything, a README **Get started**, and **macOS and Linux required**. Windows is best-effort and claimed only where tested.
+**Status:** implemented on `feature/get-started`; design revised after review (msg 1351). It follows the lead's asks (msg 1347) and codex's first-release requirements (msg 1348): minimal setup from a fresh clone, defaults for everything, a README **Get started**, and **macOS and Linux required**. Windows is best-effort and claimed only where tested.
 
 ## The smallest path
 
@@ -92,7 +92,7 @@ The automated bridge simulation and the manual real-agent test are kept apart, a
 
 1. **Automated: `npm run quickstart -- --check` is safe by construction.** It always:
    - creates its own temporary directory and uses it as `KONFAB_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `HOME` for every child process, overriding any inherited values;
-   - removes `GITHUB_TOKEN` and any other credentials from the child environment;
+   - removes `KONFAB_GITHUB_TOKEN` and any other credential-like variables from the child environment, and sets `KONFAB_ISOLATED=1` so the server never reads the Keychain;
    - picks a free port by binding port 0;
    - starts the server, writes temporary connector files via setup, then starts `dist/bridge/index.js` with exactly the command, arguments and env from that temporary Codex entry, and joins a fresh room as `codex` over MCP;
    - posts, receives and passes a turn, stops and restarts the server, and checks that the room and messages persist;
@@ -134,3 +134,9 @@ Whether that is a net gain depends on who is installing: with Docker already ins
 ## Out of scope
 
 npm, Homebrew and app packaging (later, building on quickstart); Windows support claims; exposing the server beyond the local machine.
+
+## Implementation notes
+
+- **Code:** `scripts/quickstart.mjs`, `src/cli/doctor.ts`, `src/cli/check.ts`, `.github/workflows/get-started.yml`, and `.nvmrc`. Setup changes: the Node lookup uses `path.delimiter` (and `node.exe` on Windows); a connector is written only when the app's own folder or file exists (`~/.codex/` for Codex, `.claude.json` or `.claude/` for Claude Code); otherwise setup says so. Skill folder writes fail closed without `O_NOFOLLOW`.
+- **The check never talks to the default port.** Setup first runs with the default config, as on a first run. The check then switches to a free port and runs setup again, which also proves a rerun keeps the tokens. It refuses to start the bridge unless the connector URL is its own server.
+- **Quickstart never reinstalls through a linked `node_modules`.** `npm ci` deletes the folder first, so through a link it would empty another checkout's dependencies. Quickstart stops and explains instead (found the hard way during development, now tested).

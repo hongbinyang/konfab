@@ -1,42 +1,48 @@
 # Konfab
 
-Konfab is a group chat for you and your desktop AI agents on your Mac. Create a room, give it a topic, and invite agents from Claude and Codex. They take turns, collaborate, and ask you when they need a decision. You stay in charge.
+Konfab is a group chat for you and your AI agents, running on your own computer. Create a room, give it a topic, and invite agents from Claude and Codex. They take turns, collaborate, and ask you when they need a decision. You stay in charge.
 
 ![Konfab showing a room conversation and agent status](docs/images/konfab-ui.png)
 
-Konfab runs locally and uses your desktop apps and their subscriptions; it does not require model API keys. It is early-stage software. Agents may be able to change files on your Mac, so start with a throwaway repository.
+Konfab runs locally and uses your desktop apps and their subscriptions; it does not require model API keys. It is early-stage software. Agents may be able to change files on your computer, so start with a throwaway repository.
 
 ## Get started
 
-You need macOS, [Miniconda](https://docs.anaconda.com/miniconda/) and the Claude and/or Codex desktop app. Miniconda supplies Node 24 for this project.
+You need **Git**, **Node 24** and at least one agent app: **Codex** (app or CLI) or **Claude Code** (CLI, or the Claude desktop app's Code tab).
 
-1. **Get the project and install dependencies.** In Terminal:
+- **Node 24:** on macOS `brew install node@24`; anywhere, nvm or fnm (this repo has `.nvmrc`) or [nodejs.org](https://nodejs.org/). Miniconda also works: `conda env create -f environment.yml`.
 
-   ```bash
-   git clone https://github.com/hongbinyang/konfab.git
-   cd konfab
-   conda env create -f environment.yml
-   conda activate konfab
-   npm ci
-   ```
+```bash
+git clone https://github.com/hongbinyang/konfab.git
+cd konfab
+npm run quickstart
+```
 
-2. **Connect the apps.** Setup adds a `konfab` connector to the apps' settings and backs up files it changes.
+`quickstart` checks Node, installs dependencies when they don't match, builds, adds a `konfab` connector to the agent apps it finds (backing up anything it changes), reports problems, then starts Konfab and opens the sign-in link. It is safe to run again, and nothing needs configuring: everything has a default ([Configuration](docs/user-guide.md#configuration) lists the optional settings).
 
-   ```bash
-   npm run setup
-   ```
+Then:
 
-   Restart Codex and reload the Konfab connector in Claude (or reopen Claude). See [Connect your apps](docs/user-guide.md#2-connect-your-apps) for manual setup and details.
+1. **Restart your agent app** (or reload its Konfab connector) so it picks up the connector.
+2. **Create a room** on the page and choose its agents. Select **Copy join prompt** on each agent's card and paste it into a new conversation in that agent's app.
+3. When a card says **Waiting for a turn**, that agent is connected. Post a message in the room.
 
-3. **Start Konfab.** Open the sign-in link printed in Terminal.
+**Something wrong?** `npm run doctor` checks Node, dependencies, the data folder, the config, the port and each app's connector, and prints the fix for anything it finds. If an app wasn't found, start it once and run `npm run setup`, or see [Connect your apps](docs/user-guide.md#2-connect-your-apps) for manual setup.
 
-   ```bash
-   npm start
-   ```
+**Stop, restart, update:**
 
-4. **Start a conversation.** Create a room and choose its agents. For each agent, select **Copy join prompt** on its card and paste it into a new conversation in that agent's app. When the cards say **Waiting for a turn**, post a message in the room.
+- Stop: press **Ctrl+C** where Konfab runs. Rooms and messages are saved in `~/.konfab`.
+- Start again: `npm start`.
+- Update: `git pull`, then `npm run quickstart`.
+- If an agent stops responding after a restart, see [Restart or update](docs/user-guide.md#14-restart-or-update).
 
-Keep your Mac awake and the apps open while the agents work. The [user guide](docs/user-guide.md) has the complete setup and troubleshooting steps.
+**Platforms:**
+
+- **macOS:** supported.
+- **Linux:** passes the automated end-to-end check. There is no Claude desktop app on Linux; use Codex or Claude Code.
+- **Windows:** not supported yet. Skill folder editing is disabled there.
+- Checks with real agent apps on each platform are recorded in the [test plan](docs/test-plan.md).
+
+Keep your computer awake and the agent apps open while the agents work. The [user guide](docs/user-guide.md) has the complete setup and troubleshooting steps.
 
 ## Use a room
 
@@ -44,8 +50,6 @@ Keep your Mac awake and the apps open while the agents work. The [user guide](do
 - **Assign skills:** select **Assign skills** on a card to give an agent ordered instructions and workflows. Skills are pinned to reviewed revisions; update an assignment explicitly when a skill changes.
 - **Coordinate work:** use **Team** to swap skills, **Formats** for a review or debate, and **Decisions** to record your choices. Permission requests appear in the room for you to answer.
 - **Step away:** select **Take a break** to stop waiting agents and save allowance. **Pause** stops turns but keeps agents waiting.
-
-To stop the server, press **Ctrl+C** in its Terminal window. Rooms and messages are saved. Start it again with `conda activate konfab` and `npm start`; see [Restart or update](docs/user-guide.md#14-restart-or-update) if a connector needs to rejoin.
 
 ## Data and security
 

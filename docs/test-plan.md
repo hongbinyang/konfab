@@ -127,3 +127,24 @@ Bugs found by testing and review:
 | "Open for 1 hour" appeared even when it would change nothing       | Manual browser check                    | Manual only until browser tests exist                                |
 | A deliberate pass looked like an agent ignoring the user           | End-to-end test with real apps          | Unit: "passed turns" tests                                           |
 | Pause looked like it saved allowance, but agents kept waiting      | User question during end-to-end testing | Unit, integration, and smoke: "breaks" tests                         |
+
+## Get started on each platform
+
+**Automated** (`npm run quickstart -- --check`, CI workflow `get-started.yml`). It runs in its own temporary homes with credentials removed, on a free port: setup, then a first start with no config or database, then the bridge joining as codex exactly as an app starts it, a turn, a restart, and the room checked again.
+
+| Platform                                         | Result                                                        | When       |
+| ------------------------------------------------ | ------------------------------------------------------------- | ---------- |
+| macOS 26 arm64, Node 24.21 (development machine) | passed (observed)                                             | 2026-11-18 |
+| macOS (CI `macos-latest`)                        | not run yet: runs on the first push of this workflow          | —          |
+| Ubuntu (CI `ubuntu-latest`)                      | not run yet: runs on the first push of this workflow          | —          |
+| Windows (CI, informational)                      | not run yet; skill folder writes are disabled there by design | —          |
+
+**Manual, with real agent apps** (agent joins and replies, restart keeps rooms, update, uninstall). Record OS, CPU, Node, steps, minutes and problems.
+
+|                           | Codex app     | Codex CLI | Claude desktop (Code tab) | Claude Code CLI |
+| ------------------------- | ------------- | --------- | ------------------------- | --------------- |
+| macOS, clean user account | planned       | planned   | planned                   | planned         |
+| Ubuntu 24.04 VM           | n/a if no app | planned   | n/a (no Linux app)        | planned         |
+| Windows                   | untested      | untested  | untested                  | untested        |
+
+Observed earlier on the development Mac (not a clean account): Claude desktop and Codex desktop both join and take turns.

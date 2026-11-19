@@ -117,6 +117,10 @@ export function konfabHome(): string {
   return process.env.KONFAB_HOME ?? join(homedir(), ".konfab");
 }
 
+export function configPath(home: string): string {
+  return join(home, "config.yaml");
+}
+
 export function databasePath(home: string): string {
   return join(home, "konfab.db");
 }
