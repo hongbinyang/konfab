@@ -12,6 +12,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -199,6 +201,152 @@ describe("getting started", () => {
       expect(result.stderr).toContain("is a link to another folder");
       expect(readFileSync(join(shared, "keep.txt"), "utf8")).toBe("keep");
       expect(statSync(join(root, "node_modules")).isDirectory()).toBe(true);
+    });
+  });
+
+  describe("npm run doctor", () => {
+    it("diagnoses a checkout without dependencies or a build, and writes nothing", () => {
+      const root = join(dir, "bare");
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      for (const file of ["doctor.mjs", "quickstart.mjs"])
+        cpSync(join("scripts", file), join(root, "scripts", file));
+      writeFileSync(join(root, "package-lock.json"), '{"lockfileVersion":3}\n');
+      const before = snapshot(root);
+      const result = spawnSync(
+        process.execPath,
+        [join(root, "scripts", "doctor.mjs")],
+        {
+          encoding: "utf8",
+          env: { ...process.env, ...sentinelEnv },
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("FAIL  Dependencies: Not installed.");
+      expect(result.stdout).toContain("FAIL  Build: Konfab isn't built yet.");
+      expect(snapshot(root)).toEqual(before);
+    });
+
+    it("runs the full checks on a built checkout without changing the build, the install or the caller's files", () => {
+      const watched = (path: string) =>
+        existsSync(path) ? snapshot(path) : {};
+      const dist = watched("dist");
+      const record = existsSync("node_modules/.konfab-install.json")
+        ? readFileSync("node_modules/.konfab-install.json", "utf8")
+        : null;
+      const real = snapshot(sentinel);
+      const result = spawnSync(process.execPath, ["scripts/doctor.mjs"], {
+        encoding: "utf8",
+        env: { ...process.env, ...sentinelEnv },
+      });
+      expect(result.stdout).toContain("Connector: Codex");
+      expect(watched("dist")).toEqual(dist);
+      expect(
+        existsSync("node_modules/.konfab-install.json")
+          ? readFileSync("node_modules/.konfab-install.json", "utf8")
+          : null,
+      ).toBe(record);
+      expect(snapshot(sentinel)).toEqual(real);
+    });
+  });
+
+  describe("starting from quickstart", () => {
+    let env: Record<string, string>;
+    let port: number;
+    let children: Array<{ kill: () => void }>;
+    const start = async (options: Record<string, unknown> = {}) => {
+      const { startKonfab } = (await import(
+        new URL("../../scripts/quickstart.mjs", import.meta.url).href
+      )) as {
+        startKonfab: (options: Record<string, unknown>) => Promise<{
+          status: string;
+          link: string;
+          child?: { kill: () => void };
+        }>;
+      };
+      const started = await startKonfab({
+        env,
+        open: false,
+        stdio: "ignore",
+        ...options,
+      });
+      if (started.child) children.push(started.child);
+      return started;
+    };
+    beforeEach(async () => {
+      children = [];
+      const probe = createServer();
+      await new Promise<void>((done) =>
+        probe.listen(0, "127.0.0.1", () => done()),
+      );
+      port = (probe.address() as AddressInfo).port;
+      await new Promise((done) => probe.close(done));
+      const home = join(dir, "start");
+      mkdirSync(join(home, ".konfab"), { recursive: true });
+      writeFileSync(
+        join(home, ".konfab", "config.yaml"),
+        `server:\n  port: ${port}\n`,
+      );
+      env = {
+        ...(process.env as Record<string, string>),
+        HOME: home,
+        KONFAB_HOME: join(home, ".konfab"),
+        KONFAB_ISOLATED: "1",
+      };
+    });
+    afterEach(() => {
+      for (const child of children) child.kill();
+    });
+
+    it("starts, then finds the same Konfab running instead of starting a second one", async () => {
+      const first = await start();
+      expect(first.status).toBe("started");
+      expect(first.link).toContain(`127.0.0.1:${port}/login?code=`);
+      const second = await start();
+      expect(second).toMatchObject({ status: "already-running" });
+      expect(second.child).toBeUndefined();
+      // The new link signs in.
+      const response = await fetch(second.link, { redirect: "manual" });
+      expect(response.status).toBe(303);
+    });
+
+    it("refuses a port used by another program", async () => {
+      const other = createHttpServer((_, response) =>
+        response.end("not konfab"),
+      );
+      await new Promise<void>((done) =>
+        other.listen(port, "127.0.0.1", () => done()),
+      );
+      try {
+        await expect(start()).rejects.toThrow(
+          `Port ${port} is in use by another program`,
+        );
+      } finally {
+        await new Promise((done) => other.close(done));
+      }
+    });
+
+    it("reports a server that stops before it is ready, and a sign-in link that can't be made", async () => {
+      const crash = join(dir, "crash.mjs");
+      writeFileSync(crash, "process.exit(3);\n");
+      await expect(start({ serverScript: crash })).rejects.toThrow(
+        "The server stopped (exit code 3) before it was ready",
+      );
+      const broken = join(dir, "broken-link.mjs");
+      writeFileSync(
+        broken,
+        "console.error('database locked'); process.exit(1);\n",
+      );
+      await expect(start({ loginScript: broken })).rejects.toThrow(
+        "Couldn't create a sign-in link: database locked",
+      );
+    });
+
+    it("gives up on a server that never answers, and stops it", async () => {
+      const silent = join(dir, "silent.mjs");
+      writeFileSync(silent, "setInterval(() => {}, 1000);\n");
+      await expect(
+        start({ serverScript: silent, timeoutMs: 1500 }),
+      ).rejects.toThrow("didn't answer within 1.5 seconds");
     });
   });
 });

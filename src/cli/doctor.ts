@@ -65,57 +65,64 @@ export async function diagnose(
   const findings: Finding[] = [];
   const add = (finding: Finding) => findings.push(finding);
 
-  const major = Number(process.versions.node.split(".")[0]);
-  add(
-    major === 24
-      ? { check: "Node", level: "ok", detail: `Node ${process.versions.node}` }
-      : {
-          check: "Node",
-          level: "fail",
-          detail: `Node ${process.versions.node} is running; Konfab needs Node 24.`,
-          fix: installNode(),
-        },
-  );
+  // Node and dependencies are checked by scripts/doctor.mjs when it runs this.
+  if (env.KONFAB_DOCTOR_BOOTSTRAPPED !== "1") {
+    const major = Number(process.versions.node.split(".")[0]);
+    add(
+      major === 24
+        ? {
+            check: "Node",
+            level: "ok",
+            detail: `Node ${process.versions.node}`,
+          }
+        : {
+            check: "Node",
+            level: "fail",
+            detail: `Node ${process.versions.node} is running; Konfab needs Node 24.`,
+            fix: installNode(),
+          },
+    );
 
-  // Dependencies: the recorded fingerprint must match, and the native module must load.
-  const record = join(projectRoot, "node_modules", ".konfab-install.json");
-  let recorded: unknown;
-  try {
-    recorded = JSON.parse(readFileSync(record, "utf8"));
-  } catch {
-    recorded = null;
+    // Dependencies: the recorded fingerprint must match, and the native module must load.
+    const record = join(projectRoot, "node_modules", ".konfab-install.json");
+    let recorded: unknown;
+    try {
+      recorded = JSON.parse(readFileSync(record, "utf8"));
+    } catch {
+      recorded = null;
+    }
+    const expected = installFingerprint(projectRoot);
+    const loads =
+      spawnSync(
+        process.execPath,
+        [
+          "-e",
+          "const D=require('better-sqlite3');new D(':memory:').prepare('select 1').get()",
+        ],
+        { cwd: projectRoot, stdio: "ignore", timeout: 20_000 },
+      ).status === 0;
+    if (!loads)
+      add({
+        check: "Dependencies",
+        level: "fail",
+        detail: "The SQLite module doesn't load with this Node.",
+        fix: "Run `npm run quickstart` to reinstall. If the install has to compile it, first install build tools: `xcode-select --install` (macOS) or `sudo apt install build-essential python3` (Linux).",
+      });
+    else if (JSON.stringify(recorded) !== JSON.stringify(expected))
+      add({
+        check: "Dependencies",
+        level: "warn",
+        detail:
+          "Installed packages weren't recorded for this lockfile, Node version and CPU.",
+        fix: "Run `npm run quickstart`; it reinstalls with `npm ci` when they differ.",
+      });
+    else
+      add({
+        check: "Dependencies",
+        level: "ok",
+        detail: "Installed and loading",
+      });
   }
-  const expected = installFingerprint(projectRoot);
-  const loads =
-    spawnSync(
-      process.execPath,
-      [
-        "-e",
-        "const D=require('better-sqlite3');new D(':memory:').prepare('select 1').get()",
-      ],
-      { cwd: projectRoot, stdio: "ignore", timeout: 20_000 },
-    ).status === 0;
-  if (!loads)
-    add({
-      check: "Dependencies",
-      level: "fail",
-      detail: "The SQLite module doesn't load with this Node.",
-      fix: "Run `npm run quickstart` to reinstall. If the install has to compile it, first install build tools: `xcode-select --install` (macOS) or `sudo apt install build-essential python3` (Linux).",
-    });
-  else if (JSON.stringify(recorded) !== JSON.stringify(expected))
-    add({
-      check: "Dependencies",
-      level: "warn",
-      detail:
-        "Installed packages weren't recorded for this lockfile, Node version and CPU.",
-      fix: "Run `npm run quickstart`; it reinstalls with `npm ci` when they differ.",
-    });
-  else
-    add({
-      check: "Dependencies",
-      level: "ok",
-      detail: "Installed and loading",
-    });
 
   const home = env.KONFAB_HOME ?? join(homedir(), ".konfab");
   if (!existsSync(home))

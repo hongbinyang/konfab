@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, console, fetch, setTimeout */
+/* global process, console, fetch, setTimeout, URL */
 // Get Konfab running from a fresh clone: check Node, install dependencies when
 // they don't match, build, set up the app connectors, report problems, then
 // start. Safe to run again. Plain Node with no dependencies, so it works before
@@ -13,6 +13,7 @@ import {
   writeFileSync,
   realpathSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -89,7 +90,7 @@ const buildTools =
       ? "sudo apt install build-essential python3   (or your distribution's equivalent)"
       : "the Visual Studio Build Tools";
 
-function main() {
+async function main() {
   // 1. Node 24.
   const major = Number(process.versions.node.split(".")[0]);
   if (major !== 24)
@@ -163,64 +164,135 @@ function main() {
   if (doctor.status !== 0)
     stop("Fix the FAIL lines above, then run `npm run quickstart` again.");
 
-  // 6. Start, then print and open the sign-in link.
-  const server = spawn(process.execPath, [join(root, "dist/server/index.js")], {
-    cwd: root,
-    stdio: "inherit",
-  });
-  server.on("exit", (code) => process.exit(code ?? 0));
-  const port = (() => {
-    try {
-      const home =
-        process.env.KONFAB_HOME ??
-        join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".konfab");
-      const match = /^\s*port:\s*(\d+)/m.exec(
-        readFileSync(join(home, "config.yaml"), "utf8"),
-      );
-      return match ? Number(match[1]) : 8787;
-    } catch {
-      return 8787;
-    }
-  })();
-  const waitThenOpen = async () => {
-    for (let i = 0; i < 100; i += 1) {
-      try {
-        await fetch(`http://127.0.0.1:${port}/login`, { redirect: "manual" });
-        break;
-      } catch {
-        await new Promise((done) => setTimeout(done, 100));
-      }
-    }
-    const link = spawnSync(
-      process.execPath,
-      [join(root, "dist/cli/login-link.js")],
-      {
-        cwd: root,
-        encoding: "utf8",
-      },
-    ).stdout.trim();
-    say(`\nKonfab is running. Sign in: ${link}`);
-    if (!args.has("--no-open") && link) {
-      const opener =
-        process.platform === "darwin"
-          ? "open"
-          : process.platform === "win32"
-            ? "explorer"
-            : "xdg-open";
-      spawn(opener, [link], { stdio: "ignore", detached: true })
-        .on("error", () => undefined)
-        .unref();
-    }
+  // 6. Start (or find Konfab already running), then print and open the sign-in link.
+  let started;
+  try {
+    started = await startKonfab({ open: !args.has("--no-open") });
+  } catch (error) {
+    stop(error.message);
+  }
+  if (started.status === "already-running")
     say(
-      "Next: restart (or reload the Konfab connector in) your agent app, then paste a join prompt from the page.\n" +
-        "An agent is connected when its card says “Waiting for a turn”. Press Ctrl+C to stop Konfab.",
+      `\nKonfab is already running from this install. Sign in: ${started.link}`,
     );
+  else {
+    say(`\nKonfab is running. Sign in: ${started.link}`);
+    started.child.on("exit", (code) => process.exit(code ?? 0));
+  }
+  say(
+    "Next: restart (or reload the Konfab connector in) your agent app, then paste a join prompt from the page.\n" +
+      "An agent is connected when its card says “Waiting for a turn”." +
+      (started.status === "started" ? " Press Ctrl+C to stop Konfab." : ""),
+  );
+}
+
+/**
+ * Starts the server unless this install's Konfab already answers on its port,
+ * and returns a fresh sign-in link only once the server proves it is this
+ * install's (a sign-in code from this database is accepted). Another program
+ * on the port, a server that stops or never answers, and a failed sign-in
+ * link are errors with the next step to take.
+ */
+export async function startKonfab({
+  projectRoot = root,
+  env = process.env,
+  serverScript = join(projectRoot, "dist/server/index.js"),
+  loginScript = join(projectRoot, "dist/cli/login-link.js"),
+  open = true,
+  timeoutMs = 15_000,
+  stdio = "inherit",
+} = {}) {
+  const loginLink = () => {
+    const result = spawnSync(process.execPath, [loginScript], {
+      cwd: projectRoot,
+      env,
+      encoding: "utf8",
+    });
+    const link = (result.stdout ?? "").trim();
+    if (
+      result.status !== 0 ||
+      !/^http:\/\/127\.0\.0\.1:\d+\/login\?code=/.test(link)
+    )
+      throw new Error(
+        `Couldn't create a sign-in link: ${(result.stderr || result.stdout || "no output").trim()}\n  Run \`npm run doctor\` for details.`,
+      );
+    return link;
   };
-  void waitThenOpen();
+  /** true: this install's Konfab; false: something else; null: nothing listening. */
+  const answersAsOurs = async () => {
+    try {
+      const response = await fetch(loginLink(), { redirect: "manual" });
+      return (
+        response.status === 303 &&
+        (response.headers.get("set-cookie") ?? "").startsWith("konfab_session=")
+      );
+    } catch (error) {
+      if (error.message?.startsWith("Couldn't create")) throw error;
+      return null;
+    }
+  };
+  const port = Number(new URL(loginLink()).port);
+  if (!(await portFree(port))) {
+    const ours = await answersAsOurs();
+    if (ours) return { status: "already-running", link: loginLink() };
+    throw new Error(
+      `Port ${port} is in use by another program, so Konfab didn't start.\n  See what it is: ${process.platform === "linux" ? `ss -ltnp 'sport = :${port}'` : `lsof -nP -iTCP:${port} -sTCP:LISTEN`}\n  Or give Konfab another port: set server.port in config.yaml (\`npm run doctor\` shows where it is).`,
+    );
+  }
+  const child = spawn(process.execPath, [serverScript], {
+    cwd: projectRoot,
+    env,
+    stdio,
+  });
+  let exited = null;
+  child.on("exit", (code) => (exited = code ?? 1));
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (exited !== null)
+      throw new Error(
+        `The server stopped (exit code ${exited}) before it was ready; see its output above.`,
+      );
+    const ours = await answersAsOurs();
+    if (ours) break;
+    if (ours === false) {
+      child.kill();
+      throw new Error(
+        `Something other than this Konfab answered on port ${port}; Konfab was stopped.`,
+      );
+    }
+    if (Date.now() > deadline) {
+      child.kill();
+      throw new Error(
+        `The server didn't answer within ${timeoutMs / 1000} seconds; it was stopped. Run \`npm run doctor\`.`,
+      );
+    }
+    await new Promise((done) => setTimeout(done, 150));
+  }
+  const link = loginLink();
+  if (open) {
+    const opener =
+      process.platform === "darwin"
+        ? "open"
+        : process.platform === "win32"
+          ? "explorer"
+          : "xdg-open";
+    spawn(opener, [link], { stdio: "ignore", detached: true })
+      .on("error", () => undefined)
+      .unref();
+  }
+  return { status: "started", child, link };
+}
+
+function portFree(port) {
+  return new Promise((done) => {
+    const probe = createServer();
+    probe.once("error", () => done(false));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => done(true)));
+  });
 }
 
 if (
   process.argv[1] &&
   realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
 )
-  main();
+  void main();

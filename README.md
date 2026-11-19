@@ -37,8 +37,8 @@ Then:
 
 **Platforms:**
 
-- **macOS:** supported.
-- **Linux:** passes the automated end-to-end check. There is no Claude desktop app on Linux; use Codex or Claude Code.
+- **macOS:** supported (checked on macOS arm64; see the [test plan](docs/test-plan.md)).
+- **Linux:** intended and covered by the CI check, but **not yet verified**; the [test plan](docs/test-plan.md) records results as they come in. There is no Claude desktop app on Linux; use Codex or Claude Code.
 - **Windows:** not supported yet. Skill folder editing is disabled there.
 - Checks with real agent apps on each platform are recorded in the [test plan](docs/test-plan.md).
 
