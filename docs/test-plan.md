@@ -132,12 +132,15 @@ Bugs found by testing and review:
 
 **Automated** (`npm run quickstart -- --check`, CI workflow `get-started.yml`). It runs in its own temporary homes with credentials removed, on a free port: setup, then a first start with no config or database, then the bridge joining as codex exactly as an app starts it, a turn, a restart, and the room checked again.
 
-| Platform                                         | Result                                                        | When       |
-| ------------------------------------------------ | ------------------------------------------------------------- | ---------- |
-| macOS 26 arm64, Node 24.21 (development machine) | passed (observed)                                             | 2026-11-18 |
-| macOS (CI `macos-latest`)                        | not run yet: runs on the first push of this workflow          | —          |
-| Ubuntu (CI `ubuntu-latest`)                      | not run yet: runs on the first push of this workflow          | —          |
-| Windows (CI, informational)                      | not run yet; skill folder writes are disabled there by design | —          |
+| Platform                                                                                                   | Result                                                                                                                                                                                                        | When       |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| macOS 26 arm64, Node 24.21 (development machine)                                                           | passed (observed)                                                                                                                                                                                             | 2026-11-18 |
+| Debian 12 arm64, Node 24.22 (`node:24-bookworm` container, fresh `npm ci`; the image includes build tools) | `--check` passed; `npm run check` 433 + 21 passed (observed)                                                                                                                                                  | 2026-11-18 |
+| Ubuntu 24.04.5 arm64, Node 24.22 via nvm (container, fresh)                                                | without build tools, `npm ci` had to compile `better-sqlite3` and quickstart stopped, naming `build-essential python3`; after installing them `--check` passed and `npm run check` 433 + 21 passed (observed) | 2026-11-18 |
+| Ubuntu 24.04.5 x86-64 (emulated), Node 24.22 via nvm (container, fresh)                                    | same as arm64: compile needed, hint shown, then everything passed (observed)                                                                                                                                  | 2026-11-18 |
+| macOS (CI `macos-latest`)                                                                                  | not run yet: runs on the first push of this workflow                                                                                                                                                          | —          |
+| Ubuntu (CI `ubuntu-latest`)                                                                                | not run yet: runs on the first push of this workflow                                                                                                                                                          | —          |
+| Windows (CI, informational)                                                                                | not run yet; skill folder writes are disabled there by design                                                                                                                                                 | —          |
 
 **Manual, with real agent apps** (agent joins and replies, restart keeps rooms, update, uninstall). Record OS, CPU, Node, steps, minutes and problems.
 
