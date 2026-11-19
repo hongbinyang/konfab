@@ -11,6 +11,7 @@ Konfab runs locally and uses your desktop apps and their subscriptions; it does 
 You need **Git**, **Node 24** and at least one agent app: **Codex** (app or CLI) or **Claude Code** (CLI, or the Claude desktop app's Code tab).
 
 - **Node 24:** on macOS `brew install node@24`; anywhere, nvm or fnm (this repo has `.nvmrc`) or [nodejs.org](https://nodejs.org/). Miniconda also works: `conda env create -f environment.yml`.
+- **Build tools**, for compiling the SQLite module: on Linux `sudo apt install build-essential python3` (or your distribution's equivalent), which was needed in every Linux test. On macOS they're only needed if no prebuilt module fits: `xcode-select --install`.
 
 ```bash
 git clone https://github.com/hongbinyang/konfab.git
@@ -38,7 +39,7 @@ Then:
 **Platforms:**
 
 - **macOS:** supported (checked on macOS arm64; see the [test plan](docs/test-plan.md)).
-- **Linux:** intended and covered by the CI check, but **not yet verified**; the [test plan](docs/test-plan.md) records results as they come in. There is no Claude desktop app on Linux; use Codex or Claude Code.
+- **Linux:** the fresh-install check passes on Ubuntu 24.04 and Debian 12 (x86-64 and arm64). Real agent apps on Linux are not verified yet. There is no Claude desktop app on Linux; use Codex or Claude Code.
 - **Windows:** not supported yet. Skill folder editing is disabled there.
 - Checks with real agent apps on each platform are recorded in the [test plan](docs/test-plan.md).
 

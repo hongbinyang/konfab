@@ -148,3 +148,5 @@ Bugs found by testing and review:
 | Windows                   | untested      | untested  | untested                  | untested        |
 
 Observed earlier on the development Mac (not a clean account): Claude desktop and Codex desktop both join and take turns.
+
+Constraints found on Linux: `better-sqlite3` had no prebuilt binary for Node 24.22 on Linux arm64 or x86-64, so `npm ci` compiles it and needs `build-essential` and `python3`. The README lists them as a Linux prerequisite, and quickstart warns before installing when they're missing. The containers ran as root with no agent app, so they cover install, setup, start, the bridge, a turn and restart persistence, but not a real signed-in agent.

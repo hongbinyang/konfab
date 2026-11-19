@@ -111,6 +111,18 @@ async function main() {
       stop(
         "node_modules here is a link to another folder, and reinstalling would delete that folder's packages. Replace the link with a real install (`rm node_modules && npm ci`) and run `npm run quickstart` again.",
       );
+    // The SQLite module is compiled when no prebuilt binary fits (always so on
+    // Linux in our tests); say up front if the usual tools are missing.
+    const missing = ["python3", "make", "c++"].filter(
+      (tool) =>
+        process.platform !== "win32" &&
+        spawnSync("sh", ["-c", `command -v ${tool}`], { stdio: "ignore" })
+          .status !== 0,
+    );
+    if (missing.length)
+      say(
+        `! ${missing.join(", ")} not found. If npm has to compile the SQLite module, it needs them: ${buildTools}`,
+      );
     say("… Installing dependencies (npm ci)");
     rmSync(record, { force: true });
     run(
