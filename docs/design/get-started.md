@@ -141,7 +141,8 @@ npm, Homebrew and app packaging (later, building on quickstart); Windows support
 - **The check never talks to the default port.** Setup first runs with the default config, as on a first run. The check then switches to a free port and runs setup again, which also proves a rerun keeps the tokens. It refuses to start the bridge unless the connector URL is its own server.
 - **Quickstart never reinstalls through a linked `node_modules`.** `npm ci` deletes the folder first, so through a link it would empty another checkout's dependencies. Quickstart stops and explains instead (found the hard way during development, now tested).
 - **`npm run doctor` needs no dependencies and no build.** `scripts/doctor.mjs` is plain Node. It checks Node, the install (present, a link or not, the recorded fingerprint, whether SQLite loads) and whether the build exists or is older than the source, and it never installs or builds. Only when dependencies load and a build exists does it run the full read-only checks in `dist/cli/doctor.js`.
-- **Starting proves it is this install's Konfab.** The port comes from the sign-in link that `login-link` prints, which uses the parsed config.
-  - If the port is busy, quickstart signs in with a fresh code from this database. If that works, Konfab is already running: it prints a new link and starts nothing. Anything else on the port is an error naming the port, how to find the program, and `server.port`.
-  - After starting, it reports "running" only once a sign-in code from this database is accepted.
-  - A server that exits, never answers (15 s, then stopped) or turns out to be another program, and a sign-in link that can't be made, all stop quickstart with the next step to take.
+- **Starting never sends a secret over the network.**
+  - The port comes from the parsed config, via the link `login-link` prints locally.
+  - A busy port stops quickstart with a message: if Konfab is already running here, run `npm run login-link`; otherwise how to find the program, or set `server.port`.
+  - The server tells its parent it is listening over an IPC message (`konfab-ready`, with the port) right after `listen`. Quickstart waits for that, not for a probe of the port, then makes the sign-in link from the local database.
+  - On any error after spawning (exit before ready, no ready signal within 15 s, a failed sign-in link), the server is stopped and reaped before quickstart reports the error.

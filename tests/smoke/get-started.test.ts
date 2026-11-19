@@ -297,56 +297,84 @@ describe("getting started", () => {
       for (const child of children) child.kill();
     });
 
-    it("starts, then finds the same Konfab running instead of starting a second one", async () => {
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const portIsFree = () =>
+      new Promise<boolean>((done) => {
+        const probe = createServer();
+        probe.once("error", () => done(false));
+        probe.listen(port, "127.0.0.1", () => probe.close(() => done(true)));
+      });
+
+    it("starts once the server itself reports ready, and refuses to start a second one", async () => {
       const first = await start();
       expect(first.status).toBe("started");
       expect(first.link).toContain(`127.0.0.1:${port}/login?code=`);
-      const second = await start();
-      expect(second).toMatchObject({ status: "already-running" });
-      expect(second.child).toBeUndefined();
-      // The new link signs in.
-      const response = await fetch(second.link, { redirect: "manual" });
-      expect(response.status).toBe(303);
+      expect((await fetch(first.link, { redirect: "manual" })).status).toBe(
+        303,
+      );
+      await expect(start()).rejects.toThrow("npm run login-link");
     });
 
-    it("refuses a port used by another program", async () => {
-      const other = createHttpServer((_, response) =>
-        response.end("not konfab"),
-      );
+    it("never sends a sign-in code to another program on the port", async () => {
+      const requests: string[] = [];
+      const other = createHttpServer((request, response) => {
+        requests.push(request.url ?? "");
+        response.end("not konfab");
+      });
       await new Promise<void>((done) =>
         other.listen(port, "127.0.0.1", () => done()),
       );
       try {
-        await expect(start()).rejects.toThrow(
-          `Port ${port} is in use by another program`,
-        );
+        await expect(start()).rejects.toThrow(`Port ${port} is already in use`);
+        expect(requests).toEqual([]);
       } finally {
         await new Promise((done) => other.close(done));
       }
     });
 
-    it("reports a server that stops before it is ready, and a sign-in link that can't be made", async () => {
+    it("stops and reaps the server on every failure after starting it", async () => {
+      // Exits before ready.
       const crash = join(dir, "crash.mjs");
       writeFileSync(crash, "process.exit(3);\n");
       await expect(start({ serverScript: crash })).rejects.toThrow(
         "The server stopped (exit code 3) before it was ready",
       );
-      const broken = join(dir, "broken-link.mjs");
-      writeFileSync(
-        broken,
-        "console.error('database locked'); process.exit(1);\n",
-      );
-      await expect(start({ loginScript: broken })).rejects.toThrow(
-        "Couldn't create a sign-in link: database locked",
-      );
-    });
-
-    it("gives up on a server that never answers, and stops it", async () => {
+      // Never reports ready: stopped after the timeout.
+      const pidFile = join(dir, "silent.pid");
       const silent = join(dir, "silent.mjs");
-      writeFileSync(silent, "setInterval(() => {}, 1000);\n");
+      writeFileSync(
+        silent,
+        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`.replace(
+          'require("node:fs")',
+          '(await import("node:fs"))',
+        ),
+      );
       await expect(
         start({ serverScript: silent, timeoutMs: 1500 }),
-      ).rejects.toThrow("didn't answer within 1.5 seconds");
+      ).rejects.toThrow("didn't report ready within 1.5 seconds");
+      expect(alive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+      // Ready, but the sign-in link then can't be made: the real server is stopped.
+      const calls = join(dir, "calls");
+      const flaky = join(dir, "flaky-link.mjs");
+      writeFileSync(
+        flaky,
+        `import { existsSync, writeFileSync } from "node:fs";
+if (existsSync(${JSON.stringify(calls)})) { console.error("database locked"); process.exit(1); }
+writeFileSync(${JSON.stringify(calls)}, "1");
+console.log("http://127.0.0.1:${port}/login?code=x");
+`,
+      );
+      await expect(start({ loginScript: flaky })).rejects.toThrow(
+        "Couldn't create a sign-in link: database locked",
+      );
+      expect(await portIsFree()).toBe(true);
     });
   });
 });

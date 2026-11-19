@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, console, fetch, setTimeout, URL */
+/* global process, console, setTimeout, URL */
 // Get Konfab running from a fresh clone: check Node, install dependencies when
 // they don't match, build, set up the app connectors, report problems, then
 // start. Safe to run again. Plain Node with no dependencies, so it works before
@@ -164,34 +164,28 @@ async function main() {
   if (doctor.status !== 0)
     stop("Fix the FAIL lines above, then run `npm run quickstart` again.");
 
-  // 6. Start (or find Konfab already running), then print and open the sign-in link.
+  // 6. Start, then print and open the sign-in link.
   let started;
   try {
     started = await startKonfab({ open: !args.has("--no-open") });
   } catch (error) {
     stop(error.message);
   }
-  if (started.status === "already-running")
-    say(
-      `\nKonfab is already running from this install. Sign in: ${started.link}`,
-    );
-  else {
-    say(`\nKonfab is running. Sign in: ${started.link}`);
-    started.child.on("exit", (code) => process.exit(code ?? 0));
-  }
+  say(`\nKonfab is running. Sign in: ${started.link}`);
+  started.child.on("exit", (code) => process.exit(code ?? 0));
   say(
     "Next: restart (or reload the Konfab connector in) your agent app, then paste a join prompt from the page.\n" +
-      "An agent is connected when its card says “Waiting for a turn”." +
-      (started.status === "started" ? " Press Ctrl+C to stop Konfab." : ""),
+      "An agent is connected when its card says “Waiting for a turn”. Press Ctrl+C to stop Konfab.",
   );
 }
 
 /**
- * Starts the server unless this install's Konfab already answers on its port,
- * and returns a fresh sign-in link only once the server proves it is this
- * install's (a sign-in code from this database is accepted). Another program
- * on the port, a server that stops or never answers, and a failed sign-in
- * link are errors with the next step to take.
+ * Starts the server and returns once that child process itself reports it is
+ * listening; then makes a sign-in link from the local database. Nothing is
+ * sent over the network, so no sign-in code can reach another program. A busy
+ * port, a server that stops or never reports ready, and a failed sign-in link
+ * are errors with the next step; on any error after starting, the server is
+ * stopped and reaped.
  */
 export async function startKonfab({
   projectRoot = root,
@@ -218,69 +212,69 @@ export async function startKonfab({
       );
     return link;
   };
-  /** true: this install's Konfab; false: something else; null: nothing listening. */
-  const answersAsOurs = async () => {
-    try {
-      const response = await fetch(loginLink(), { redirect: "manual" });
-      return (
-        response.status === 303 &&
-        (response.headers.get("set-cookie") ?? "").startsWith("konfab_session=")
-      );
-    } catch (error) {
-      if (error.message?.startsWith("Couldn't create")) throw error;
-      return null;
-    }
-  };
+  // The port as Konfab will use it, from the parsed config (login-link reads it).
   const port = Number(new URL(loginLink()).port);
-  if (!(await portFree(port))) {
-    const ours = await answersAsOurs();
-    if (ours) return { status: "already-running", link: loginLink() };
+  if (!(await portFree(port)))
     throw new Error(
-      `Port ${port} is in use by another program, so Konfab didn't start.\n  See what it is: ${process.platform === "linux" ? `ss -ltnp 'sport = :${port}'` : `lsof -nP -iTCP:${port} -sTCP:LISTEN`}\n  Or give Konfab another port: set server.port in config.yaml (\`npm run doctor\` shows where it is).`,
+      `Port ${port} is already in use, so Konfab didn't start.\n` +
+        `  If Konfab is already running from this install, get a new sign-in link with \`npm run login-link\`.\n` +
+        `  Otherwise see what uses it: ${process.platform === "linux" ? `ss -ltnp 'sport = :${port}'` : `lsof -nP -iTCP:${port} -sTCP:LISTEN`}\n` +
+        `  or give Konfab another port: set server.port in config.yaml (\`npm run doctor\` shows where it is).`,
     );
-  }
   const child = spawn(process.execPath, [serverScript], {
     cwd: projectRoot,
     env,
-    stdio,
+    stdio: [stdio === "inherit" ? "inherit" : "ignore", stdio, stdio, "ipc"],
   });
-  let exited = null;
-  child.on("exit", (code) => (exited = code ?? 1));
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (exited !== null)
+  const exited = new Promise((done) =>
+    child.once("exit", (code) => done(code ?? 1)),
+  );
+  const stopChild = async () => {
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill("SIGTERM");
+    await exited;
+  };
+  try {
+    const ready = new Promise((done) =>
+      child.on("message", (message) => {
+        if (message?.type === "konfab-ready" && message.port === port)
+          done("ready");
+      }),
+    );
+    const timer = new Promise((done) =>
+      setTimeout(() => done("timeout"), timeoutMs),
+    );
+    const outcome = await Promise.race([
+      ready,
+      timer,
+      exited.then((code) => ({ code })),
+    ]);
+    if (outcome === "timeout")
       throw new Error(
-        `The server stopped (exit code ${exited}) before it was ready; see its output above.`,
+        `The server didn't report ready within ${timeoutMs / 1000} seconds; it was stopped. Run \`npm run doctor\`.`,
       );
-    const ours = await answersAsOurs();
-    if (ours) break;
-    if (ours === false) {
-      child.kill();
+    if (typeof outcome === "object")
       throw new Error(
-        `Something other than this Konfab answered on port ${port}; Konfab was stopped.`,
+        `The server stopped (exit code ${outcome.code}) before it was ready; see its output above.`,
       );
+    child.disconnect?.();
+    const link = loginLink();
+    if (open) {
+      const opener =
+        process.platform === "darwin"
+          ? "open"
+          : process.platform === "win32"
+            ? "explorer"
+            : "xdg-open";
+      spawn(opener, [link], { stdio: "ignore", detached: true })
+        .on("error", () => undefined)
+        .unref();
     }
-    if (Date.now() > deadline) {
-      child.kill();
-      throw new Error(
-        `The server didn't answer within ${timeoutMs / 1000} seconds; it was stopped. Run \`npm run doctor\`.`,
-      );
-    }
-    await new Promise((done) => setTimeout(done, 150));
+    return { status: "started", child, link };
+  } catch (error) {
+    await stopChild();
+    throw error;
   }
-  const link = loginLink();
-  if (open) {
-    const opener =
-      process.platform === "darwin"
-        ? "open"
-        : process.platform === "win32"
-          ? "explorer"
-          : "xdg-open";
-    spawn(opener, [link], { stdio: "ignore", detached: true })
-      .on("error", () => undefined)
-      .unref();
-  }
-  return { status: "started", child, link };
 }
 
 function portFree(port) {

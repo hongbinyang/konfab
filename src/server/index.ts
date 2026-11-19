@@ -47,6 +47,9 @@ process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
 await app.listen({ host: "127.0.0.1", port: config.server.port });
+// A parent that started this server (quickstart) learns it is listening from
+// the process itself, without probing the port.
+process.send?.({ type: "konfab-ready", port: config.server.port });
 
 // Printed directly, so the one-time code stays out of the structured logs.
 console.log(
