@@ -697,7 +697,13 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         "Report working with a short one-line detail before work outside your turn. Posting or passing clears it. Other kinds report problems or low allowance.",
       inputSchema: {
         session_id: z.string(),
-        kind: z.enum(["low_allowance", "out_of_allowance", "other", "working"]),
+        kind: z.enum([
+          "low_allowance",
+          "out_of_allowance",
+          "other",
+          "working",
+          "blocked",
+        ]),
         detail: z.string().optional(),
       },
     },
@@ -721,7 +727,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     {
       ...toolHints("request_permission"),
       description:
-        'Ask the user before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI. Do not send anything unless the state is "approved". If the state is "pending", call this again with the same session_id and the request_id you received. An approval covers only this recipient and data. For code_push provide push_scope with repository, branch, and full base and head commit IDs. Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.',
+        'Ask the user before sharing secrets, credentials or personal data, even in this room, and before sending file contents, conversation content, secrets, or personal data anywhere outside this Konfab room to anyone other than Anthropic, OpenAI, Meta, or xAI. Ordinary replies and work in the room need no request. Do not send anything unless the state is "approved". If the state is "pending", call this again with the same session_id and the request_id you received. An approval covers only this recipient and data. For code_push provide push_scope with repository, branch, and full base and head commit IDs. Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.',
       inputSchema: {
         session_id: z.string(),
         recipient: z

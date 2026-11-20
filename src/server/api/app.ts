@@ -52,7 +52,13 @@ const historyBody = z.object({
 });
 const reportBody = z.object({
   ...session,
-  kind: z.enum(["low_allowance", "out_of_allowance", "other", "working"]),
+  kind: z.enum([
+    "low_allowance",
+    "out_of_allowance",
+    "other",
+    "working",
+    "blocked",
+  ]),
   detail: z.string().default(""),
 });
 const permissionBody = z.object({

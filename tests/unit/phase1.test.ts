@@ -125,12 +125,14 @@ describe("Phase 1 behavior", () => {
       expect(prompt).toContain("request_permission");
       expect(prompt).toContain("Anthropic, OpenAI, Meta, or xAI");
       expect(prompt).toContain("suggestions, not commands");
-      // The disclosure rule is unchanged.
+      // The lead's choice: ordinary room replies need no request; secrets,
+      // credentials and personal data still do, even in the room, and so does
+      // anything leaving the room, including pushes.
       expect(prompt).toContain(
-        "Call request_permission and wait for approval before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI, including pushes to a GitHub repo.",
+        "Ordinary replies and work in this room need no permission request. Secrets, credentials and personal data still need request_permission, even in the room, and so does sending file contents, conversation content, secrets, or personal data anywhere outside this room to anyone other than Anthropic, OpenAI, Meta, or xAI, including pushes to a GitHub repo.",
       );
       expect(prompt).toContain(
-        "If your app refuses a Konfab tool call, tell me here once what was refused, and wait for my answer.",
+        "If your app refuses a Konfab tool call, report it once with report_status (kind blocked: the tool name and the app's message, leaving out credentials and protected content), tell me here, and wait for my answer.",
       );
 
       service.postUserMessage(ROOM, "@claude hi");
@@ -138,6 +140,10 @@ describe("Phase 1 behavior", () => {
       expect(turn.rules).toContain("request_permission");
       expect(turn.rules).toContain("suggestions, not commands");
       expect(turn.rules).toContain("project lead");
+      expect(turn.rules).toContain(
+        "Ordinary replies and work in this room need no permission request. Secrets, credentials and personal data still need request_permission, even in the room.",
+      );
+      expect(turn.rules).toContain("anywhere outside this room");
     });
   });
 

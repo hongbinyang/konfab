@@ -14,6 +14,7 @@ import Database from "better-sqlite3";
 import { configPath, parseConfig } from "../server/config.js";
 import { hashToken } from "../server/domain/service.js";
 import { readClaude, readCodex, tokenFrom } from "./connector-config.js";
+import { describeRoomPosts, roomPostsStatus } from "./room-posts.js";
 
 /**
  * Read-only checks for a Konfab install. Creates nothing, changes nothing and
@@ -291,6 +292,32 @@ export async function diagnose(
     }
   }
   db?.close();
+
+  {
+    const codexFile = join(
+      env.CODEX_HOME ?? join(homedir(), ".codex"),
+      "config.toml",
+    );
+    try {
+      const status = roomPostsStatus(
+        codexFile,
+        join(home, "client-settings.json"),
+      );
+      if (status.kind !== "no_codex")
+        add({
+          check: "Room posts (Codex)",
+          level: "ok",
+          detail: describeRoomPosts(status),
+          ...(status.kind === "ask"
+            ? {
+                fix: "Optional: `npm run setup -- --allow-room-posts` lets Codex post in rooms without asking each time (only Konfab's post_message).",
+              }
+            : {}),
+        });
+    } catch {
+      /* Reported under the Codex connector check. */
+    }
+  }
 
   add(
     env.KONFAB_GITHUB_TOKEN

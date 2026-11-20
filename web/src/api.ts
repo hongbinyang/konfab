@@ -42,7 +42,7 @@ export interface Report {
   id: number;
   room: string;
   agent_id: string;
-  kind: "low_allowance" | "out_of_allowance" | "other";
+  kind: "low_allowance" | "out_of_allowance" | "other" | "blocked";
   detail: string;
 }
 

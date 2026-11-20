@@ -91,6 +91,32 @@ describe("server and bridge", () => {
     }
   });
 
+  it("accepts an agent's report that its app refused a call, and shows it for the lead", async () => {
+    const session = await client.callTool({
+      name: "join_room",
+      arguments: { room: ROOM },
+    });
+    const sessionId = JSON.parse(
+      (session.content as Array<{ text: string }>)[0]!.text,
+    ).session_id as string;
+    const result = await client.callTool({
+      name: "report_status",
+      arguments: {
+        session_id: sessionId,
+        kind: "blocked",
+        detail: "post_message: approval review rejected the post",
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(service.overview().reports).toEqual([
+      expect.objectContaining({
+        agent_id: "claude",
+        kind: "blocked",
+        detail: "post_message: approval review rejected the post",
+      }),
+    ]);
+  });
+
   it("does not attach parallel notices when the room setting is off", async () => {
     const session = service.join("claude", ROOM).session_id;
     service.postUserMessage(ROOM, "Start work");

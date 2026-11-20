@@ -56,6 +56,7 @@ const REPORT_LABELS = {
   low_allowance: "Low on allowance",
   out_of_allowance: "Out of allowance",
   other: "Status",
+  blocked: "App refused an action",
 };
 
 function formatTime(timestamp: number): string {
@@ -2829,7 +2830,8 @@ function Agents({
                   (report) =>
                     report.agent_id === agent.id &&
                     report.room === room.room.name &&
-                    report.kind !== "other",
+                    report.kind !== "other" &&
+                    report.kind !== "blocked",
                 )
                 .map((report) => (
                   <p className="warning-text" key={report.id}>
@@ -2838,6 +2840,28 @@ function Agents({
                       : "Low allowance"}
                     {report.detail ? `: ${report.detail}` : ""}
                   </p>
+                ))}
+              {overview.reports
+                .filter(
+                  (report) =>
+                    report.agent_id === agent.id &&
+                    report.room === room.room.name &&
+                    report.kind === "blocked",
+                )
+                .map((report) => (
+                  <BlockedReport
+                    key={report.id}
+                    agentName={agent.display_name}
+                    roomName={room.room.name}
+                    detail={report.detail}
+                    onDismiss={() =>
+                      void act(() =>
+                        request(`/api/reports/${report.id}/dismiss`, {
+                          method: "POST",
+                        }),
+                      )
+                    }
+                  />
                 ))}
               {member && (
                 <RoomNameForm
@@ -3142,5 +3166,54 @@ function AgentDetails({
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * An agent reported that its own app refused a Konfab tool call. The report
+ * comes from the agent and may be incomplete; Konfab can't see the app.
+ */
+export function BlockedReport({
+  agentName,
+  roomName,
+  detail,
+  onDismiss,
+}: {
+  agentName: string;
+  roomName: string;
+  detail: string | null;
+  onDismiss: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const suggestion = `I approve you posting your reply to the Konfab room "${roomName}".`;
+  return (
+    <div className="warning-text blocked-report" role="status">
+      <p>
+        {agentName} reports that its app refused a Konfab action
+        {detail ? `: ${detail}` : "."}
+      </p>
+      <p className="muted">
+        Answer in {agentName}'s own conversation in its app, not here. The app
+        decides; this report comes from the agent.
+      </p>
+      <p className="muted">
+        Suggested wording: "{suggestion}"{" "}
+        <button
+          type="button"
+          className="secondary"
+          onClick={() =>
+            void navigator.clipboard.writeText(suggestion).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            })
+          }
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>{" "}
+        <button type="button" className="secondary" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </p>
+    </div>
   );
 }

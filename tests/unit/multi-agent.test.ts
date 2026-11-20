@@ -82,12 +82,14 @@ describe("multi-agent apps", () => {
           .roomState(room.id)
           .agents.find((agent) => agent.id === "app-dev")?.rejoin_prompt,
       ).toBe(
-        'Rejoin Konfab room "team" as app-dev (pass as="app-dev" to join_room) and continue the loop.',
+        'Rejoin Konfab room "team" as app-dev (pass as="app-dev" to join_room) and continue the loop. Ordinary replies and work in this room need no permission request; secrets, credentials and personal data still do.',
       );
       expect(
         service.roomState(room.id).agents.find((agent) => agent.id === "app")
           ?.rejoin_prompt,
-      ).toBe('Rejoin Konfab room "team" and continue the loop.');
+      ).toBe(
+        'Rejoin Konfab room "team" and continue the loop. Ordinary replies and work in this room need no permission request; secrets, credentials and personal data still do.',
+      );
       expect(() => service.addAppAgent("app", "app-qa", "QA")).toThrow("limit");
       service.renameAppAgent("app-dev", "Builder");
       expect(

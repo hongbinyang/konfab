@@ -24,6 +24,50 @@ import {
 } from "./setup-connectors.js";
 import { snapshot } from "./safe-config-files.js";
 import { setupGithubToken } from "../server/github-token.js";
+import { createInterface } from "node:readline/promises";
+import {
+  allowRoomPosts,
+  askBeforeRoomPosts,
+  describeRoomPosts,
+  roomPostsStatus,
+} from "./room-posts.js";
+
+/**
+ * The optional Codex setting for Konfab's post_message. Changed only with a
+ * flag or the lead's answer to the question; never silently.
+ */
+async function roomPostsStep(codexPath: string, statePath: string) {
+  if (args.includes("--allow-room-posts")) {
+    console.log(allowRoomPosts(codexPath, statePath));
+    return;
+  }
+  if (args.includes("--ask-before-room-posts")) {
+    console.log(askBeforeRoomPosts(codexPath, statePath));
+    return;
+  }
+  const status = roomPostsStatus(codexPath, statePath);
+  if (status.kind !== "ask" || !process.stdin.isTTY || !process.stdout.isTTY) {
+    if (status.kind !== "no_codex") console.log(describeRoomPosts(status));
+    return;
+  }
+  const prompt = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const answer = (
+    await prompt.question(
+      "Let Codex post in Konfab rooms without asking you each time? This changes only Konfab's post_message in Codex's settings; other approvals stay as they are. [Y/n] ",
+    )
+  )
+    .trim()
+    .toLowerCase();
+  prompt.close();
+  console.log(
+    answer === "" || answer === "y" || answer === "yes"
+      ? allowRoomPosts(codexPath, statePath)
+      : "Left as it is. Change it later with `npm run setup -- --allow-room-posts`.",
+  );
+}
 
 const args = process.argv.slice(2);
 if (args.includes("--github-token")) {
@@ -198,6 +242,7 @@ if (args.includes("--github-token")) {
         console.log(
           "Existing project connector entries are unchanged; migrate a known project only after verifying the user-level connection.",
         );
+        await roomPostsStep(paths.codex, join(home, "client-settings.json"));
       }
     }
   } catch (error) {
