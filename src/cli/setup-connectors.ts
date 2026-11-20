@@ -81,6 +81,8 @@ export function installConnectors(options: {
   url: string;
   tokens: Record<string, string>;
   changed: string[];
+  /** Told about each config file this call replaced, with its exact contents. */
+  onWrite?: (path: string, before: string | null, after: string) => void;
 }): string[] {
   const { paths, service, db, tokens } = options;
   recover(paths.journal, service, {
@@ -141,6 +143,8 @@ export function installConnectors(options: {
     throw error;
   }
   unlinkSync(paths.journal);
+  for (const write of changedWrites)
+    options.onWrite?.(write.before.path, write.before.contents, write.after);
   return backups;
 }
 

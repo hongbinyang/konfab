@@ -19,6 +19,7 @@ import {
   askBeforeRoomPosts,
   keepOwnershipAfterSetup,
   ownsRoomPosts,
+  roomPostsHooks,
   roomPostsStatus,
 } from "../../src/cli/room-posts.js";
 
@@ -78,19 +79,72 @@ describe("Codex approval for Konfab's post_message", () => {
 
   it("stays Konfab's across Konfab's own setup rewrite of the connector entry", () => {
     allowRoomPosts(codex, state);
-    const owned = ownsRoomPosts(codex, state);
-    writeFileSync(
-      codex,
-      configureCodex(text(), {
-        ...entry,
-        env: { ...entry.env, KONFAB_TOKEN: "t2" },
-      }),
-    );
-    if (owned) keepOwnershipAfterSetup(codex, state);
+    const ownedText = text();
+    expect(ownsRoomPosts(codex, state)).toBe(true);
+    const after = configureCodex(ownedText, {
+      ...entry,
+      env: { ...entry.env, KONFAB_TOKEN: "t2" },
+    });
+    writeFileSync(codex, after);
+    keepOwnershipAfterSetup(codex, state, ownedText, {
+      before: ownedText,
+      after,
+    });
     expect(value()).toBe("approve");
     expect(roomPostsStatus(codex, state)).toEqual({
       kind: "allowed_by_konfab",
     });
+  });
+
+  it("doesn't carry ownership over a setup write that started from someone else's edit", () => {
+    allowRoomPosts(codex, state);
+    const ownedText = text();
+    // Between the ownership check and setup's write, the user edits the file.
+    const edited = ownedText.replace('model = "x"', 'model = "y"');
+    userWrites(edited);
+    const after = configureCodex(edited, {
+      ...entry,
+      env: { ...entry.env, KONFAB_TOKEN: "t2" },
+    });
+    writeFileSync(codex, after);
+    keepOwnershipAfterSetup(codex, state, ownedText, { before: edited, after });
+    expect(ownsRoomPosts(codex, state)).toBe(false);
+    expect(askBeforeRoomPosts(codex, state)).toContain(
+      "Konfab can't tell that this value is still the one it set",
+    );
+    expect(value()).toBe("approve");
+  });
+
+  it("doesn't carry ownership when the file changed after setup's write", () => {
+    allowRoomPosts(codex, state);
+    const ownedText = text();
+    const after = configureCodex(ownedText, {
+      ...entry,
+      env: { ...entry.env, KONFAB_TOKEN: "t2" },
+    });
+    writeFileSync(codex, after);
+    // Someone writes right after setup's write, before ownership is recorded.
+    userWrites(after.replace('model = "x"', 'model = "z"'));
+    keepOwnershipAfterSetup(codex, state, ownedText, {
+      before: ownedText,
+      after,
+    });
+    expect(ownsRoomPosts(codex, state)).toBe(false);
+  });
+
+  it("doesn't remove the value when the user edits between undo's check and its write", () => {
+    allowRoomPosts(codex, state);
+    roomPostsHooks.beforeWrite = () =>
+      userWrites(text().replace('model = "x"', 'model = "y"'));
+    try {
+      expect(askBeforeRoomPosts(codex, state)).toContain(
+        "Konfab can't tell that this value is still the one it set",
+      );
+    } finally {
+      roomPostsHooks.beforeWrite = undefined;
+    }
+    expect(value()).toBe("approve");
+    expect(text()).toContain('model = "y"');
   });
 
   it("keeps a value the user chose before opting in, or after", () => {
@@ -112,7 +166,7 @@ describe("Codex approval for Konfab's post_message", () => {
       kind: "allowed_elsewhere",
     });
     expect(askBeforeRoomPosts(codex, state)).toContain(
-      "Konfab can't prove it set this value",
+      "Konfab can't tell that this value is still the one it set",
     );
     expect(value()).toBe("approve");
   });
@@ -121,7 +175,7 @@ describe("Codex approval for Konfab's post_message", () => {
     allowRoomPosts(codex, state);
     userWrites(text().replace('model = "x"', 'model = "y"'));
     expect(askBeforeRoomPosts(codex, state)).toContain(
-      "Konfab can't prove it set this value",
+      "Konfab can't tell that this value is still the one it set",
     );
     expect(value()).toBe("approve");
   });

@@ -37,44 +37,62 @@ interface Journal {
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-/** Konfab owns the value only if the file is byte for byte, and write for write, what it wrote. */
+/**
+ * Konfab treats the value as its own only if the file is byte for byte, and
+ * write for write (modification time), what it wrote. A conservative change
+ * detector, not proof of authorship.
+ */
 function owned(
   codexPath: string,
   text: string,
   journal: Journal | null,
+  mtimeMs = statSync(codexPath).mtimeMs,
 ): boolean {
   return (
     journal?.path === codexPath &&
     journal.state === "applied" &&
     journal.after_mtime_ms !== undefined &&
     sha(text) === journal.after_hash &&
-    statSync(codexPath).mtimeMs === journal.after_mtime_ms
+    mtimeMs === journal.after_mtime_ms
   );
 }
 
-/** True when the current value is provably the one Konfab set. */
+/** Test seam: runs between the ownership check and the guarded write. */
+export const roomPostsHooks: { beforeWrite?: () => void } = {};
+
+/** True when the current value is unchanged since Konfab set it. */
 export function ownsRoomPosts(codexPath: string, statePath: string): boolean {
   return roomPostsStatus(codexPath, statePath).kind === "allowed_by_konfab";
 }
 
 /**
  * Konfab's own setup rewrote the connector entry (which keeps the tools
- * table). If Konfab owned the value just before, it still does: record the
- * new file state.
+ * table). Ownership carries forward only when that guarded write started from
+ * exactly the file Konfab owned and the file is still exactly what it wrote;
+ * otherwise someone else's edit may be in it, and it stays ambiguous.
  */
 export function keepOwnershipAfterSetup(
   codexPath: string,
   statePath: string,
+  ownedText: string,
+  write: { before: string | null; after: string } | undefined,
 ): void {
   const journal = readJournal(statePath);
-  if (!journal || !existsSync(codexPath)) return;
-  const text = readFileSync(codexPath, "utf8");
-  if (codexPostApproval(text) !== APPROVE) return;
+  if (!journal || journal.path !== codexPath || !write) return;
+  if (write.before !== ownedText || sha(ownedText) !== journal.after_hash)
+    return;
+  const before = snapshot(codexPath);
+  const mtimeMs = statSync(codexPath).mtimeMs;
+  if (
+    before.contents !== write.after ||
+    codexPostApproval(write.after) !== APPROVE
+  )
+    return;
   writeJournal(statePath, {
     ...journal,
     state: "applied",
-    after_hash: sha(text),
-    after_mtime_ms: statSync(codexPath).mtimeMs,
+    after_hash: sha(write.after),
+    after_mtime_ms: mtimeMs,
   });
 }
 
@@ -148,7 +166,7 @@ export function describeRoomPosts(status: RoomPostsStatus): string {
 }
 
 const AMBIGUOUS = (codexPath: string) =>
-  `Konfab can't prove it set this value: ${codexPath} has changed since Konfab wrote it. Konfab leaves it as it is. To turn it off yourself, remove the [mcp_servers.konfab.tools.post_message] table (or its approval_mode) from that file.`;
+  `Konfab can't tell that this value is still the one it set: ${codexPath} has changed since Konfab wrote it. Konfab leaves it as it is. To turn it off yourself, remove the [mcp_servers.konfab.tools.post_message] table (or its approval_mode) from that file.`;
 
 /**
  * Turns the setting on. A value the user already chose is kept. An
@@ -207,16 +225,36 @@ export function askBeforeRoomPosts(
   statePath: string,
 ): string {
   const journal = readJournal(statePath);
-  const status = roomPostsStatus(codexPath, statePath);
-  if (status.kind === "allowed_by_konfab") {
-    const before = snapshot(codexPath);
-    const backup = replaceConfig(
-      before,
-      setCodexPostApproval(before.contents ?? "", undefined),
-    );
+  const before = snapshot(codexPath);
+  if (before.contents === null) return describeRoomPosts({ kind: "no_codex" });
+  // Check ownership on this exact snapshot and write from it, so an edit made
+  // after the check makes the guarded replace fail instead of being removed.
+  const mtimeMs = statSync(codexPath).mtimeMs;
+  const value = codexPostApproval(before.contents);
+  if (
+    value === APPROVE &&
+    owned(codexPath, before.contents, journal, mtimeMs)
+  ) {
+    roomPostsHooks.beforeWrite?.();
+    let backup: string | null;
+    try {
+      backup = replaceConfig(
+        before,
+        setCodexPostApproval(before.contents, undefined),
+      );
+    } catch {
+      writeJournal(statePath, null);
+      return AMBIGUOUS(codexPath);
+    }
     writeJournal(statePath, null);
     return `Codex will ask again before posting in Konfab rooms.${backup ? ` Backup: ${backup}` : ""}`;
   }
+  const status: RoomPostsStatus =
+    value === APPROVE
+      ? { kind: "allowed_elsewhere" }
+      : value !== undefined
+        ? { kind: "custom", value }
+        : { kind: "ask" };
   if (journal?.path === codexPath) {
     writeJournal(statePath, null);
     if (status.kind === "allowed_elsewhere") return AMBIGUOUS(codexPath);

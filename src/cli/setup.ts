@@ -224,8 +224,14 @@ if (args.includes("--github-token")) {
         } else console.log("All agents already have tokens; no changes made.");
       } else {
         const roomPostsState = join(home, "client-settings.json");
-        const ownedRoomPosts = ownsRoomPosts(paths.codex, roomPostsState);
+        const ownedText = ownsRoomPosts(paths.codex, roomPostsState)
+          ? snapshot(paths.codex).contents
+          : null;
+        let codexWrite: { before: string | null; after: string } | undefined;
         const backups = installConnectors({
+          onWrite: (path, before, after) => {
+            if (path === paths.codex) codexWrite = { before, after };
+          },
           paths,
           service,
           db,
@@ -246,8 +252,13 @@ if (args.includes("--github-token")) {
         console.log(
           "Existing project connector entries are unchanged; migrate a known project only after verifying the user-level connection.",
         );
-        if (ownedRoomPosts)
-          keepOwnershipAfterSetup(paths.codex, roomPostsState);
+        if (ownedText !== null)
+          keepOwnershipAfterSetup(
+            paths.codex,
+            roomPostsState,
+            ownedText,
+            codexWrite,
+          );
         await roomPostsStep(paths.codex, roomPostsState);
       }
     }
