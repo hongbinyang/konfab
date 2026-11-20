@@ -31,17 +31,33 @@ Keep your computer awake and the apps open while agents are in a room.
 
 Setup's backups contain your agent tokens, so keep them private and delete them once you no longer need them.
 
-**Options**
+**Setup options.** `npm run setup` is normally run once, and again after moving the checkout, upgrading Node or switching to a new version of Konfab. Every run is safe to repeat. Pass options after `--`, for example `npm run setup -- --rotate`.
 
-- `npm run setup -- --manual`, or `connectors: { install: manual }` in `~/.konfab/config.yaml`: don't touch the apps' files; write the connector entries to `~/.konfab/app-setup.md` for you to add yourself.
-- `npm run setup -- --rotate`: issue new tokens and update both apps. Agents connected with the old tokens stop working until their connector reloads.
-- `npm run setup -- --github-token`: store an optional GitHub token (see [section 15](#15-github-token-optional)).
+| Option                    | What it does                                                                                                                                                                                                                                                           |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _(none)_                  | Adds or updates the `konfab` connector for each app found (Codex if `~/.codex/` exists, Claude Code if `~/.claude.json` or `~/.claude/` exists), reusing existing tokens. It also turns on **room posts without asking** for Codex (below) unless you turned that off. |
+| `--manual`                | Changes no app files: writes the connector entries to `~/.konfab/app-setup.md` for you to add yourself. Same as `connectors: { install: manual }` in `config.yaml`.                                                                                                    |
+| `--rotate`                | Issues new agent tokens and updates both apps. Agents connected with the old tokens stop working until their connector reloads.                                                                                                                                        |
+| `--migrate <folder>`      | Removes an old Konfab entry from that project folder's `.mcp.json` (one folder per run, with a backup); see below.                                                                                                                                                     |
+| `--allow-room-posts`      | Turns room posts without asking back on for Codex after you turned it off.                                                                                                                                                                                             |
+| `--ask-before-room-posts` | Turns it off: Codex asks before each room post again. Remembered by later runs. It removes only a value Konfab set, and leaves a value you set yourself.                                                                                                               |
+| `--github-token`          | Stores an optional GitHub token in the macOS Keychain (see [section 15](#15-github-token-optional)); `--github-token --remove` deletes it.                                                                                                                             |
+
+`npm run doctor` shows what is set up, and changes nothing.
+
+**Restart the agent apps after setup changes something.** The apps read their connector settings when they start:
+
+- **Codex:** quit and reopen the Codex app. A connector reload is enough for the connector, but a new setting such as room posts applies to conversations started after the restart.
+- **Claude:** restart the Konfab connector in Claude's Code tab, or quit and reopen the app.
+- **Already-running agents:** give each one its **rejoin** prompt from its card after the restart.
+
+If setup printed that nothing changed, no restart is needed.
 
 **Moving from a project `.mcp.json`.** Earlier versions put Claude's connector in a project folder's `.mcp.json`. To switch: run `npm run setup` (it reuses your tokens), reload the connector in Claude, check that an agent can join from a **different** folder, then remove the old entry with `npm run setup -- --migrate /path/to/old/project` (one folder per command; it backs up the file and leaves other connectors alone). If setup can't find a token to reuse, it says so; restore the old configuration or run `--rotate`.
 
 **Full access.** Each app has its own full-access setting. It lets agents work without approval prompts, and also lets them change anything on your Mac, so try it on a throwaway repo first. Konfab can't change an app's permissions.
 
-**Room posts without asking (Codex, optional).** Setup asks once whether Codex may post in Konfab rooms without asking you each time. Yes changes only Konfab's `post_message` in Codex's settings (`[mcp_servers.konfab.tools.post_message] approval_mode = "approve"`), with a backup. Everything else Codex does keeps its normal approvals, and Konfab permission requests still come to you. Turn it on or off later with `npm run setup -- --allow-room-posts` or `npm run setup -- --ask-before-room-posts`; the second only undoes a value Konfab set. `npm run doctor` shows the current setting. Claude Code isn't changed.
+**Room posts without asking (Codex, on by default).** So that room conversation flows, setup lets Codex post in Konfab rooms without asking you each time. It changes only Konfab's `post_message` in Codex's settings (`[mcp_servers.konfab.tools.post_message] approval_mode = "approve"`), with a backup. Everything else Codex does keeps its normal approvals, Konfab permission requests (secrets, anything leaving the room, pushes) still come to you, and the app's own review can still refuse. If you already set your own value for it, setup keeps yours. To turn it off, run `npm run setup -- --ask-before-room-posts`; later runs remember that. `npm run doctor` shows the current setting. Claude Code isn't changed yet; its equivalent hasn't been verified.
 
 ## 3. Open a room
 

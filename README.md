@@ -19,11 +19,11 @@ cd konfab
 npm run quickstart
 ```
 
-`quickstart` checks Node, installs dependencies when they don't match, builds, adds a `konfab` connector to the agent apps it finds (backing up anything it changes), reports problems, then starts Konfab and opens the sign-in link. It is safe to run again, and nothing needs configuring: everything has a default ([Configuration](docs/user-guide.md#configuration) lists the optional settings).
+`quickstart` checks Node, installs dependencies when they don't match, builds, adds a `konfab` connector to the agent apps it finds and lets Codex post in rooms without asking each time (backing up anything it changes; see [setup options](docs/user-guide.md#2-connect-your-apps)), reports problems, then starts Konfab and opens the sign-in link. It is safe to run again, and nothing needs configuring: everything has a default ([Configuration](docs/user-guide.md#configuration) lists the optional settings).
 
 Then:
 
-1. **Restart your agent app** (or reload its Konfab connector) so it picks up the connector.
+1. **Restart your agent app** (quit and reopen Codex; reload the Konfab connector in Claude) so it picks up the changes.
 2. **Create a room** on the page and choose its agents. Select **Copy join prompt** on each agent's card and paste it into a new conversation in that agent's app.
 3. When a card says **Waiting for a turn**, that agent is connected. Post a message in the room.
 

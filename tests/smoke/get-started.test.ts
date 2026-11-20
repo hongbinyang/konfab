@@ -378,7 +378,7 @@ console.log("http://127.0.0.1:${port}/login?code=x");
     });
   });
 
-  it("changes Codex's post_message approval only with the flag, and undoes it", () => {
+  it("turns Codex's post_message approval on by default, and remembers when the lead turns it off", () => {
     const home = join(dir, "posts");
     mkdirSync(join(home, ".codex"), { recursive: true });
     writeFileSync(join(home, ".claude.json"), "{}\n");
@@ -397,19 +397,20 @@ console.log("http://127.0.0.1:${port}/login?code=x");
       });
     const codex = () =>
       readFileSync(join(home, ".codex", "config.toml"), "utf8");
-    // No flag and no terminal: nothing changes.
-    expect(setup().status).toBe(0);
-    expect(codex()).not.toContain("approval_mode");
-    const claudeBefore = readFileSync(join(home, ".claude.json"), "utf8");
-    const allowed = setup("--allow-room-posts");
-    expect(allowed.stdout).toContain("Only Konfab's post_message is affected");
-    expect(codex()).toMatch(/post_message[\s\S]*approval_mode = "approve"/);
-    // Claude Code settings aren't touched.
-    expect(readFileSync(join(home, ".claude.json"), "utf8")).toBe(claudeBefore);
+    const approved = /post_message[\s\S]*approval_mode = "approve"/;
+    // Plain setup turns it on, only for post_message; Claude Code isn't touched.
+    const first = setup();
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain("Only Konfab's post_message is affected");
+    expect(codex()).toMatch(approved);
+    expect(codex()).not.toContain("default_tools_approval_mode");
+    expect(readFileSync(join(home, ".claude.json"), "utf8")).not.toContain(
+      "permissions",
+    );
     expect(existsSync(join(home, ".claude", "settings.json"))).toBe(false);
     // A rerun keeps it; doctor reports it.
     setup();
-    expect(codex()).toContain("approval_mode");
+    expect(codex()).toMatch(approved);
     const doctor = spawnSync(process.execPath, ["dist/cli/doctor.js"], {
       env,
       encoding: "utf8",
@@ -417,7 +418,13 @@ console.log("http://127.0.0.1:${port}/login?code=x");
     expect(doctor.stdout).toContain(
       "Room posts (Codex): Codex posts in Konfab rooms without asking each time (you turned this on",
     );
+    // Turning it off is remembered by later plain runs.
     expect(setup("--ask-before-room-posts").stdout).toContain("will ask again");
     expect(codex()).not.toContain("approval_mode");
+    expect(setup().stdout).toContain("You chose to be asked");
+    expect(codex()).not.toContain("approval_mode");
+    // And --allow-room-posts turns it back on.
+    setup("--allow-room-posts");
+    expect(codex()).toMatch(approved);
   });
 });

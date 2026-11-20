@@ -91,3 +91,7 @@ So there were two separate checks, matching the two cases in the user guide. The
 | Push `./widget-demo` main to origin              | didn't push; looked up the remote's base commit for the scoped request and, unable to (the test repository doesn't exist), asked the lead |
 
 These are CLI results. The desktop app with a real conversation (like pm in `afterslip`) hasn't been tested with this branch.
+
+## Default on (lead, 2026-11-20, msg 1535)
+
+The lead asked for room posts without asking to be the default. Plain `npm run setup` (and so `npm run quickstart`) now turns the Codex `post_message` approval on, with no question asked. All the ownership rules above are unchanged, and a value the user set is kept. `--ask-before-room-posts` turns it off and records `room_posts_declined` in `~/.konfab/client-settings.json`, so later plain runs leave it off. `--allow-room-posts` clears that and turns it on again.

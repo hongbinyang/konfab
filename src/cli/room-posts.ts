@@ -108,18 +108,53 @@ function readJournal(statePath: string): Journal | null {
   }
 }
 
-function writeJournal(statePath: string, journal: Journal | null): void {
-  if (!journal) {
+interface StateFile {
+  codex_post_message?: Journal;
+  /** The lead chose to be asked: setup no longer turns the setting on by default. */
+  room_posts_declined?: boolean;
+}
+
+function readState(statePath: string): StateFile {
+  try {
+    return JSON.parse(readFileSync(statePath, "utf8")) as StateFile;
+  } catch {
+    return {};
+  }
+}
+
+function writeState(statePath: string, state: StateFile): void {
+  if (!state.codex_post_message && !state.room_posts_declined) {
     rmSync(statePath, { force: true });
     return;
   }
   const temporary = `${statePath}.partial`;
-  writeFileSync(
-    temporary,
-    `${JSON.stringify({ codex_post_message: journal }, null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, {
+    mode: 0o600,
+  });
   renameSync(temporary, statePath);
+}
+
+function writeJournal(statePath: string, journal: Journal | null): void {
+  const state = readState(statePath);
+  if (journal) state.codex_post_message = journal;
+  else delete state.codex_post_message;
+  writeState(statePath, state);
+}
+
+/** Whether the lead chose to keep Codex asking before room posts. */
+export function roomPostsDeclined(statePath: string): boolean {
+  return readState(statePath).room_posts_declined === true;
+}
+
+/** Remembers the lead's choice, so setup's default doesn't turn it back on. */
+export function setRoomPostsDeclined(
+  statePath: string,
+  declined: boolean,
+): void {
+  const state = readState(statePath);
+  if (declined) state.room_posts_declined = true;
+  else delete state.room_posts_declined;
+  writeState(statePath, state);
 }
 
 export type RoomPostsStatus =

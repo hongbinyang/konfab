@@ -24,51 +24,39 @@ import {
 } from "./setup-connectors.js";
 import { snapshot } from "./safe-config-files.js";
 import { setupGithubToken } from "../server/github-token.js";
-import { createInterface } from "node:readline/promises";
 import {
   allowRoomPosts,
   askBeforeRoomPosts,
   describeRoomPosts,
   keepOwnershipAfterSetup,
   ownsRoomPosts,
+  roomPostsDeclined,
   roomPostsStatus,
+  setRoomPostsDeclined,
 } from "./room-posts.js";
 
 /**
- * The optional Codex setting for Konfab's post_message. Changed only with a
- * flag or the lead's answer to the question; never silently.
+ * Codex's approval for Konfab's post_message. On by default (the lead's
+ * choice): setup turns it on unless the lead chose to be asked
+ * (`--ask-before-room-posts`, remembered) or Codex already has its own value.
  */
-async function roomPostsStep(codexPath: string, statePath: string) {
-  if (args.includes("--allow-room-posts")) {
-    console.log(allowRoomPosts(codexPath, statePath));
-    return;
-  }
+function roomPostsStep(codexPath: string, statePath: string) {
   if (args.includes("--ask-before-room-posts")) {
+    setRoomPostsDeclined(statePath, true);
     console.log(askBeforeRoomPosts(codexPath, statePath));
     return;
   }
-  const status = roomPostsStatus(codexPath, statePath);
-  if (status.kind !== "ask" || !process.stdin.isTTY || !process.stdout.isTTY) {
-    if (status.kind !== "no_codex") console.log(describeRoomPosts(status));
+  if (args.includes("--allow-room-posts"))
+    setRoomPostsDeclined(statePath, false);
+  if (roomPostsDeclined(statePath)) {
+    const status = roomPostsStatus(codexPath, statePath);
+    if (status.kind !== "no_codex")
+      console.log(
+        `${describeRoomPosts(status)} (You chose to be asked; \`npm run setup -- --allow-room-posts\` changes that.)`,
+      );
     return;
   }
-  const prompt = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  const answer = (
-    await prompt.question(
-      "Let Codex post in Konfab rooms without asking you each time? This changes only Konfab's post_message in Codex's settings; other approvals stay as they are. [Y/n] ",
-    )
-  )
-    .trim()
-    .toLowerCase();
-  prompt.close();
-  console.log(
-    answer === "" || answer === "y" || answer === "yes"
-      ? allowRoomPosts(codexPath, statePath)
-      : "Left as it is. Change it later with `npm run setup -- --allow-room-posts`.",
-  );
+  console.log(allowRoomPosts(codexPath, statePath));
 }
 
 const args = process.argv.slice(2);
@@ -259,7 +247,7 @@ if (args.includes("--github-token")) {
             ownedText,
             codexWrite,
           );
-        await roomPostsStep(paths.codex, roomPostsState);
+        roomPostsStep(paths.codex, roomPostsState);
       }
     }
   } catch (error) {
