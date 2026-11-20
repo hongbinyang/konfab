@@ -427,4 +427,57 @@ console.log("http://127.0.0.1:${port}/login?code=x");
     setup("--allow-room-posts");
     expect(codex()).toMatch(approved);
   });
+
+  describe("an existing Codex setting for Konfab's post_message", () => {
+    const run = (initial: string) => {
+      const home = join(dir, `existing-${initial}`);
+      mkdirSync(join(home, ".codex"), { recursive: true });
+      writeFileSync(join(home, ".claude.json"), "{}\n");
+      // The user's own value, set before Konfab ever touched it.
+      writeFileSync(
+        join(home, ".codex", "config.toml"),
+        `[mcp_servers.konfab.tools.post_message]\napproval_mode = "${initial}"\n`,
+      );
+      const env = {
+        ...process.env,
+        HOME: home,
+        KONFAB_HOME: join(home, ".konfab"),
+        CODEX_HOME: join(home, ".codex"),
+        CLAUDE_CONFIG_DIR: home,
+        KONFAB_ISOLATED: "1",
+      };
+      const setup = (...flags: string[]) =>
+        spawnSync(process.execPath, ["dist/cli/setup.js", ...flags], {
+          env,
+          encoding: "utf8",
+        });
+      const value = () =>
+        /approval_mode = "([a-z]+)"/.exec(
+          readFileSync(join(home, ".codex", "config.toml"), "utf8"),
+        )?.[1];
+      return { setup, value };
+    };
+
+    it("keeps a custom value through the default and the opt-out", () => {
+      const { setup, value } = run("prompt");
+      expect(setup().stdout).toContain(
+        'Codex has its own setting for Konfab\'s post_message (approval_mode = "prompt"); Konfab leaves it as it is.',
+      );
+      expect(value()).toBe("prompt");
+      expect(setup("--ask-before-room-posts").stdout).toContain(
+        'approval_mode = "prompt"',
+      );
+      expect(value()).toBe("prompt");
+    });
+
+    it("keeps an approve value Konfab didn't set through the default and the opt-out", () => {
+      const { setup, value } = run("approve");
+      expect(setup().stdout).toContain("not provably set by Konfab setup");
+      expect(value()).toBe("approve");
+      expect(setup("--ask-before-room-posts").stdout).toContain(
+        "Konfab leaves it; remove [mcp_servers.konfab.tools.post_message]",
+      );
+      expect(value()).toBe("approve");
+    });
+  });
 });

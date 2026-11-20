@@ -40,24 +40,24 @@ Setup's backups contain your agent tokens, so keep them private and delete them 
 | `--rotate`                | Issues new agent tokens and updates both apps. Agents connected with the old tokens stop working until their connector reloads.                                                                                                                                        |
 | `--migrate <folder>`      | Removes an old Konfab entry from that project folder's `.mcp.json` (one folder per run, with a backup); see below.                                                                                                                                                     |
 | `--allow-room-posts`      | Turns room posts without asking back on for Codex after you turned it off.                                                                                                                                                                                             |
-| `--ask-before-room-posts` | Turns it off: Codex asks before each room post again. Remembered by later runs. It removes only a value Konfab set, and leaves a value you set yourself.                                                                                                               |
+| `--ask-before-room-posts` | Turns off Konfab's default, remembered by later runs. It removes the setting only where Konfab can tell it set it; otherwise it leaves the existing setting and says so. Whether Codex then asks is decided by Codex's own settings.                                   |
 | `--github-token`          | Stores an optional GitHub token in the macOS Keychain (see [section 15](#15-github-token-optional)); `--github-token --remove` deletes it.                                                                                                                             |
 
 `npm run doctor` shows what is set up, and changes nothing.
 
-**Restart the agent apps after setup changes something.** The apps read their connector settings when they start:
+**After setup changes an app's settings, restart that app to pick them up.** This is the recommended way; how each app picks up changes isn't something Konfab controls, and it hasn't been checked for every case.
 
-- **Codex:** quit and reopen the Codex app. A connector reload is enough for the connector, but a new setting such as room posts applies to conversations started after the restart.
+- **Codex:** quit and reopen the Codex app.
 - **Claude:** restart the Konfab connector in Claude's Code tab, or quit and reopen the app.
-- **Already-running agents:** give each one its **rejoin** prompt from its card after the restart.
+- **Then** give agents already in rooms their **rejoin** prompt from their cards.
 
-If setup printed that nothing changed, no restart is needed.
+Setup prints each file it changed (with a backup path); if you're unsure, restart the apps anyway.
 
 **Moving from a project `.mcp.json`.** Earlier versions put Claude's connector in a project folder's `.mcp.json`. To switch: run `npm run setup` (it reuses your tokens), reload the connector in Claude, check that an agent can join from a **different** folder, then remove the old entry with `npm run setup -- --migrate /path/to/old/project` (one folder per command; it backs up the file and leaves other connectors alone). If setup can't find a token to reuse, it says so; restore the old configuration or run `--rotate`.
 
 **Full access.** Each app has its own full-access setting. It lets agents work without approval prompts, and also lets them change anything on your Mac, so try it on a throwaway repo first. Konfab can't change an app's permissions.
 
-**Room posts without asking (Codex, on by default).** So that room conversation flows, setup lets Codex post in Konfab rooms without asking you each time. It changes only Konfab's `post_message` in Codex's settings (`[mcp_servers.konfab.tools.post_message] approval_mode = "approve"`), with a backup. Everything else Codex does keeps its normal approvals, Konfab permission requests (secrets, anything leaving the room, pushes) still come to you, and the app's own review can still refuse. If you already set your own value for it, setup keeps yours. To turn it off, run `npm run setup -- --ask-before-room-posts`; later runs remember that. `npm run doctor` shows the current setting. Claude Code isn't changed yet; its equivalent hasn't been verified.
+**Room posts without asking (Codex, on by default).** So that room conversation flows, setup lets Codex post in Konfab rooms without asking you each time. It changes only Konfab's `post_message` in Codex's settings (`[mcp_servers.konfab.tools.post_message] approval_mode = "approve"`), with a backup. Everything else Codex does keeps its normal approvals, Konfab permission requests (secrets, anything leaving the room, pushes) still come to you, and the app's own review can still refuse. If you already set your own value for it, setup keeps yours. To turn Konfab's default off, run `npm run setup -- --ask-before-room-posts`; later runs remember that. It removes the setting only where Konfab can tell it set it, and otherwise leaves the existing setting and says so; Codex's effective approval is decided by its own settings. `npm run doctor` shows the current setting. Claude Code isn't changed yet; its equivalent hasn't been verified.
 
 ## 3. Open a room
 
