@@ -2365,7 +2365,7 @@ export class KonfabService {
       "anywhere outside this room to anyone other than Anthropic, OpenAI, Meta, or xAI,",
       "including pushes to a GitHub repo.",
       "If your app refuses a Konfab tool call, report it once with report_status",
-      "(kind blocked: the tool name and the app's message, leaving out credentials",
+      '(kind blocked, detail "<tool name>: <the app\'s message>", leaving out credentials',
       "and protected content), tell me here, and wait for my answer.",
     ].join(" ");
   }

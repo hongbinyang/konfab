@@ -3185,6 +3185,9 @@ export function BlockedReport({
   onDismiss: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // Only a report that names post_message gets wording about room posts;
+  // anything else is shown as reported, with no guessed approval.
+  const aboutPosting = /^post_message\b/.test(detail ?? "");
   const suggestion = `I approve you posting your reply to the Konfab room "${roomName}".`;
   return (
     <div className="warning-text blocked-report" role="status">
@@ -3193,23 +3196,28 @@ export function BlockedReport({
         {detail ? `: ${detail}` : "."}
       </p>
       <p className="muted">
-        Answer in {agentName}'s own conversation in its app, not here. The app
-        decides; this report comes from the agent.
+        Answer in {agentName}'s own conversation in its app, not here; check the
+        app for what it needs. The app decides, and this report comes from the
+        agent.
       </p>
       <p className="muted">
-        Suggested wording: "{suggestion}"{" "}
-        <button
-          type="button"
-          className="secondary"
-          onClick={() =>
-            void navigator.clipboard.writeText(suggestion).then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            })
-          }
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>{" "}
+        {aboutPosting && (
+          <>
+            Suggested wording, not guaranteed to be accepted: "{suggestion}"{" "}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() =>
+                void navigator.clipboard.writeText(suggestion).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+              }
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>{" "}
+          </>
+        )}
         <button type="button" className="secondary" onClick={onDismiss}>
           Dismiss
         </button>

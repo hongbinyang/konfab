@@ -29,6 +29,8 @@ import {
   allowRoomPosts,
   askBeforeRoomPosts,
   describeRoomPosts,
+  keepOwnershipAfterSetup,
+  ownsRoomPosts,
   roomPostsStatus,
 } from "./room-posts.js";
 
@@ -221,6 +223,8 @@ if (args.includes("--github-token")) {
           );
         } else console.log("All agents already have tokens; no changes made.");
       } else {
+        const roomPostsState = join(home, "client-settings.json");
+        const ownedRoomPosts = ownsRoomPosts(paths.codex, roomPostsState);
         const backups = installConnectors({
           paths,
           service,
@@ -242,7 +246,9 @@ if (args.includes("--github-token")) {
         console.log(
           "Existing project connector entries are unchanged; migrate a known project only after verifying the user-level connection.",
         );
-        await roomPostsStep(paths.codex, join(home, "client-settings.json"));
+        if (ownedRoomPosts)
+          keepOwnershipAfterSetup(paths.codex, roomPostsState);
+        await roomPostsStep(paths.codex, roomPostsState);
       }
     }
   } catch (error) {

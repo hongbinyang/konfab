@@ -3,6 +3,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,8 @@ import {
 import {
   allowRoomPosts,
   askBeforeRoomPosts,
+  keepOwnershipAfterSetup,
+  ownsRoomPosts,
   roomPostsStatus,
 } from "../../src/cli/room-posts.js";
 
@@ -42,85 +45,123 @@ describe("Codex approval for Konfab's post_message", () => {
     );
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-  const value = () => codexPostApproval(readFileSync(codex, "utf8"));
+  const text = () => readFileSync(codex, "utf8");
+  const value = () => codexPostApproval(text());
+  /** A write by someone else: new contents and a new modification time. */
+  let tick = 0;
+  const userWrites = (contents: string) => {
+    writeFileSync(codex, contents);
+    tick += 5;
+    const later = new Date(Date.now() + tick * 1000);
+    utimesSync(codex, later, later);
+  };
 
-  it("is changed only for post_message, kept across a setup rerun, and undone exactly", () => {
+  it("is changed only for post_message and undone while the file is still Konfab's", () => {
     expect(roomPostsStatus(codex, state)).toEqual({ kind: "ask" });
     expect(allowRoomPosts(codex, state)).toContain(
       "Only Konfab's post_message is affected",
     );
     expect(value()).toBe("approve");
-    const text = readFileSync(codex, "utf8");
-    expect(text).toContain("# mine");
-    expect(text).toContain("[mcp_servers.other]");
-    expect(text).not.toContain("default_tools_approval_mode");
-    // Setup rewrites the connector entry; the approval stays.
+    expect(text()).toContain("# mine");
+    expect(text()).toContain("[mcp_servers.other]");
+    expect(text()).not.toContain("default_tools_approval_mode");
+    expect(ownsRoomPosts(codex, state)).toBe(true);
+    // Running it again changes nothing.
+    const before = text();
+    allowRoomPosts(codex, state);
+    expect(text()).toBe(before);
+    expect(askBeforeRoomPosts(codex, state)).toContain("will ask again");
+    expect(value()).toBeUndefined();
+    expect(text()).toContain("# mine");
+    expect(readdirSync(dir)).not.toContain("client-settings.json");
+  });
+
+  it("stays Konfab's across Konfab's own setup rewrite of the connector entry", () => {
+    allowRoomPosts(codex, state);
+    const owned = ownsRoomPosts(codex, state);
     writeFileSync(
       codex,
-      configureCodex(text, {
+      configureCodex(text(), {
         ...entry,
         env: { ...entry.env, KONFAB_TOKEN: "t2" },
       }),
     );
+    if (owned) keepOwnershipAfterSetup(codex, state);
     expect(value()).toBe("approve");
     expect(roomPostsStatus(codex, state)).toEqual({
       kind: "allowed_by_konfab",
     });
-    // Running it again changes nothing.
-    const before = readFileSync(codex, "utf8");
-    allowRoomPosts(codex, state);
-    expect(readFileSync(codex, "utf8")).toBe(before);
-    expect(askBeforeRoomPosts(codex, state)).toContain("will ask again");
-    expect(value()).toBeUndefined();
-    expect(readFileSync(codex, "utf8")).toContain("# mine");
-    expect(readdirSync(dir)).not.toContain("client-settings.json");
   });
 
-  it("keeps a value the user chose, before or after opting in", () => {
-    writeFileSync(
-      codex,
-      setCodexPostApproval(readFileSync(codex, "utf8"), "prompt"),
-    );
+  it("keeps a value the user chose before opting in, or after", () => {
+    userWrites(setCodexPostApproval(text(), "prompt"));
     expect(allowRoomPosts(codex, state)).toContain('approval_mode = "prompt"');
     expect(value()).toBe("prompt");
-    // Opt in, then the user changes it: undo leaves their value.
-    writeFileSync(
-      codex,
-      setCodexPostApproval(readFileSync(codex, "utf8"), undefined),
-    );
+    userWrites(setCodexPostApproval(text(), undefined));
     allowRoomPosts(codex, state);
-    writeFileSync(
-      codex,
-      setCodexPostApproval(readFileSync(codex, "utf8"), "writes"),
-    );
-    expect(askBeforeRoomPosts(codex, state)).toContain("leaves your value");
+    userWrites(setCodexPostApproval(text(), "writes"));
+    expect(askBeforeRoomPosts(codex, state)).toContain("Konfab leaves it");
     expect(value()).toBe("writes");
   });
 
-  it("leaves an approval Konfab didn't set, and finishes an interrupted opt-in", () => {
-    writeFileSync(
-      codex,
-      setCodexPostApproval(readFileSync(codex, "utf8"), "approve"),
-    );
+  it("leaves a value that was changed away and back after Konfab set it", () => {
+    allowRoomPosts(codex, state);
+    userWrites(setCodexPostApproval(text(), "prompt"));
+    userWrites(setCodexPostApproval(text(), "approve"));
     expect(roomPostsStatus(codex, state)).toEqual({
       kind: "allowed_elsewhere",
     });
-    expect(askBeforeRoomPosts(codex, state)).toContain("Konfab didn't set it");
-    expect(value()).toBe("approve");
-    // Interrupted after recording the intent, before writing the config.
-    writeFileSync(
-      codex,
-      setCodexPostApproval(readFileSync(codex, "utf8"), undefined),
+    expect(askBeforeRoomPosts(codex, state)).toContain(
+      "Konfab can't prove it set this value",
     );
+    expect(value()).toBe("approve");
+  });
+
+  it("leaves the value when any other edit touched the file after Konfab's write", () => {
+    allowRoomPosts(codex, state);
+    userWrites(text().replace('model = "x"', 'model = "y"'));
+    expect(askBeforeRoomPosts(codex, state)).toContain(
+      "Konfab can't prove it set this value",
+    );
+    expect(value()).toBe("approve");
+  });
+
+  it("treats an identical value added after an interrupted opt-in as the user's", () => {
+    // Interrupted after journalling the intent, before writing the config.
+    const original = text();
+    allowRoomPosts(codex, state);
+    const journal = JSON.parse(readFileSync(state, "utf8"));
+    userWrites(original);
     writeFileSync(
       state,
-      JSON.stringify({ codex_post_message: { state: "pending", path: codex } }),
+      JSON.stringify({
+        codex_post_message: { ...journal.codex_post_message, state: "pending" },
+      }),
+    );
+    // The user independently adds exactly what Konfab would have written.
+    userWrites(setCodexPostApproval(original, "approve"));
+    expect(allowRoomPosts(codex, state)).toContain(
+      "earlier Konfab setup was interrupted",
+    );
+    expect(ownsRoomPosts(codex, state)).toBe(false);
+    expect(askBeforeRoomPosts(codex, state)).toContain("Konfab leaves it");
+    expect(value()).toBe("approve");
+  });
+
+  it("finishes an interrupted opt-in when the file never changed", () => {
+    const original = text();
+    allowRoomPosts(codex, state);
+    const journal = JSON.parse(readFileSync(state, "utf8"));
+    userWrites(original);
+    writeFileSync(
+      state,
+      JSON.stringify({
+        codex_post_message: { ...journal.codex_post_message, state: "pending" },
+      }),
     );
     allowRoomPosts(codex, state);
     expect(value()).toBe("approve");
-    expect(
-      JSON.parse(readFileSync(state, "utf8")).codex_post_message.state,
-    ).toBe("applied");
+    expect(ownsRoomPosts(codex, state)).toBe(true);
   });
 
   it("does nothing without Codex", () => {

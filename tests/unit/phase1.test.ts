@@ -132,7 +132,7 @@ describe("Phase 1 behavior", () => {
         "Ordinary replies and work in this room need no permission request. Secrets, credentials and personal data still need request_permission, even in the room, and so does sending file contents, conversation content, secrets, or personal data anywhere outside this room to anyone other than Anthropic, OpenAI, Meta, or xAI, including pushes to a GitHub repo.",
       );
       expect(prompt).toContain(
-        "If your app refuses a Konfab tool call, report it once with report_status (kind blocked: the tool name and the app's message, leaving out credentials and protected content), tell me here, and wait for my answer.",
+        'If your app refuses a Konfab tool call, report it once with report_status (kind blocked, detail "<tool name>: <the app\'s message>", leaving out credentials and protected content), tell me here, and wait for my answer.',
       );
 
       service.postUserMessage(ROOM, "@claude hi");
