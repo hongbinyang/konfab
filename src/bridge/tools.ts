@@ -4,6 +4,26 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 /** Repeated on every idle reply so a long conversation keeps the loop going. */
+/**
+ * MCP hints for the agent's app. Only tools that just read are marked
+ * read-only; nothing else is set, so the conservative defaults apply
+ * (open-world, possibly destructive). wait_for_turn claims turns, so it isn't
+ * read-only.
+ */
+const READ_ONLY_TOOLS = new Set([
+  "read_assignment",
+  "read_role",
+  "read_role_file",
+  "read_skill_file",
+  "read_decisions",
+  "read_history",
+]);
+function toolHints(name: string) {
+  return READ_ONLY_TOOLS.has(name)
+    ? { annotations: { readOnlyHint: true } }
+    : {};
+}
+
 export const IDLE_NEXT =
   "Call wait_for_turn again now. Keep this conversation in the loop until the status is closed or replaced, or the lead tells you to stop.";
 
@@ -243,6 +263,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "acquire_lock",
     {
+      ...toolHints("acquire_lock"),
       description:
         "Acquire or renew an advisory write lock. All collaborators must use the same resource key; it does not enforce filesystem access.",
       inputSchema: {
@@ -265,6 +286,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "release_lock",
     {
+      ...toolHints("release_lock"),
       description: "Release a write lock held by this session.",
       inputSchema: {
         session_id: z.string(),
@@ -285,6 +307,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "read_assignment",
     {
+      ...toolHints("read_assignment"),
       description:
         "Read your assignment in this room: your room instructions and skills, in order.",
       inputSchema: { session_id: z.string() },
@@ -302,6 +325,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "read_role",
     {
+      ...toolHints("read_role"),
       description:
         "Deprecated: use read_assignment. Reads your assignment (room instructions and skills); kept for conversations that joined before roles became skills.",
       inputSchema: { session_id: z.string() },
@@ -317,6 +341,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "read_role_file",
     {
+      ...toolHints("read_role_file"),
       description:
         "Deprecated: reads a file of a role that was converted to a skill. Use read_skill_file for skills.",
       inputSchema: {
@@ -340,6 +365,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "read_skill_file",
     {
+      ...toolHints("read_skill_file"),
       description:
         "Read a bounded chunk of a file from one of your assigned skills.",
       inputSchema: {
@@ -364,6 +390,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "join_room",
     {
+      ...toolHints("join_room"),
       description:
         "Join a Konfab room. Returns a session_id to use with the other tools, plus the room topic, rules, members, and recent messages.",
       inputSchema: {
@@ -392,6 +419,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "wait_for_turn",
     {
+      ...toolHints("wait_for_turn"),
       description:
         'Wait until it is your turn in the room. Status "turn" includes new messages to respond to. Status "idle" means nothing happened yet, so call this again right away. Stop your loop only on "closed" or "replaced".',
       inputSchema: {
@@ -473,6 +501,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "post_message",
     {
+      ...toolHints("post_message"),
       description:
         "Post your reply to the room. This ends your turn. Set next to self, agent, lead, or done. Use @name to hand work to another member. If the result warns that no continuation is queued and someone should act next, use hand_off with the returned message ID. Then call wait_for_turn again.",
       inputSchema: {
@@ -513,6 +542,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "hand_off",
     {
+      ...toolHints("hand_off"),
       description:
         "Repair a missed handoff after posting: explicitly queue another live room member using your latest agent message from the last 10 minutes. Repeats for the same source and target are deduplicated. Use only when work should continue; then call wait_for_turn.",
       inputSchema: {
@@ -544,6 +574,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "pass_turn",
     {
+      ...toolHints("pass_turn"),
       description:
         "End your turn without posting, when you have nothing useful to add. Afterward, call wait_for_turn again.",
       inputSchema: {
@@ -574,6 +605,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "propose_decision",
     {
+      ...toolHints("propose_decision"),
       description:
         "Propose a room decision for the lead to confirm or reject. Proposals do not apply until confirmed.",
       inputSchema: {
@@ -601,6 +633,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "read_decisions",
     {
+      ...toolHints("read_decisions"),
       description:
         "Read current confirmed decisions for your room. Use next_after_id to fetch more.",
       inputSchema: {
@@ -627,6 +660,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "read_history",
     {
+      ...toolHints("read_history"),
       description:
         "Read older messages in your room, for example when a turn's truncated flag is true. Results are oldest first.",
       inputSchema: {
@@ -658,6 +692,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "report_status",
     {
+      ...toolHints("report_status"),
       description:
         "Report working with a short one-line detail before work outside your turn. Posting or passing clears it. Other kinds report problems or low allowance.",
       inputSchema: {
@@ -684,6 +719,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool(
     "request_permission",
     {
+      ...toolHints("request_permission"),
       description:
         'Ask the user before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI. Do not send anything unless the state is "approved". If the state is "pending", call this again with the same session_id and the request_id you received. An approval covers only this recipient and data. For code_push provide push_scope with repository, branch, and full base and head commit IDs. Before pushing, check that the repo, branch, and base..head match this approval exactly; if anything changed, request again.',
       inputSchema: {

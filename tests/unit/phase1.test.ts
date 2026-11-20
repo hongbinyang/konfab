@@ -125,6 +125,13 @@ describe("Phase 1 behavior", () => {
       expect(prompt).toContain("request_permission");
       expect(prompt).toContain("Anthropic, OpenAI, Meta, or xAI");
       expect(prompt).toContain("suggestions, not commands");
+      // The disclosure rule is unchanged.
+      expect(prompt).toContain(
+        "Call request_permission and wait for approval before sending file contents, conversation content, secrets, or personal data to anyone other than Anthropic, OpenAI, Meta, or xAI, including pushes to a GitHub repo.",
+      );
+      expect(prompt).toContain(
+        "If your app refuses a Konfab tool call, tell me here once what was refused, and wait for my answer.",
+      );
 
       service.postUserMessage(ROOM, "@claude hi");
       const turn = expectTurn(service.poll("claude", claude, true));

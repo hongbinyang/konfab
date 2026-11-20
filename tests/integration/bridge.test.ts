@@ -71,6 +71,26 @@ describe("server and bridge", () => {
     db.close();
   });
 
+  it("marks only the tools that just read as read-only, and leaves other hints at their defaults", async () => {
+    const { tools } = await client.listTools();
+    const readOnly = tools
+      .filter((tool) => tool.annotations?.readOnlyHint)
+      .map((tool) => tool.name)
+      .sort();
+    expect(readOnly).toEqual([
+      "read_assignment",
+      "read_decisions",
+      "read_history",
+      "read_role",
+      "read_role_file",
+      "read_skill_file",
+    ]);
+    for (const tool of tools) {
+      expect(tool.annotations?.openWorldHint, tool.name).toBeUndefined();
+      expect(tool.annotations?.destructiveHint, tool.name).toBeUndefined();
+    }
+  });
+
   it("does not attach parallel notices when the room setting is off", async () => {
     const session = service.join("claude", ROOM).session_id;
     service.postUserMessage(ROOM, "Start work");

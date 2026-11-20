@@ -2361,6 +2361,8 @@ export class KonfabService {
       "Call request_permission and wait for approval before sending file contents,",
       "conversation content, secrets, or personal data to anyone other than",
       "Anthropic, OpenAI, Meta, or xAI, including pushes to a GitHub repo.",
+      "If your app refuses a Konfab tool call, tell me here once what was refused,",
+      "and wait for my answer.",
     ].join(" ");
   }
 
