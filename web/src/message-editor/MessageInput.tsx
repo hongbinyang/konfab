@@ -99,11 +99,36 @@ export function MessageInput({
           );
         onChange(input.value);
       },
-      clear: () => {
-        if (showRich) rich.current?.clear();
-        else onChange("");
+      take: () => {
+        if (showRich && rich.current) return rich.current.take();
+        const text = textarea.current?.value ?? "";
+        onChange("");
+        return { text };
       },
-      ready: () => (showRich ? (rich.current?.ready() ?? true) : true),
+      putBack: (draft) => {
+        if (showRich) return rich.current?.putBack(draft);
+        const input = textarea.current;
+        if (!input) return;
+        const apply = () => {
+          const { value: since, selectionStart, selectionEnd } = input;
+          const before = since ? `${draft.text}\n` : draft.text;
+          onChange(before + since);
+          // After the value is set, keep the cursor where it was in the text.
+          setTimeout(() =>
+            input.setSelectionRange(
+              before.length + selectionStart,
+              before.length + selectionEnd,
+            ),
+          );
+        };
+        if (composing.current)
+          input.addEventListener("compositionend", () => setTimeout(apply), {
+            once: true,
+          });
+        else apply();
+      },
+      ready: () =>
+        showRich ? (rich.current?.ready() ?? true) : !composing.current,
     }),
     [showRich, onChange],
   );

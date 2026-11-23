@@ -282,22 +282,37 @@ export function createEditor(element: HTMLElement, options: EditorOptions) {
       options.onChange();
     },
   });
+  /** Now, or once the current composition has ended. */
+  const whenSettled = (apply: () => void) => {
+    const run = () => {
+      if (!view.isDestroyed) apply();
+    };
+    if (view.composing)
+      view.dom.addEventListener("compositionend", () => setTimeout(run, 60), {
+        once: true,
+      });
+    else run();
+  };
   return {
     view,
-    /** Replaces everything and its undo history, never during a composition. */
-    reset(doc: DocNode = literal("")) {
-      const apply = () => {
-        if (view.isDestroyed) return;
-        view.updateState(fresh(doc));
-        options.onChange();
-      };
-      if (view.composing)
-        view.dom.addEventListener(
-          "compositionend",
-          () => setTimeout(apply, 60),
-          { once: true },
-        );
-      else apply();
+    /** Empties the box and its undo history, and returns what was in it. */
+    take(): DocNode {
+      const { doc } = view.state;
+      view.updateState(fresh(literal("")));
+      options.onChange();
+      return doc;
+    },
+    /** Puts a draft back, before anything written since. */
+    putBack(doc: DocNode) {
+      whenSettled(() => {
+        const { state } = view;
+        const change = state.tr.setMeta("addToHistory", false);
+        if (isPlainEmpty(state.doc)) {
+          change.replaceWith(0, state.doc.content.size, doc.content);
+          change.setSelection(TextSelection.atEnd(change.doc));
+        } else change.insert(0, doc.content);
+        view.dispatch(change);
+      });
     },
   };
 }

@@ -1302,6 +1302,7 @@ function Composer({
   const [body, setBody] = useState("");
   const messageRef = useRef<EditorHandle>(null);
   const sending = useRef(false);
+  const [waiting, setWaiting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -1342,7 +1343,16 @@ function Composer({
     if (sending.current || uploading || (!body.trim() && !attachments.length))
       return;
     if (!checked && messageRef.current?.ready() === false) return;
+    const draft = messageRef.current?.take();
+    if (!draft) return;
+    const files = attachments;
+    // The draft leaves the box now, so anything written or attached while it
+    // is being sent is a new draft. If it can't be sent, it comes back first.
+    setAttachments((current) =>
+      current.filter((item) => !files.some(({ id }) => id === item.id)),
+    );
     sending.current = true;
+    setWaiting(true);
     void act(async () => {
       let result: { unreachable?: Unreachable[] };
       try {
@@ -1350,16 +1360,22 @@ function Composer({
           `/api/rooms/${roomId}/messages`,
           {
             method: "POST",
-            body: { body, attachment_ids: attachments.map((item) => item.id) },
+            body: {
+              body: draft.text,
+              attachment_ids: files.map((item) => item.id),
+            },
           },
         );
+      } catch (error) {
+        messageRef.current?.putBack(draft);
+        setAttachments((current) => [...files, ...current]);
+        throw error;
       } finally {
         // Before the page refreshes, so the next message can be sent at once.
         sending.current = false;
+        setWaiting(false);
       }
       setUnreachable(result.unreachable ?? []);
-      messageRef.current?.clear();
-      setAttachments([]);
       onSent();
     });
   };
@@ -1446,9 +1462,17 @@ function Composer({
       >
         📎
       </button>
-      <button type="button" onClick={() => send()} disabled={uploading}>
+      <button
+        type="button"
+        onClick={() => send()}
+        disabled={uploading}
+        aria-disabled={waiting}
+      >
         Send
       </button>
+      <p className="composer-sending" role="status">
+        {waiting ? "Sending…" : ""}
+      </p>
     </div>
   );
 }

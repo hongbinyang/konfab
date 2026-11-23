@@ -46,7 +46,10 @@ async function send(
   );
   await how();
   const sent = await request;
-  if ((await sent.response())?.ok()) await expect(box(page)).toHaveText("");
+  if ((await sent.response())?.ok()) {
+    await expect(box(page)).toHaveText("");
+    await expect(page.getByText("Sending…")).toHaveCount(0);
+  }
   return sent.postDataJSON() as { body: string; attachment_ids: string[] };
 }
 
@@ -465,3 +468,134 @@ test("fits a phone-width page", async ({ page }, info) => {
     await page.evaluate("document.documentElement.scrollWidth"),
   ).toBeLessThanOrEqual(375);
 });
+
+for (const mode of ["rich", "plain"] as const)
+  for (const outcome of ["succeeds", "fails"] as const)
+    test(`text and files added during a slow send are kept when it ${outcome} (${mode} box)`, async ({
+      page,
+    }, info) => {
+      await open(page, info.project.name);
+      if (mode === "plain") {
+        await page.getByRole("button", { name: "Plain text" }).click();
+        await expect(page.locator("textarea#message")).toBeFocused();
+      }
+      const text = () =>
+        page.evaluate<string>(
+          `(() => { const box = document.getElementById("message"); return box.value ?? [...box.children].map((line) => line.textContent).join("\\n"); })()`,
+        );
+      await paste(page, null, "", true);
+      await expect(page.getByLabel("Remove shot.png")).toHaveCount(1);
+      await page.keyboard.type("first **one**");
+
+      let answer = () => {};
+      const held = new Promise<void>((done) => {
+        answer = done;
+      });
+      const bodies: { body: string; attachment_ids: string[] }[] = [];
+      await page.route(/\/messages$/, async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        bodies.push(route.request().postDataJSON() as (typeof bodies)[number]);
+        if (bodies.length > 1) return route.continue();
+        await held;
+        if (outcome === "fails")
+          return route.fulfill({ status: 500, body: '{"error":"no"}' });
+        return route.continue();
+      });
+      await page.keyboard.press(`${MOD}+Enter`);
+      await expect(page.getByText("Sending…")).toBeVisible();
+      await expect(page.getByLabel("Remove shot.png")).toHaveCount(0);
+      expect(await text()).toBe("");
+
+      // Written, attached and even sent again while the first is on its way.
+      await page.keyboard.type("second");
+      await paste(page, null, "", true);
+      await expect(page.getByLabel("Remove shot.png")).toHaveCount(1);
+      await page.keyboard.press(`${MOD}+Enter`);
+      await page.waitForTimeout(100);
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]?.body).toBe("first **one**");
+      expect(bodies[0]?.attachment_ids).toHaveLength(1);
+      expect(await text()).toBe("second");
+
+      answer();
+      await expect(page.getByText("Sending…")).toHaveCount(0);
+      const kept = outcome === "fails";
+      await expect(page.getByLabel("Remove shot.png")).toHaveCount(
+        kept ? 2 : 1,
+      );
+      const first = mode === "rich" ? "first one" : "first **one**";
+      await expect.poll(text).toBe(kept ? `${first}\nsecond` : "second");
+      // The cursor is still where it was.
+      await page.keyboard.type("!");
+      await expect.poll(text).toBe(kept ? `${first}\nsecond!` : "second!");
+
+      await send(page);
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]?.body).toBe(kept ? "first **one**\nsecond!" : "second!");
+      expect(bodies[1]?.attachment_ids).toHaveLength(kept ? 2 : 1);
+      expect(new Set(bodies[1]?.attachment_ids).size).toBe(kept ? 2 : 1);
+      if (!kept)
+        expect(bodies[1]?.attachment_ids).not.toEqual(
+          bodies[0]?.attachment_ids,
+        );
+    });
+
+test("formats a reviewed message shows come back if it can't be sent", async ({
+  page,
+}, info) => {
+  await open(page, info.project.name);
+  await page.keyboard.type("foo!bar");
+  await page.keyboard.press("Home");
+  for (let count = 0; count < 4; count += 1)
+    await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press(`${MOD}+b`);
+  await page.route(/\/messages$/, (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 500, body: '{"error":"no"}' })
+      : route.continue(),
+  );
+  await page.keyboard.press(`${MOD}+Enter`);
+  await page.getByRole("button", { name: "Send as shown here" }).click();
+  await expect(box(page).locator("strong")).toHaveText("foo!");
+});
+
+for (const mode of ["rich", "plain"] as const)
+  test(`a send that fails during a composition puts the draft back after it (${mode} box)`, async ({
+    page,
+  }, info) => {
+    await open(page, info.project.name);
+    if (mode === "plain") {
+      await page.getByRole("button", { name: "Plain text" }).click();
+      await expect(page.locator("textarea#message")).toBeFocused();
+    }
+    let answer = () => {};
+    const held = new Promise<void>((done) => {
+      answer = done;
+    });
+    await page.route(/\/messages$/, async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      await held;
+      return route.fulfill({ status: 500, body: '{"error":"no"}' });
+    });
+    await page.keyboard.type("first");
+    await page.keyboard.press(`${MOD}+Enter`);
+    await expect(page.getByText("Sending…")).toBeVisible();
+    const session = await page.context().newCDPSession(page);
+    const compose = (text: string) =>
+      session.send("Input.imeSetComposition", {
+        text,
+        selectionStart: text.length,
+        selectionEnd: text.length,
+      });
+    await compose("に");
+    await page.waitForTimeout(50);
+    answer();
+    await expect(page.getByText("Sending…")).toHaveCount(0);
+    await compose("にほ");
+    await page.waitForTimeout(50);
+    await session.send("Input.insertText", { text: "日本" });
+    await page.unroute(/\/messages$/);
+    await page.waitForTimeout(200);
+    await page.keyboard.type("!");
+    expect((await send(page)).body).toBe("first\n日本!");
+  });

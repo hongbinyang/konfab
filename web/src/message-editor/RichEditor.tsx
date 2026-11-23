@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import type { Node as DocNode } from "prosemirror-model";
 import { TextSelection } from "prosemirror-state";
 import { RichText } from "../RichText";
 import { formats, isActive, type Format } from "./commands";
@@ -27,10 +28,15 @@ import { createEditor, mac } from "./editor";
 export type EditorHandle = {
   focus: () => void;
   insert: (text: string) => void;
-  clear: () => void;
-  /** False if a review was opened because the message would look different. */
+  /** Empties the box and returns what was in it. */
+  take: () => Draft;
+  /** Puts a draft back, before anything written since. */
+  putBack: (draft: Draft) => void;
+  /** False if it isn't time to send, or a review was opened because the message would look different. */
   ready: () => boolean;
 };
+/** `doc` keeps formats that the text alone can't show. */
+export type Draft = { text: string; doc?: DocNode };
 
 type Props = {
   initial: string;
@@ -174,8 +180,11 @@ export default function RichEditor({
   }, []);
 
   const check = useCallback((): boolean => {
-    const doc = editor.current?.view.state.doc;
-    if (!doc || compare(doc) !== "differs") return true;
+    const view = editor.current?.view;
+    if (!view) return true;
+    if (view.composing) return false;
+    const { doc } = view.state;
+    if (compare(doc) !== "differs") return true;
     setReview({ text: toText(doc), lost: lostFormats(doc) });
     return false;
   }, []);
@@ -190,7 +199,12 @@ export default function RichEditor({
         view.dispatch(view.state.tr.insertText(value).scrollIntoView());
         view.focus();
       },
-      clear: () => editor.current?.reset(),
+      take: () => {
+        const doc = editor.current?.take();
+        return { text: doc ? toText(doc) : "", doc };
+      },
+      putBack: ({ text: value, doc }) =>
+        editor.current?.putBack(doc ?? fromText(value)),
       ready: check,
     }),
     [check],
