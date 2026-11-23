@@ -91,23 +91,26 @@ You are always the lead: agents are told to follow your instructions and decisio
 
 Also under **Shortcuts** below the message box. On Windows and Linux, use Ctrl for ⌘ and Shift for ⇧.
 
-| Format                         | Keys    | Or type                                 |
-| ------------------------------ | ------- | --------------------------------------- |
-| Bold                           | ⌘B      | `**text**`                              |
-| Italic                         | ⌘I      | `_text_`                                |
-| Strikethrough                  | ⌘⇧X     | `~~text~~`                              |
-| Code                           | ⌘E      | `` `text` ``                            |
-| Link                           | ⌘K      |                                         |
-| Bulleted list                  | ⌘⇧8     | `-` and a space at the start of a line  |
-| Numbered list                  | ⌘⇧7     | `1.` and a space at the start of a line |
-| Quote                          | ⌘⇧9     | `>` and a space at the start of a line  |
-| Nest a list item               | ⌘]      |                                         |
-| Un-nest a list item            | ⌘[      |                                         |
-| New line in the same list item | ⇧Enter  |                                         |
-| Undo, redo                     | ⌘Z, ⌘⇧Z |                                         |
-| Send                           | ⌘Enter  |                                         |
+| Format                                        | Keys    | Or type                                 |
+| --------------------------------------------- | ------- | --------------------------------------- |
+| Bold                                          | ⌘B      | `**text**`                              |
+| Italic                                        | ⌘I      | `_text_`                                |
+| Strikethrough                                 | ⌘⇧X     | `~~text~~`                              |
+| Code                                          | ⌘E      | `` `text` ``                            |
+| Link                                          | ⌘K      |                                         |
+| Bulleted list                                 | ⌘⇧8     | `-` and a space at the start of a line  |
+| Numbered list                                 | ⌘⇧7     | `1.` and a space at the start of a line |
+| Quote                                         | ⌘⇧9     | `>` and a space at the start of a line  |
+| Normal text                                   | ⌘⇧0     |                                         |
+| Leave a list or quote at the end              | ↓       |                                         |
+| Leave bold, code or another format at the end | →       |                                         |
+| Nest a list item                              | ⌘]      |                                         |
+| Un-nest a list item                           | ⌘[      |                                         |
+| New line in the same list item                | ⇧Enter  |                                         |
+| Undo, redo                                    | ⌘Z, ⌘⇧Z |                                         |
+| Send                                          | ⌘Enter  |                                         |
 
-Press the same keys again to remove a format (for a link, choose **Remove link**). Ctrl+Y or ⌘Y also redoes. Backspace right after typing a mark takes the formatting back. Enter on an empty list item or quote line leaves it. Tab leaves the box.
+Press the same keys again to remove a format (for a link, choose **Remove link**). Ctrl+Y or ⌘Y also redoes. Backspace right after typing a mark takes the formatting back. Enter on an empty list item or quote line leaves it, one level at a time; **Normal text** leaves everything at once. Tab leaves the box.
 
 ## 5. Skills
 

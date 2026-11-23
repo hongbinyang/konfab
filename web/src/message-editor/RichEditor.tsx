@@ -253,7 +253,11 @@ export default function RichEditor({
             data-format={format.label}
             tabIndex={index ? -1 : 0}
             aria-label={format.label}
-            aria-pressed={active.includes(format.label)}
+            aria-pressed={
+              format.mark || format.block
+                ? active.includes(format.label)
+                : undefined
+            }
             title={`${format.label} (${shortcut(format.key)})`}
             // Keep the text selected.
             onMouseDown={(event) => event.preventDefault()}
@@ -408,6 +412,8 @@ function Shortcuts() {
       shortcut(format.key),
       format.typed ?? "",
     ]),
+    ["Leave a list or quote at the end", "↓", ""],
+    ["Leave bold, code or another format at the end", "→", ""],
     ["Nest a list item", shortcut("Mod-]"), ""],
     ["Un-nest a list item", shortcut("Mod-["), ""],
     ["Undo", shortcut("Mod-z"), ""],

@@ -188,7 +188,9 @@ test("a message that would look different is reviewed before it is sent", async 
   });
   const write = async () => {
     await page.keyboard.type("foo!bar");
-    await page.keyboard.press("Home");
+    // Home and End scroll the page on a Mac when it is long enough.
+    for (let count = 0; count < "foo!bar".length; count += 1)
+      await page.keyboard.press("ArrowLeft");
     for (let count = 0; count < 4; count += 1)
       await page.keyboard.press("Shift+ArrowRight");
     await page.keyboard.press(`${MOD}+b`);
@@ -372,6 +374,9 @@ test("the formatting menu is optional and remembered, and every shortcut is list
     "Bulleted list",
     "Numbered list",
     "Quote",
+    "Normal text",
+    "Leave a list or quote at the end",
+    "Leave bold, code or another format at the end",
     "Nest a list item",
     "Un-nest a list item",
     "Undo",
@@ -545,7 +550,9 @@ test("formats a reviewed message shows come back if it can't be sent", async ({
 }, info) => {
   await open(page, info.project.name);
   await page.keyboard.type("foo!bar");
-  await page.keyboard.press("Home");
+  // Home and End scroll the page on a Mac when it is long enough.
+  for (let count = 0; count < "foo!bar".length; count += 1)
+    await page.keyboard.press("ArrowLeft");
   for (let count = 0; count < 4; count += 1)
     await page.keyboard.press("Shift+ArrowRight");
   await page.keyboard.press(`${MOD}+b`);
@@ -664,7 +671,6 @@ for (const mode of ["rich", "plain"] as const) {
     await page.keyboard.type("first");
     await page.keyboard.press(`${MOD}+Enter`);
     await expect.poll(() => bodies.length).toBe(1);
-    await page.keyboard.press("End");
     await page.keyboard.type("second");
     await paste(page, null, "", true);
     await expect(chips(page)).toHaveCount(1);
@@ -764,4 +770,90 @@ test("closing the page asks first only while a message is being sent", async ({
   await page.close({ runBeforeUnload: true });
   await closed;
   expect(asked).toBe(1);
+});
+
+test("every format can be left", async ({ page }, info) => {
+  await open(page, info.project.name);
+  const E = "Enter";
+  const key = (name: string) => `${MOD}+${name}`;
+  // Typed text and [key], then "Z"; what is sent.
+  const cases: [string, (string | [string])[], string][] = [
+    ["list: Enter twice", ["- a", [E], [E]], "- a\n\nZ"],
+    ["list: Enter on spaces", ["- a", [E], "  ", [E]], "- a\n\nZ"],
+    ["list: down at the end", ["- a", ["ArrowDown"]], "- a\n\nZ"],
+    ["list: shortcut", ["- a", [key("Shift+8")]], "aZ"],
+    ["list: normal text", ["- a", [key("Shift+0")]], "aZ"],
+    [
+      "nested list: normal text",
+      ["- a", [E], "b", [key("]")], [E], [key("Shift+0")]],
+      "- a\n  - b\n\nZ",
+    ],
+    [
+      "nested list: down at the end",
+      ["- a", [E], "b", [key("]")], ["ArrowDown"]],
+      "- a\n  - b\n\nZ",
+    ],
+    [
+      "a later line of an item keeps the item",
+      ["- a", ["Shift+Enter"], [E]],
+      "- a\n- Z",
+    ],
+    ["quote: Enter twice", ["> a", [E], [E]], "> a\n\nZ"],
+    ["quote: Enter on spaces", ["> a", [E], " ", [E]], "> a\n\nZ"],
+    ["quote: down at the end", ["> a", ["ArrowDown"]], "> a\n\nZ"],
+    ["quote: normal text", ["> a", [key("Shift+0")]], "aZ"],
+    [
+      "list in a quote: normal text",
+      ["> ", "- a", [E], [key("Shift+0")]],
+      "> - a\n\nZ",
+    ],
+    ["bold: right at the end", [[key("b")], "a", ["ArrowRight"]], "**a**Z"],
+    ["code: right at the end", [[key("e")], "a", ["ArrowRight"]], "`a`Z"],
+    ["code: normal text", [[key("e")], "a", [key("Shift+0")]], "`a`Z"],
+    ["code: again", [[key("e")], "a", [key("e")]], "`a`Z"],
+    ["code: Enter", [[key("e")], "a", [E]], "`a`\nZ"],
+    [
+      "selected: normal text",
+      [[key("b")], "a b", [key("a")], [key("Shift+0")], ["ArrowRight"]],
+      "a bZ",
+    ],
+    [
+      "selected list: normal text",
+      ["- a", [E], "b", [key("a")], [key("Shift+0")], ["ArrowRight"]],
+      "a\nbZ",
+    ],
+    [
+      "selected mix: normal text",
+      [
+        "x",
+        [E],
+        "- a",
+        [E],
+        "b",
+        [key("]")],
+        [E],
+        [E],
+        [E],
+        "> q",
+        [key("a")],
+        [key("Shift+0")],
+        ["ArrowRight"],
+      ],
+      "x\na\nb\nqZ",
+    ],
+    // Arrows still only move the cursor anywhere else.
+    [
+      "right inside",
+      ["**ab**", ["ArrowLeft"], ["ArrowLeft"], ["ArrowRight"]],
+      "**aZb**",
+    ],
+    ["down inside", ["- a", [E], "b", ["ArrowUp"], ["ArrowDown"]], "- a\n- bZ"],
+  ];
+  for (const [name, steps, sent] of cases) {
+    for (const step of steps)
+      if (typeof step === "string") await page.keyboard.type(step);
+      else await page.keyboard.press(step[0]);
+    await page.keyboard.type("Z");
+    expect((await send(page)).body, name).toBe(sent);
+  }
 });

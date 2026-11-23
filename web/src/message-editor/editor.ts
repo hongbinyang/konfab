@@ -20,12 +20,27 @@ import {
   type Command,
 } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import { backspaceOut, formats, leaveQuote, typingRules } from "./commands";
+import {
+  backspaceOut,
+  clearBlank,
+  formats,
+  leaveBlock,
+  leaveMarks,
+  leaveQuote,
+  splitBlankLine,
+  typingRules,
+} from "./commands";
 import { literal, nodeType, plainLines, schema, toText } from "./convert";
 
 const item = nodeType("item");
 const paragraph = nodeType("paragraph");
 export const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+const leaveEmpty = chainCommands(
+  splitBlankLine,
+  liftListItem(item),
+  leaveQuote,
+);
 
 export type EditorOptions = {
   doc: DocNode;
@@ -186,11 +201,20 @@ export function createEditor(element: HTMLElement, options: EditorOptions) {
     "Mod-]": sinkListItem(item),
     "Mod-[": liftListItem(item),
     Enter: chainCommands(
+      (state, dispatch, view) => {
+        if (!clearBlank(state)) return false;
+        clearBlank(state, dispatch, view);
+        if (view) leaveEmpty(view.state, dispatch, view);
+        return true;
+      },
+      splitBlankLine,
       splitListItem(item),
       liftListItem(item),
       leaveQuote,
       splitBlock,
     ),
+    ArrowRight: leaveMarks,
+    ArrowDown: leaveBlock,
     "Shift-Enter": splitBlock,
     Backspace: chainCommands(undoInputRule, backspaceOut),
   };
@@ -201,7 +225,7 @@ export function createEditor(element: HTMLElement, options: EditorOptions) {
       handleKeyDown(view, event) {
         if (!(mac ? event.metaKey : event.ctrlKey) || !event.shiftKey)
           return false;
-        const digit = /^Digit([789])$/.exec(event.code)?.[1];
+        const digit = /^Digit([7890])$/.exec(event.code)?.[1];
         const run = formats.find(
           ({ key }) => key === `Mod-Shift-${digit}`,
         )?.run;

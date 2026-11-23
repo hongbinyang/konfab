@@ -2,7 +2,12 @@ import { lift, toggleMark, wrapIn } from "prosemirror-commands";
 import { InputRule, inputRules } from "prosemirror-inputrules";
 import type { MarkType, NodeType, ResolvedPos } from "prosemirror-model";
 import { liftListItem, wrapInList } from "prosemirror-schema-list";
-import type { Command, EditorState, Transaction } from "prosemirror-state";
+import {
+  EditorState,
+  TextSelection,
+  type Command,
+  type Transaction,
+} from "prosemirror-state";
 import { markType, nodeType, schema } from "./convert";
 
 const bullets = nodeType("bullets");
@@ -39,6 +44,105 @@ const toggleQuote: Command = (state, dispatch, view) =>
   depthIn(state, quote)
     ? lift(state, dispatch, view)
     : wrapIn(quote)(state, dispatch, view);
+
+/** Plain lines again: out of every list and quote, with no formats. */
+export const normalText: Command = (state, dispatch) => {
+  const change = state.tr;
+  const { from, to, empty } = state.selection;
+  // Each selected line on its own, so a mix of lists, quotes and lines works.
+  const lines: number[] = [];
+  state.doc.nodesBetween(from, to, (node, position) => {
+    if (node.isTextblock) lines.push(position + 1);
+  });
+  for (const line of lines)
+    for (let round = 0; round < 50; round += 1) {
+      const before = EditorState.create({ doc: change.doc });
+      const cursor = before.apply(
+        before.tr.setSelection(
+          TextSelection.create(change.doc, change.mapping.map(line)),
+        ),
+      );
+      if (cursor.selection.$from.depth < 2) break;
+      let next: Transaction | undefined;
+      const take = (lifted: Transaction) => {
+        next = lifted;
+      };
+      if (!liftListItem(item)(cursor, take)) lift(cursor, take);
+      if (!next) break;
+      for (const step of next.steps) change.step(step);
+    }
+  if (!empty)
+    change.removeMark(change.mapping.map(from), change.mapping.map(to));
+  change.setStoredMarks([]);
+  dispatch?.(change.scrollIntoView());
+  return true;
+};
+
+const atVeryEnd = (state: EditorState): boolean => {
+  const { selection, doc } = state;
+  return (
+    selection.empty &&
+    selection.$head.parent.isTextblock &&
+    selection.head === TextSelection.atEnd(doc).head
+  );
+};
+
+/** → at the very end, where the cursor has nowhere to go, leaves the format. */
+export const leaveMarks: Command = (state, dispatch) => {
+  const marks = state.storedMarks ?? state.selection.$from.marks();
+  if (!atVeryEnd(state) || !marks.length) return false;
+  dispatch?.(state.tr.setStoredMarks([]));
+  return true;
+};
+
+/** ↓ at the very end leaves a list or quote for a new plain line. */
+export const leaveBlock: Command = (state, dispatch, view) => {
+  if (
+    !atVeryEnd(state) ||
+    state.selection.$head.depth < 2 ||
+    (view && !view.endOfTextblock("down"))
+  )
+    return false;
+  if (dispatch) {
+    const change = state.tr.insert(
+      state.doc.content.size,
+      nodeType("paragraph").create(),
+    );
+    change.setSelection(TextSelection.atEnd(change.doc)).setStoredMarks([]);
+    dispatch(change.scrollIntoView());
+  }
+  return true;
+};
+
+/** Enter on an empty later line of an item starts a new item there. */
+export const splitBlankLine: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection;
+  if (
+    !empty ||
+    $from.parent.content.size ||
+    $from.depth < 2 ||
+    $from.node(-1).type !== item ||
+    !$from.index(-1)
+  )
+    return false;
+  dispatch?.(state.tr.split($from.before(), 1).scrollIntoView());
+  return true;
+};
+
+/** Enter in a list item or quote line with only spaces: as if it were empty. */
+export const clearBlank: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection;
+  const { parent } = $from;
+  if (
+    !empty ||
+    $from.depth < 2 ||
+    !parent.content.size ||
+    parent.textContent.trim()
+  )
+    return false;
+  dispatch?.(state.tr.delete($from.start(), $from.end()));
+  return true;
+};
 
 export type Format = {
   label: string;
@@ -94,6 +198,12 @@ export const formats: Format[] = [
     typed: "> ",
     block: quote,
     run: toggleQuote,
+  },
+  {
+    label: "Normal text",
+    key: "Mod-Shift-0",
+    icon: "¶",
+    run: normalText,
   },
 ];
 
