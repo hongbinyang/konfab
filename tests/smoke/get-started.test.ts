@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -201,6 +201,138 @@ describe("getting started", () => {
       expect(result.stderr).toContain("is a link to another folder");
       expect(readFileSync(join(shared, "keep.txt"), "utf8")).toBe("keep");
       expect(statSync(join(root, "node_modules")).isDirectory()).toBe(true);
+    });
+
+    describe("while something may use the dependencies", () => {
+      const children: ChildProcess[] = [];
+      afterEach(() => {
+        for (const child of children.splice(0)) child.kill("SIGKILL");
+      });
+
+      /** A project whose npm only records that it was called, then fails. */
+      const installed = () => {
+        const root = project();
+        const native = [
+          "build/Release/better_sqlite3.node",
+          `prebuilds/${process.platform}-${process.arch}.node`,
+        ]
+          .map((path) => join("node_modules/better-sqlite3", path))
+          .find((path) => existsSync(path));
+        if (!native) throw new Error("no native SQLite module here");
+        const module = join(root, "node_modules", "x", "sqlite.node");
+        mkdirSync(join(root, "node_modules", "x"), { recursive: true });
+        cpSync(native, module);
+        const bin = join(dir, "bin");
+        mkdirSync(bin);
+        writeFileSync(
+          join(bin, "npm"),
+          `#!/bin/sh\necho "$@" >> "${join(dir, "npm-calls")}"\nexit 1\n`,
+          { mode: 0o755 },
+        );
+        return { root, module };
+      };
+      const quickstart = (root: string) =>
+        spawnSync(
+          process.execPath,
+          [join(root, "scripts", "quickstart.mjs"), "--no-open"],
+          {
+            cwd: root,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+            },
+          },
+        );
+      const npmCalls = () =>
+        existsSync(join(dir, "npm-calls"))
+          ? readFileSync(join(dir, "npm-calls"), "utf8")
+          : "";
+      /** Runs until killed, as a server on any port or with any home would. */
+      const running = async (code: string) => {
+        const child = spawn(
+          process.execPath,
+          ["-e", `${code};setInterval(()=>{},1000);console.log("up")`],
+          { stdio: ["ignore", "pipe", "inherit"] },
+        );
+        children.push(child);
+        await new Promise((up) => child.stdout!.once("data", up));
+        return child;
+      };
+
+      it.skipIf(process.platform === "win32")(
+        "doesn't reinstall under a running program, and does once it stopped",
+        async () => {
+          const { root, module } = installed();
+          const before = snapshot(join(root, "node_modules"));
+          const server = await running(
+            `process.dlopen({exports:{}}, ${JSON.stringify(module)})`,
+          );
+          const blocked = quickstart(root);
+          expect(blocked.status).toBe(1);
+          expect(blocked.stderr).toContain(`process ${server.pid}`);
+          expect(blocked.stderr).toContain("Nothing was changed");
+          expect(npmCalls()).toBe("");
+          expect(snapshot(join(root, "node_modules"))).toEqual(before);
+
+          const gone = new Promise((done) => server.once("exit", done));
+          server.kill("SIGKILL");
+          await gone;
+          const failed = quickstart(root);
+          expect(npmCalls()).toBe("ci\n");
+          // A failed install is reported and never recorded as good.
+          expect(failed.status).toBe(1);
+          expect(failed.stderr).toContain("npm ci failed");
+          expect(
+            existsSync(join(root, "node_modules", ".konfab-install.json")),
+          ).toBe(false);
+        },
+      );
+
+      it.skipIf(process.platform === "win32")(
+        "isn't stopped by an unrelated program on Konfab's port",
+        async () => {
+          const { root } = installed();
+          await running(
+            `require("net").createServer().on("error",()=>{}).listen(8787,"127.0.0.1")`,
+          );
+          quickstart(root);
+          expect(npmCalls()).toBe("ci\n");
+        },
+      );
+
+      it.skipIf(process.platform === "win32")(
+        "asks to be sure when it can't tell, and never guesses from an incomplete list",
+        async () => {
+          const { root } = installed();
+          const { processesUsing } = (await import(
+            join(root, "scripts", "quickstart.mjs")
+          )) as {
+            processesUsing: (
+              modules: string,
+              options: object,
+            ) => number[] | null;
+          };
+          const modules = join(root, "node_modules");
+          expect(processesUsing(modules, { platform: "win32" })).toBeNull();
+          for (const listed of [
+            { stdout: "", error: new Error("no lsof") },
+            { stdout: "p1\nn/other/file\n" },
+          ])
+            expect(
+              processesUsing(modules, {
+                platform: "darwin",
+                run: () => listed,
+              }),
+            ).toBeNull();
+          expect(
+            processesUsing(modules, {
+              platform: "darwin",
+              run: () => ({ stdout: `p${process.pid}\nn/other/file\n` }),
+            }),
+          ).toEqual([]);
+        },
+      );
     });
   });
 

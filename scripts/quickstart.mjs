@@ -3,13 +3,16 @@
 // Get Konfab running from a fresh clone: check Node, install dependencies when
 // they don't match, build, set up the app connectors, report problems, then
 // start. Safe to run again. Plain Node with no dependencies, so it works before
-// `npm ci`. `--check` runs the isolated end-to-end check instead of starting.
+// `npm ci`. `--check` runs the isolated end-to-end check instead of starting;
+// `--konfab-stopped` allows a reinstall where it can't tell if Konfab is running.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   lstatSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
   realpathSync,
 } from "node:fs";
@@ -59,6 +62,57 @@ export function installMatches(projectRoot = root) {
   } catch {
     return false;
   }
+}
+
+/**
+ * This user's processes that have a file under node_modules loaded, such as
+ * a running Konfab server (its SQLite module). Asks the operating system, so
+ * ports and homes don't matter and nothing is contacted. Returns null when it
+ * can't be told; processes of other users aren't visible.
+ */
+export function processesUsing(
+  modules,
+  { platform = process.platform, run = spawnSync } = {},
+) {
+  const inside = `${realpathSync(modules)}/`;
+  const users = new Set();
+  if (platform === "linux") {
+    try {
+      const uid = process.getuid();
+      for (const pid of readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+        try {
+          if (statSync(`/proc/${pid}`).uid !== uid) continue;
+          if (readFileSync(`/proc/${pid}/maps`, "utf8").includes(inside))
+            users.add(Number(pid));
+        } catch (error) {
+          if (error.code === "ENOENT" || error.code === "ESRCH") continue;
+          // Some programs hide their maps (ssh-agent); a hidden Node can't be ruled out.
+          const name = readFileSync(`/proc/${pid}/comm`, "utf8").trim();
+          if (/node|MainThread/i.test(name)) return null;
+        }
+      }
+      return [...users];
+    } catch {
+      return null;
+    }
+  }
+  // lsof writes other characters in paths in escaped form.
+  if (platform !== "darwin" || !/^[\x20-\x7e]+$/.test(inside)) return null;
+  const listed = run(
+    "/usr/sbin/lsof",
+    ["-nP", "-w", "-u", String(process.getuid()), "-Fpn"],
+    { encoding: "utf8", timeout: 20_000, maxBuffer: 256 * 1024 * 1024 },
+  );
+  let pid = 0;
+  let sawItself = false;
+  for (const line of (listed.stdout ?? "").split("\n")) {
+    if (line.startsWith("p")) {
+      pid = Number(line.slice(1));
+      if (pid === process.pid) sawItself = true;
+    } else if (line.startsWith(`n${inside}`)) users.add(pid);
+  }
+  // lsof's exit code isn't reliable; a complete list includes this process.
+  return users.size || (sawItself && !listed.error) ? [...users] : null;
 }
 
 function nativeModuleLoads() {
@@ -111,6 +165,20 @@ async function main() {
       stop(
         "node_modules here is a link to another folder, and reinstalling would delete that folder's packages. Replace the link with a real install (`rm node_modules && npm ci`) and run `npm run quickstart` again.",
       );
+    // Reinstalling would also pull the packages from under a running server.
+    if (lstatSafe(modules)) {
+      const users = processesUsing(modules);
+      const stopIt =
+        "Stop it (Ctrl+C in its terminal, or `npm run login-item -- uninstall` if it starts at login), then run `npm run quickstart` again.";
+      if (users?.length)
+        stop(
+          `The dependencies need reinstalling, but a running program uses them (process ${users.join(", ")}); it is probably Konfab. Nothing was changed.\n  ${stopIt}\n  To see it: \`ps -p ${users.join(",")} -o pid,command\``,
+        );
+      if (users === null && !args.has("--konfab-stopped"))
+        stop(
+          `The dependencies need reinstalling, and quickstart can't tell here whether Konfab is running from this folder. Nothing was changed.\n  If it is: ${stopIt}\n  Once you are sure it isn't, run \`npm run quickstart -- --konfab-stopped\`.`,
+        );
+    }
     // The SQLite module is compiled when no prebuilt binary fits (always so on
     // Linux in our tests); say up front if the usual tools are missing.
     const missing = ["python3", "make", "c++"].filter(
