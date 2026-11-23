@@ -8,6 +8,7 @@ import {
   writeState,
   type NoticeState,
 } from "./store.js";
+import { botId, type TokenSlot } from "./token.js";
 
 export type NoticeOptions = {
   away_minutes: number;
@@ -58,7 +59,7 @@ export class TelegramNotices {
       db: Db;
       home: string;
       options: NoticeOptions;
-      token: () => string | null;
+      token: (slot: TokenSlot) => string | null;
       client?: (token: string) => Pick<TelegramClient, "send">;
       now?: () => number;
       warn?: (message: string) => void;
@@ -98,7 +99,7 @@ export class TelegramNotices {
       if (settings.enabled !== enabled) {
         writeSettings(this.deps.home, { ...settings, enabled });
         // What happens while it is off is never sent later.
-        const state = readState(this.deps.home);
+        const state = readState(this.deps.home, settings.setup_id);
         writeState(this.deps.home, {
           ...state,
           rooms: {},
@@ -130,7 +131,7 @@ export class TelegramNotices {
     const settings = readSettings(this.deps.home);
     if (!settings?.enabled) return;
     const now = this.now();
-    let state = readState(this.deps.home);
+    let state = readState(this.deps.home, settings.setup_id);
     if (!state.baseline) {
       state = { ...state, baseline: this.newest() };
       writeState(this.deps.home, state);
@@ -153,10 +154,15 @@ export class TelegramNotices {
     );
     // A moment for related things to become one notice.
     if (!needs.some((need) => now - need.created_at >= GATHER_MS)) return;
-    const token = this.deps.token();
-    if (!token) {
+    const token = this.deps.token(settings.slot);
+    // Never with a token that isn't this setup's own.
+    if (!token || botId(token) !== settings.bot_id) {
       this.stuckAt = settingsStamp(this.deps.home);
-      this.fail("The bot token isn't stored any more.");
+      this.fail(
+        token
+          ? "The stored bot token is for another bot. Run setup again."
+          : "The bot token isn't stored any more. Run setup again.",
+      );
       return;
     }
     const before = state;

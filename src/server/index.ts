@@ -29,7 +29,7 @@ const notices = new TelegramNotices({
   db,
   home,
   options: config.phone_notices,
-  token: resolveTelegramToken,
+  token: (slot) => resolveTelegramToken(slot),
   warn: (message) => app.log.warn(message),
 });
 

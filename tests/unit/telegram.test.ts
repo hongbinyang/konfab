@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -172,17 +173,20 @@ describe("the Telegram client", () => {
     expect(telegram.calls[0]?.body).toEqual({ limit: 100, timeout: 0 });
   });
 
-  it("reads only a token that looks like one, and none when isolated", () => {
-    const keychain = () => TOKEN;
-    expect(resolveTelegramToken({}, "darwin", keychain)).toBe(TOKEN);
-    expect(resolveTelegramToken({}, "linux", keychain)).toBeNull();
+  it("reads only a token that looks like one, from its own place, and none when isolated", () => {
+    const keychain = (args: string[]) =>
+      args.includes("konfab-telegram-token-b") ? TOKEN : "x";
+    const env = { KONFAB_TELEGRAM_TOKEN: TOKEN };
+    expect(resolveTelegramToken("b", {}, "darwin", keychain)).toBe(TOKEN);
+    expect(resolveTelegramToken("a", {}, "darwin", keychain)).toBeNull();
+    // The environment never stands in for a Keychain slot, or the other way.
+    expect(resolveTelegramToken("a", env, "darwin", keychain)).toBeNull();
+    expect(resolveTelegramToken("env", {}, "darwin", keychain)).toBeNull();
+    expect(resolveTelegramToken("env", env, "linux", keychain)).toBe(TOKEN);
+    expect(resolveTelegramToken("b", {}, "linux", keychain)).toBeNull();
     expect(
-      resolveTelegramToken({ KONFAB_ISOLATED: "1" }, "darwin", keychain),
+      resolveTelegramToken("b", { KONFAB_ISOLATED: "1" }, "darwin", keychain),
     ).toBeNull();
-    expect(resolveTelegramToken({}, "darwin", () => "x")).toBeNull();
-    expect(
-      resolveTelegramToken({ KONFAB_TELEGRAM_TOKEN: TOKEN }, "linux", keychain),
-    ).toBe(TOKEN);
   });
 });
 
@@ -214,7 +218,11 @@ describe("setting up phone notices", () => {
       },
     }));
   /** Answers questions by a part of their text; anything else is a no. */
-  const run = (answers: Record<string, string>, platform = "linux") =>
+  let keychain: Map<string, string>;
+  const run = (
+    answers: Record<string, string>,
+    change: Partial<Parameters<typeof setupTelegram>[0]> = {},
+  ) =>
     setupTelegram({
       home,
       say: (line) => (said += `${line}\n`),
@@ -225,16 +233,21 @@ describe("setting up phone notices", () => {
         );
         return key === undefined ? "" : (answers[key] as string);
       },
-      platform: platform as NodeJS.Platform,
-      storeToken: () => true,
-      removeToken: () => true,
-      token: () => TOKEN,
+      platform: "darwin",
+      fromEnvironment: false,
+      storeToken: (slot) => Boolean(keychain.set(slot, TOKEN)),
+      removeToken: (slot) => {
+        keychain.delete(slot);
+        return true;
+      },
+      token: (slot) => keychain.get(slot) ?? null,
       client: () => client(),
       sleep: async (ms) => {
         time += ms;
       },
       now: () => time,
       code: () => CODE,
+      ...change,
     });
   const ALL = {
     "contact Telegram": "y",
@@ -247,6 +260,7 @@ describe("setting up phone notices", () => {
   beforeEach(() => {
     said = "";
     asked = [];
+    keychain = new Map();
     time = 1_800_000_000_000;
   });
 
@@ -262,7 +276,12 @@ describe("setting up phone notices", () => {
       chat_id: CHAT,
       chat_name: "Lead",
       enabled: true,
+      slot: "b",
+      bot_id: "1234567890",
+      setup_id: expect.any(String),
     });
+    // The replaced setup's token is gone.
+    expect([...keychain.keys()]).toEqual(["b"]);
     if (process.platform !== "win32")
       expect(statSync(settingsPath(home)).mode & 0o777).toBe(0o600);
     expect(said).not.toContain(TOKEN);
@@ -328,6 +347,202 @@ describe("setting up phone notices", () => {
       false,
     );
     expect(readSettings(home)?.chat_id).toBe(CHAT);
+  });
+
+  describe("replacing a working setup", () => {
+    const OLD_TOKEN = "5555555555:ZZbbCCddEEffGGhhIIjjKKllMMnnOOppQQr";
+    const old = {
+      chat_id: 111,
+      chat_name: "Old chat",
+      enabled: true,
+      slot: "a" as const,
+      bot_id: "5555555555",
+      setup_id: "old-setup",
+    };
+    let file: string;
+    beforeEach(() => {
+      writeSettings(home, old);
+      file = readFileSync(settingsPath(home), "utf8");
+      keychain.set("a", OLD_TOKEN);
+      updates(message());
+    });
+    /** Byte for byte, with its own token, and nothing left of the new one. */
+    const untouched = () => {
+      expect(readFileSync(settingsPath(home), "utf8")).toBe(file);
+      expect([...keychain]).toEqual([["a", OLD_TOKEN]]);
+      expect(readdirSync(home)).toEqual(["telegram.json"]);
+    };
+
+    it.each(Object.keys(ALL))(
+      "leaves it untouched when the lead stops at %j",
+      async (question) => {
+        const stopped = await run({ ...ALL, [question]: "n" });
+        if (
+          question === "Konfab: test" ||
+          question === "Turn phone notices on"
+        ) {
+          // These two are choices within a complete setup.
+          expect(stopped).toBe(true);
+          expect(readSettings(home)?.chat_id).toBe(CHAT);
+          return;
+        }
+        expect(stopped).toBe(false);
+        untouched();
+      },
+    );
+
+    it.each([
+      ["getMe", { status: 401, body: { ok: false } }],
+      ["getMe", { hang: true }],
+      ["getWebhookInfo", { status: 502, body: {} }],
+      [
+        "getWebhookInfo",
+        { body: { ok: true, result: { url: "https://example.com" } } },
+      ],
+      ["getUpdates", { status: 409, body: { ok: false } }],
+      ["getUpdates", { drop: true }],
+      ["sendMessage", { status: 403, body: { ok: false } }],
+      ["sendMessage", { drop: true }],
+    ] as [string, Reply][])(
+      "leaves it untouched when %s fails (%j)",
+      async (method, reply) => {
+        telegram.replies.set(method, reply);
+        expect(await run(ALL, { client: () => client(300) })).toBe(false);
+        untouched();
+        expect(said).toContain("the earlier setup is as it was");
+        expect(said).not.toContain(TOKEN);
+      },
+    );
+
+    const fails = () => {
+      throw new Error("broken");
+    };
+    it.each([
+      ["saving the token is refused", { storeToken: () => false }],
+      ["saving the token breaks", { storeToken: fails }],
+      ["the token can't be read", { token: () => null }],
+      ["reading the token breaks", { token: fails }],
+      ["it isn't a token", { client: fails }],
+    ])("leaves it untouched when %s", async (_name, change) => {
+      expect(await run(ALL, change)).toBe(false);
+      untouched();
+      expect(telegram.sent()).toEqual([]);
+    });
+
+    it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+      "leaves it untouched when the new settings can't be written",
+      async () => {
+        chmodSync(home, 0o500);
+        try {
+          expect(await run(ALL)).toBe(false);
+        } finally {
+          chmodSync(home, 0o700);
+        }
+        untouched();
+        expect(said).toContain("the earlier setup is as it was");
+      },
+    );
+
+    it("is as it was if setup is killed at any question", async () => {
+      const questions = (await run(ALL), asked.length);
+      for (let at = 1; at <= questions; at += 1) {
+        writeSettings(home, old);
+        keychain = new Map([["a", OLD_TOKEN]]);
+        said = "";
+        updates(message());
+        let count = 0;
+        // Never answered: the process ends here, with nothing cleaned up.
+        void run(ALL, {
+          ask: () => {
+            count += 1;
+            return count === at
+              ? new Promise<string>(() => undefined)
+              : Promise.resolve("y");
+          },
+          removeToken: () => {
+            throw new Error("it cleaned up");
+          },
+        });
+        for (let wait = 0; wait < 200 && count < at; wait += 1)
+          await new Promise((done) => setTimeout(done, 5));
+        expect(count).toBe(at);
+        expect(readFileSync(settingsPath(home), "utf8")).toBe(file);
+        expect(keychain.get("a")).toBe(OLD_TOKEN);
+      }
+    });
+
+    it("goes on sending with the old bot to the old chat until the new one is complete, then only with the new", async () => {
+      const db = openDatabase(":memory:");
+      const used: string[] = [];
+      let at = time;
+      const sender = () =>
+        new TelegramNotices({
+          db,
+          home,
+          options: {
+            away_minutes: 1,
+            quiet_from: null,
+            quiet_to: null,
+            room_names: false,
+            room_every_minutes: 1,
+            max_per_day: 100,
+          },
+          token: (slot) => keychain.get(slot) ?? null,
+          client: (token) => ({
+            send: async (chat) => {
+              used.push(`${token.split(":")[0]} ${chat}`);
+            },
+          }),
+          now: () => at,
+        });
+      const service = new KonfabService(db, {
+        now: () => at,
+        waitTimeoutSeconds: 50,
+        turnTimeoutMs: 60_000_000,
+        maxMessageChars: 1000,
+        runHoursFor: () => 24,
+      });
+      service.ensureAgent("claude", "Claude");
+      service.createRoom("r", "", ["claude"]);
+      const session = service.join("claude", "r").session_id;
+      const notices = sender();
+      await notices.tick();
+      const event = async (look: TelegramNotices) => {
+        service.reportStatus("claude", session, "blocked", "x");
+        at += 5 * 60_000;
+        await look.tick();
+      };
+      await event(notices);
+      let during = 0;
+      await run(ALL, {
+        ask: async (question) => {
+          if (question.includes("Did it arrive")) {
+            await event(notices);
+            during = used.length;
+          }
+          return "y";
+        },
+      });
+      expect(used).toEqual(["5555555555 111", "5555555555 111"]);
+      expect(during).toBe(2);
+      // Something from before the new setup isn't sent by it.
+      await notices.tick();
+      await event(notices);
+      expect(used.at(-1)).toBe(`1234567890 ${CHAT}`);
+      expect(used).toHaveLength(3);
+      // Also after a restart.
+      at += 60_000;
+      const restarted = sender();
+      await event(restarted);
+      expect(used.at(-1)).toBe(`1234567890 ${CHAT}`);
+      db.close();
+    });
+
+    it("says when a replaced token couldn't be removed; it isn't used any more", async () => {
+      expect(await run(ALL, { removeToken: () => false })).toBe(true);
+      expect(readSettings(home)?.slot).toBe("b");
+      expect(said).toContain("konfab-telegram-token-a");
+    });
   });
 
   it("makes codes that can't be guessed", () => {
@@ -400,6 +615,9 @@ describe("phone notices", () => {
       chat_id: CHAT,
       chat_name: "Lead",
       enabled: false,
+      slot: "a",
+      bot_id: "1234567890",
+      setup_id: "one",
     });
     notices = make();
     notices.setEnabled(true);
@@ -584,6 +802,21 @@ describe("phone notices", () => {
     ]);
   });
 
+  it("sends nothing with another bot's token, also after a restart, until setup is run again", async () => {
+    writeSettings(home, {
+      ...readSettings(home)!,
+      bot_id: "999",
+    });
+    mention();
+    await later(11);
+    await later(30, make());
+    expect(telegram.calls).toEqual([]);
+    expect(warnings[0]).toContain("for another bot");
+    writeSettings(home, { ...readSettings(home)!, bot_id: "1234567890" });
+    await later(11);
+    expect(telegram.sent()).toHaveLength(1);
+  });
+
   it("ignores a broken or group setting, and a broken record of what was sent", async () => {
     writeFileSync(statePath(home), "{");
     mention();
@@ -592,7 +825,7 @@ describe("phone notices", () => {
     expect(telegram.sent()).toEqual([]);
     writeFileSync(
       settingsPath(home),
-      JSON.stringify({ chat_id: -100, chat_name: "g", enabled: true }),
+      JSON.stringify({ ...readSettings(home), chat_id: -100 }),
     );
     expect(notices.view().state).toBe("not_set_up");
     mention();

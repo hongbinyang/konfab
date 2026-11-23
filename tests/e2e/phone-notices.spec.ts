@@ -41,7 +41,14 @@ test("the lead can switch phone notices, and only a person's actions count as ac
     // As setup leaves it, off; there is no token, so nothing can be sent.
     writeFileSync(
       file,
-      JSON.stringify({ chat_id: 12345, chat_name: "Test", enabled: false }),
+      JSON.stringify({
+        chat_id: 12345,
+        chat_name: "Test",
+        enabled: false,
+        slot: "env",
+        bot_id: "1",
+        setup_id: "e2e",
+      }),
     );
     await page.reload();
     await openLead();

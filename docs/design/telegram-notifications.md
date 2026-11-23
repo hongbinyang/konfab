@@ -16,6 +16,8 @@ Each step that contacts Telegram says so and waits for a yes. Nothing is sent or
 4. Setup shows that chat's name and asks "Send Konfab's notices here?".
 5. **Send a test** is a separate yes, and turning notices on is another. `--telegram --remove` deletes the token and the chat number.
 
+**Replacing a setup.** A new token goes into the Keychain slot that the current setup doesn't use. The current setup keeps sending, with its own token and chat, until the last question is answered; then one file is replaced in one step, and the old token is removed. On a no, a failure or a failed write, the new token is removed and the current setup is as it was. If setup is killed, the unused token stays in its slot until the next setup or `--remove`. The settings name the slot, the bot and the setup: a token for another bot is never used, and records of an earlier setup aren't either. With `KONFAB_TELEGRAM_TOKEN`, changing the variable to another bot stops notices until setup is run again.
+
 **Other uses of a bot.** The reads never confirm messages (no `offset`), so they stay for whatever else would read them. Reading can still interrupt another program that is reading the same bot at that moment, and Telegram refuses two readers. That is why a new bot is required, and why setup stops when Telegram says the bot is in use elsewhere. Setup never deletes a webhook. The lead can skip all reading by typing the chat number instead; then the test message is the only proof of who receives it, and notices can't be turned on until the lead confirms it arrived.
 
 ## Where the token and chat number are

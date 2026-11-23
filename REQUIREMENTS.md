@@ -461,3 +461,53 @@ Importing multiple skills at once and importing archives are out of scope for th
 - Replace a tracked skill after a warning; verify the old revision can be restored, existing assignments remain pinned, and an unsaved draft or concurrent destination change is not overwritten. A collision with an untracked folder must not replace it. Cover a trashed skill, a built-in name in another library, and replacement of a skill previously copied from a public source.
 - Cancel or force failure at each write stage, then restart the service and inspect the library: no partial import or loss of existing work. Exercise invalid manifests, duplicate or unsafe paths, package limits, excluded files, licence preservation and unavailable project libraries.
 - Check the user flow in an isolated browser in both themes and run the repository's required checks, including browser tests for the page change.
+
+## 20. Formatting while writing
+
+**Status:** Implemented. Design: [message editor](docs/design/message-editor.md).
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| ME1 | MUST | Messages show basic Markdown: emphasis, strikethrough, inline and fenced code, lists, task lists, tables, quotes and links. Raw HTML and unsafe link targets are never rendered. Wide tables scroll inside the message. |
+| ME2 | MUST | Bold, italic, strikethrough, inline code, links, lists and quotes show in the message box as they are written, through shortcuts, typed marks or an optional menu that is hidden until opened. |
+| ME3 | MUST | What isn't formatted is sent exactly as typed. Markdown the box can't show (such as tables) is rendered live beside it. A message that would lose a format is reviewed, and can be corrected, before it is sent. |
+| ME4 | MUST | Every format can be left: **Normal text** clears all of them, and ↓ or → at the very end leaves a list, a quote or an inline format. Elsewhere, arrows only move the cursor. |
+| ME5 | MUST | Every formatting shortcut is listed in the app and the user guide, and a test compares the guide's formats with the editor's. |
+| ME6 | MUST | Drafts and files are kept per room until the page is closed or reloaded. What is written or attached during a send, and a message that can't be sent, aren't lost when switching rooms or opening the library. |
+| ME7 | MUST | A plain text box is always available and is the fallback if the editor can't load. |
+| ME8 | LATER | Edit tables, task lists, headings and code blocks visually in the box. |
+
+Not yet verified: Safari, Firefox, VoiceOver, real input methods, Windows, Linux and phones.
+
+## 21. Bounded logs and updates
+
+**Status:** Implemented.
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| LG1 | MUST | The server's log is kept in a fixed number of size-limited files that only the user can read. A problem with the log never stops Konfab. |
+| LG2 | MUST | A login item's other output is bounded while it runs. Logs of earlier versions are never cut or deleted by Konfab. |
+| LG3 | MUST | One process at a time writes and rotates a log; a second instance can't interfere, and a crash frees it. |
+| LG4 | MUST | Sign-in codes, tokens, cookies and message text are not written to logs. Routine requests are left out. |
+| LG5 | MUST | `npm run doctor` shows the space used by the database, files, backups and logs. Rooms, files and backups are not deleted automatically. |
+| LG6 | MUST | A build whose installed packages don't match the lockfile stops with the command to run. Reinstalling is refused when a program is found to use the packages; that check is best effort and says so. |
+
+Not yet verified: a real macOS login item.
+
+## 22. Phone notices
+
+**Status:** Implemented on `feature/telegram-notices`; in review. Design: [Telegram notifications](docs/design/telegram-notifications.md).
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| PN1 | MUST | Off until the lead sets it up at a terminal with a Telegram bot of their own. Contacting Telegram, sending a test and turning notices on each need their own yes. |
+| PN2 | MUST | The recipient is the private chat whose own person sent a one-time code, or a typed chat number whose test message the lead confirmed. |
+| PN3 | MUST | While the lead is away (10 minutes without activity on the page by default), Konfab tells them that an agent mentioned @lead, a permission request is waiting, or a room has stopped. Never message text, files, links or agent names; room names only if turned on. |
+| PN4 | MUST | Limits per room and day, quiet hours, pauses and breaks are respected. What the lead has seen while active, answered or decided, and anything from while notices were off, isn't sent. |
+| PN5 | MUST | A notice that may have arrived is not sent again. After a refusal nothing is sent until the lead acts, and the page says why without secrets. |
+| PN6 | MUST | Replacing a setup takes effect in one step after everything is confirmed. Cancelling, any failure, or a crash at any point leaves the earlier setup working or sends nothing; a token is only used for its own bot, chat and setup. |
+| PN7 | MUST | The token is in the Keychain (or an environment variable), and Konfab gives it to no agent tool, page, export, database, backup or log. Programs running as the lead may still reach it; the documentation says so. |
+| PN8 | MUST | One way: after setup Konfab reads nothing from Telegram. Agents have no route to setup or sending. |
+| PN9 | MUST | Automated tests use a local stand-in and never contact Telegram. |
+
+Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Windows.
