@@ -280,6 +280,7 @@ describe("getting started", () => {
           await gone;
           const failed = quickstart(root);
           expect(npmCalls()).toBe("ci\n");
+          expect(failed.stdout).toContain("best-effort check");
           // A failed install is reported and never recorded as good.
           expect(failed.status).toBe(1);
           expect(failed.stderr).toContain("npm ci failed");

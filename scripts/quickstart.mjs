@@ -68,7 +68,8 @@ export function installMatches(projectRoot = root) {
  * This user's processes that have a file under node_modules loaded, such as
  * a running Konfab server (its SQLite module). Asks the operating system, so
  * ports and homes don't matter and nothing is contacted. Returns null when it
- * can't be told; processes of other users aren't visible.
+ * can't be told. Best effort: processes of other users, hidden mappings and
+ * processes that start later are missed, so an empty list is no guarantee.
  */
 export function processesUsing(
   modules,
@@ -179,6 +180,13 @@ async function main() {
           `The dependencies need reinstalling, and quickstart can't tell here whether Konfab is running from this folder. Nothing was changed.\n  If it is: ${stopIt}\n  Once you are sure it isn't, run \`npm run quickstart -- --konfab-stopped\`.`,
         );
     }
+    if (lstatSafe(modules))
+      say(
+        "! Replacing the installed packages. Make sure Konfab isn't running from this folder: " +
+          (args.has("--konfab-stopped")
+            ? "you confirmed this with --konfab-stopped."
+            : "quickstart found no program using them, but this is a best-effort check. It can miss other users' programs, programs whose files are hidden, and ones that start from now on."),
+      );
     // The SQLite module is compiled when no prebuilt binary fits (always so on
     // Linux in our tests); say up front if the usual tools are missing.
     const missing = ["python3", "make", "c++"].filter(

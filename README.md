@@ -33,7 +33,7 @@ Then:
 
 - Stop: press **Ctrl+C** where Konfab runs. Rooms and messages are saved in `~/.konfab`.
 - Start again: `npm start`.
-- Update: stop Konfab (Ctrl+C), then `git pull` and `npm run quickstart`, which also installs new dependencies (and stops first if Konfab is still running from this folder). If you use `npm start` instead and the dependencies changed, it stops and tells you to run `npm ci`.
+- Update: stop Konfab (Ctrl+C), then `git pull` and `npm run quickstart`, which also installs new dependencies (it stops if it finds a program of yours using them, but it can't find every one, so stop Konfab yourself). If you use `npm start` instead and the dependencies changed, it stops and tells you to run `npm ci`.
 - If an agent stops responding after a restart, see [Restart or update](docs/user-guide.md#14-restart-or-update).
 
 **Platforms:**
