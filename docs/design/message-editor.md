@@ -39,7 +39,7 @@ The editor is ProseMirror with a small schema (lines, bulleted and numbered list
 - **Undo** is one step per format or paste.
 - **Links:** a small form; Escape cancels and focus returns. Other addresses are refused with a message.
 - **Keyboard:** Tab leaves the editor. The toolbar is one tab stop with arrow keys; buttons have names, shortcuts and a pressed state.
-- **Drafts, attachments, failed sends:** Send takes the draft and its files out of the box at once and shows "Sending…". What is written or attached meanwhile is a new draft and is kept. If the send fails, the draft (with its formats) and files come back before it, and the cursor stays in place; during a composition this waits until it ends. A second send waits for the first. As before, leaving the room while sending loses a draft that then fails.
+- **Drafts, attachments, failed sends:** Send takes the draft and its files out of the box at once and shows "Sending…". What is written or attached meanwhile is a new draft and is kept. If the send fails, the draft (with its formats) and files come back before it, and the cursor stays in place; during a composition this waits until it ends. A second send waits for the first. Drafts, formats and files are kept per room in memory, so switching rooms or opening the library doesn't lose them, also when a send fails meanwhile; closing or reloading the page during a send asks first.
 - **IME:** the document isn't replaced while a composition is in progress.
 
 ## Limits

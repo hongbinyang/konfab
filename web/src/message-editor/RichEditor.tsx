@@ -31,7 +31,7 @@ export type EditorHandle = {
   /** Empties the box and returns what was in it. */
   take: () => Draft;
   /** Puts a draft back, before anything written since. */
-  putBack: (draft: Draft) => void;
+  putBack: (draft: Draft, placed?: () => void) => void;
   /** False if it isn't time to send, or a review was opened because the message would look different. */
   ready: () => boolean;
 };
@@ -39,10 +39,10 @@ export type EditorHandle = {
 export type Draft = { text: string; doc?: DocNode };
 
 type Props = {
-  initial: string;
+  initial: Draft;
   placeholder: string;
   labelId: string;
-  onChange: (text: string) => void;
+  onChange: (draft: Draft) => void;
   /** `checked`: the person reviewed the difference and chose to send. */
   onSend: (checked?: boolean) => void;
   onImages: (files: File[]) => void;
@@ -106,7 +106,7 @@ export default function RichEditor({
     latest.current = { onChange, onSend, onImages };
   });
   const [active, setActive] = useState<string[]>([]);
-  const [text, setText] = useState(initial);
+  const [text, setText] = useState(initial.text);
   const [difference, setDifference] =
     useState<ReturnType<typeof compare>>("same");
   const [tools, setTools] = useRemembered(TOOLS, false);
@@ -153,7 +153,7 @@ export default function RichEditor({
           .map((format) => format.label),
       );
       setText(value);
-      latest.current.onChange(value);
+      latest.current.onChange({ text: value, doc: state.doc });
       clearTimeout(timer);
       timer = setTimeout(
         () => setDifference(compare(created.view.state.doc)),
@@ -161,7 +161,7 @@ export default function RichEditor({
       );
     };
     const created = createEditor(element.current, {
-      doc: fromText(initial),
+      doc: initial.doc ?? fromText(initial.text),
       placeholder,
       labelId,
       onChange: update,
@@ -203,8 +203,8 @@ export default function RichEditor({
         const doc = editor.current?.take();
         return { text: doc ? toText(doc) : "", doc };
       },
-      putBack: ({ text: value, doc }) =>
-        editor.current?.putBack(doc ?? fromText(value)),
+      putBack: ({ text: value, doc }, placed) =>
+        editor.current?.putBack(doc ?? fromText(value), placed),
       ready: check,
     }),
     [check],

@@ -14,6 +14,13 @@ import { Library } from "./Library";
 import { AssignSkills } from "./AssignSkills";
 import { TeamSkills } from "./TeamSkills";
 import { DecisionReferences } from "./DecisionReferences";
+import {
+  putDraftBack,
+  roomDraft,
+  showsRoom,
+  updateDraft,
+  useRoomDraft,
+} from "./composer-drafts";
 import { MessageInput } from "./message-editor/MessageInput";
 import type { EditorHandle } from "./message-editor/RichEditor";
 import { RichText } from "./RichText";
@@ -1299,22 +1306,27 @@ function Composer({
   act: Act;
   onSent: () => void;
 }) {
-  const [body, setBody] = useState("");
+  const draft = useRoomDraft(roomId);
+  const { text: body, attachments, uploading, sending } = draft;
+  const setAttachments = (change: (current: Attachment[]) => Attachment[]) =>
+    updateDraft(roomId, (current) => ({
+      attachments: change(current.attachments),
+    }));
   const messageRef = useRef<EditorHandle>(null);
-  const sending = useRef(false);
-  const [waiting, setWaiting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
   const [unreachable, setUnreachable] = useState<Unreachable[]>([]);
+  useEffect(
+    () => showsRoom(roomId, (back) => messageRef.current?.putBack(back)),
+    [roomId],
+  );
   const addFiles = async (files: File[]) => {
     if (!files.length || uploading) return;
     if (attachments.length + files.length > 20) {
       setAttachmentError("Choose up to 20 files per message.");
       return;
     }
-    setUploading(true);
+    updateDraft(roomId, () => ({ uploading: true }));
     setAttachmentError("");
     try {
       for (const file of files) {
@@ -1324,7 +1336,7 @@ function Composer({
     } catch (error) {
       setAttachmentError(errorMessage(error));
     } finally {
-      setUploading(false);
+      updateDraft(roomId, () => ({ uploading: false }));
     }
   };
   const removeAttachment = (attachment: Attachment) => {
@@ -1340,19 +1352,25 @@ function Composer({
 
   /** `checked`: the lead has reviewed how the message will look. */
   const send = (checked = false) => {
-    if (sending.current || uploading || (!body.trim() && !attachments.length))
+    if (
+      roomDraft(roomId).sending ||
+      uploading ||
+      (!body.trim() && !attachments.length)
+    )
       return;
     if (!checked && messageRef.current?.ready() === false) return;
-    const draft = messageRef.current?.take();
-    if (!draft) return;
+    const taken = messageRef.current?.take();
+    if (!taken) return;
     const files = attachments;
     // The draft leaves the box now, so anything written or attached while it
-    // is being sent is a new draft. If it can't be sent, it comes back first.
-    setAttachments((current) =>
-      current.filter((item) => !files.some(({ id }) => id === item.id)),
-    );
-    sending.current = true;
-    setWaiting(true);
+    // is being sent is a new draft. If it can't be sent, it comes back first,
+    // also when this room isn't shown any more.
+    updateDraft(roomId, (current) => ({
+      sending: true,
+      attachments: current.attachments.filter(
+        (item) => !files.some(({ id }) => id === item.id),
+      ),
+    }));
     void act(async () => {
       let result: { unreachable?: Unreachable[] };
       try {
@@ -1361,19 +1379,18 @@ function Composer({
           {
             method: "POST",
             body: {
-              body: draft.text,
+              body: taken.text,
               attachment_ids: files.map((item) => item.id),
             },
           },
         );
       } catch (error) {
-        messageRef.current?.putBack(draft);
+        putDraftBack(roomId, taken);
         setAttachments((current) => [...files, ...current]);
         throw error;
       } finally {
         // Before the page refreshes, so the next message can be sent at once.
-        sending.current = false;
-        setWaiting(false);
+        updateDraft(roomId, () => ({ sending: false }));
       }
       setUnreachable(result.unreachable ?? []);
       onSent();
@@ -1433,14 +1450,15 @@ function Composer({
       )}
       <MessageInput
         ref={messageRef}
-        value={body}
+        draft={draft}
         labelId="message-label"
         placeholder={`Message the room, or use ${[
           ...agents.map((agent) => `@${mentionName(agent)}`),
           "@lead",
           "@all",
         ].join(", ")}`}
-        onChange={setBody}
+        onChange={(next) => updateDraft(roomId, () => next)}
+        onUnplaced={(back) => putDraftBack(roomId, back)}
         onSend={send}
         onImages={(files) => void addFiles(files)}
       />
@@ -1466,12 +1484,12 @@ function Composer({
         type="button"
         onClick={() => send()}
         disabled={uploading}
-        aria-disabled={waiting}
+        aria-disabled={sending}
       >
         Send
       </button>
       <p className="composer-sending" role="status">
-        {waiting ? "Sending…" : ""}
+        {sending ? "Sending…" : ""}
       </p>
     </div>
   );

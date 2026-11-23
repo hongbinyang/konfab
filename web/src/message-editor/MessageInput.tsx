@@ -7,7 +7,7 @@ import {
   type Ref,
 } from "react";
 import type RichEditorType from "./RichEditor";
-import type { EditorHandle } from "./RichEditor";
+import type { Draft, EditorHandle } from "./RichEditor";
 import "./message-editor.css";
 
 const STORED = "konfab.plain-text-box";
@@ -19,36 +19,42 @@ const storedPlain = () => {
   }
 };
 
+type RichComponent = ComponentType<Parameters<typeof RichEditorType>[0]>;
+/** Once loaded, the next room opens with it at once. */
+let loadedRich: RichComponent | null = null;
+
 /**
  * The message box: rich text, or today's plain box if it was chosen, until
  * the rich one has loaded, or if it can't load. The text is always a plain
  * string, so switching never loses or changes it.
  */
 export function MessageInput({
-  value,
+  draft,
   placeholder,
   labelId,
   onChange,
+  onUnplaced,
   onSend,
   onImages,
   ref,
 }: {
-  value: string;
+  draft: Draft;
   placeholder: string;
   labelId: string;
-  onChange: (text: string) => void;
+  onChange: (draft: Draft) => void;
+  /** A draft that was being put back when the box went away. */
+  onUnplaced: (draft: Draft) => void;
   onSend: (checked?: boolean) => void;
   onImages: (files: File[]) => void;
   ref?: Ref<EditorHandle>;
 }) {
   const [wantsPlain, setWantsPlain] = useState(storedPlain);
-  const [Rich, setRich] = useState<ComponentType<
-    Parameters<typeof RichEditorType>[0]
-  > | null>(null);
+  const value = draft.text;
+  const [Rich, setRich] = useState<RichComponent | null>(() => loadedRich);
   const [failed, setFailed] = useState(false);
   // Once the plain box has text, it stays until that text is sent or the
   // person switches, so the box never changes while someone is typing.
-  const [swap, setSwap] = useState(false);
+  const [swap, setSwap] = useState(() => Boolean(loadedRich));
   const textarea = useRef<HTMLTextAreaElement>(null);
   const rich = useRef<EditorHandle>(null);
   const composing = useRef(false);
@@ -58,6 +64,7 @@ export function MessageInput({
     let current = true;
     import("./RichEditor").then(
       (loaded) => {
+        loadedRich = loaded.default;
         if (current) setRich(() => loaded.default);
       },
       () => {
@@ -80,6 +87,56 @@ export function MessageInput({
     hadFocus.current = false;
   }, [showRich]);
 
+  // Waits for a composition to end. Until it is placed, changing or closing
+  // the box doesn't lose it.
+  const pending = useRef<Draft | null>(null);
+  const place = useRef(() => {});
+  useEffect(() => {
+    place.current = () => {
+      const back = pending.current;
+      if (!back) return;
+      const placed = () => {
+        pending.current = null;
+      };
+      if (showRich) return rich.current?.putBack(back, placed);
+      const input = textarea.current;
+      if (!input) return;
+      const apply = () => {
+        if (pending.current !== back || !input.isConnected) return;
+        const { value: since, selectionStart, selectionEnd } = input;
+        const before = since ? `${back.text}\n` : back.text;
+        placed();
+        onChange({ text: before + since, doc: since ? undefined : back.doc });
+        // After the value is set, keep the cursor where it was in the text.
+        setTimeout(() =>
+          input.setSelectionRange(
+            before.length + selectionStart,
+            before.length + selectionEnd,
+          ),
+        );
+      };
+      if (composing.current)
+        input.addEventListener("compositionend", () => setTimeout(apply), {
+          once: true,
+        });
+      else apply();
+    };
+  });
+  useEffect(() => place.current(), [showRich]);
+  const unplaced = useRef(onUnplaced);
+  useEffect(() => {
+    unplaced.current = onUnplaced;
+  });
+  useEffect(
+    () => () => {
+      const back = pending.current;
+      pending.current = null;
+      // After this box has stopped being the room's.
+      if (back) setTimeout(() => unplaced.current(back));
+    },
+    [],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -97,35 +154,17 @@ export function MessageInput({
             input.selectionEnd,
             "end",
           );
-        onChange(input.value);
+        onChange({ text: input.value, doc: undefined });
       },
       take: () => {
         if (showRich && rich.current) return rich.current.take();
         const text = textarea.current?.value ?? "";
-        onChange("");
+        onChange({ text: "", doc: undefined });
         return { text };
       },
-      putBack: (draft) => {
-        if (showRich) return rich.current?.putBack(draft);
-        const input = textarea.current;
-        if (!input) return;
-        const apply = () => {
-          const { value: since, selectionStart, selectionEnd } = input;
-          const before = since ? `${draft.text}\n` : draft.text;
-          onChange(before + since);
-          // After the value is set, keep the cursor where it was in the text.
-          setTimeout(() =>
-            input.setSelectionRange(
-              before.length + selectionStart,
-              before.length + selectionEnd,
-            ),
-          );
-        };
-        if (composing.current)
-          input.addEventListener("compositionend", () => setTimeout(apply), {
-            once: true,
-          });
-        else apply();
+      putBack: (back) => {
+        pending.current = back;
+        place.current();
       },
       ready: () =>
         showRich ? (rich.current?.ready() ?? true) : !composing.current,
@@ -168,7 +207,7 @@ export function MessageInput({
       {showRich && Rich ? (
         <Rich
           ref={rich}
-          initial={value}
+          initial={draft}
           placeholder={placeholder}
           labelId={labelId}
           onChange={onChange}
@@ -197,7 +236,9 @@ export function MessageInput({
           onCompositionEnd={() => {
             composing.current = false;
           }}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) =>
+            onChange({ text: event.target.value, doc: undefined })
+          }
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
               onSend();

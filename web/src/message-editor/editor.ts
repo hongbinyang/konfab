@@ -303,7 +303,7 @@ export function createEditor(element: HTMLElement, options: EditorOptions) {
       return doc;
     },
     /** Puts a draft back, before anything written since. */
-    putBack(doc: DocNode) {
+    putBack(doc: DocNode, placed?: () => void) {
       whenSettled(() => {
         const { state } = view;
         const change = state.tr.setMeta("addToHistory", false);
@@ -312,6 +312,7 @@ export function createEditor(element: HTMLElement, options: EditorOptions) {
           change.setSelection(TextSelection.atEnd(change.doc));
         } else change.insert(0, doc.content);
         view.dispatch(change);
+        placed?.();
       });
     },
   };

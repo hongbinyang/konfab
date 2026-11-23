@@ -599,3 +599,169 @@ for (const mode of ["rich", "plain"] as const)
     await page.keyboard.type("!");
     expect((await send(page)).body).toBe("first\n日本!");
   });
+
+// These check only that nothing is lost, whatever the box shows meanwhile.
+const chips = (page: Page) => page.getByLabel("Remove shot.png");
+/** Holds the first send until answered. */
+async function holdFirstSend(page: Page, status?: number) {
+  let answer = () => {};
+  const held = new Promise<void>((done) => {
+    answer = done;
+  });
+  const bodies: { body: string; attachment_ids: string[] }[] = [];
+  await page.route(/\/messages$/, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    bodies.push(route.request().postDataJSON() as (typeof bodies)[number]);
+    if (bodies.length > 1) return route.continue();
+    await held;
+    return status
+      ? route.fulfill({ status, body: '{"error":"no"}' })
+      : route.continue();
+  });
+  return {
+    bodies,
+    answer: async () => {
+      const response = page.waitForResponse(
+        (item) =>
+          item.request().method() === "POST" && /\/messages$/.test(item.url()),
+      );
+      answer();
+      await response;
+    },
+  };
+}
+async function plainBox(page: Page) {
+  await page.getByRole("button", { name: "Plain text" }).click();
+  await expect(page.locator("textarea#message")).toBeFocused();
+}
+/** The current room's sidebar button. */
+async function here(page: Page) {
+  const name = await page
+    .locator("h2, h1")
+    .filter({ hasText: /^# editor-/ })
+    .first()
+    .innerText();
+  return page
+    .locator("aside, nav")
+    .getByRole("button", { name: new RegExp(name) })
+    .first();
+}
+async function otherRoom(page: Page) {
+  await page.getByLabel("Name", { exact: true }).fill(`other-${Date.now()}`);
+  await page.getByRole("button", { name: "Create room" }).click();
+  await expect(
+    page.getByRole("heading", { name: /^# other-/ }).first(),
+  ).toBeVisible();
+}
+
+for (const mode of ["rich", "plain"] as const) {
+  test(`lost-draft check: text and a file added during a slow send (${mode} box)`, async ({
+    page,
+  }, info) => {
+    await open(page, info.project.name);
+    if (mode === "plain") await plainBox(page);
+    const { bodies, answer } = await holdFirstSend(page);
+    await page.keyboard.type("first");
+    await page.keyboard.press(`${MOD}+Enter`);
+    await expect.poll(() => bodies.length).toBe(1);
+    await page.keyboard.press("End");
+    await page.keyboard.type("second");
+    await paste(page, null, "", true);
+    await expect(chips(page)).toHaveCount(1);
+    await answer();
+    await expect(page.locator(".messages .rich-text").last()).toHaveText(
+      "first",
+    );
+    if (mode === "rich") await expect(box(page)).toHaveText(/second/);
+    else await expect(box(page)).toHaveValue(/second/);
+    await expect(chips(page)).toHaveCount(1);
+  });
+
+  for (const when of ["away", "back"] as const)
+    test(`lost-draft check: a send that fails after switching rooms, answered while ${when} (${mode} box)`, async ({
+      page,
+    }, info) => {
+      await open(page, info.project.name);
+      if (mode === "plain") await plainBox(page);
+      const room = await here(page);
+      const { bodies, answer } = await holdFirstSend(page, 500);
+      await paste(page, null, "", true);
+      await expect(chips(page)).toHaveCount(1);
+      await page.keyboard.type("first **one**");
+      await page.keyboard.press(`${MOD}+Enter`);
+      await expect.poll(() => bodies.length).toBe(1);
+      const second = mode === "rich" ? "- second" : "second";
+      await page.keyboard.type(second);
+      await paste(page, null, "", true);
+      await otherRoom(page);
+      // The other room has its own draft.
+      await expect(chips(page)).toHaveCount(0);
+      await box(page).click();
+      await page.keyboard.type("elsewhere");
+      if (when === "away") {
+        await answer();
+        await page.waitForTimeout(200);
+      }
+      await room.click();
+      await expect(
+        page.getByRole("heading", { name: /^# editor-/ }).first(),
+      ).toBeVisible();
+      if (when === "back") await answer();
+      await expect(chips(page)).toHaveCount(2);
+      if (mode === "rich") {
+        await expect(box(page).locator("strong")).toHaveText("one");
+        await expect(box(page).locator("li")).toHaveText("second");
+      }
+      await box(page).click();
+      const { body, attachment_ids } = await send(page);
+      expect(body).toBe(`first **one**\n${second}`);
+      expect(new Set(attachment_ids).size).toBe(2);
+      expect(attachment_ids).toContain(bodies[0]?.attachment_ids[0]);
+    });
+
+  test(`lost-draft check: a send that fails after the box closed for the library (${mode} box)`, async ({
+    page,
+  }, info) => {
+    await open(page, info.project.name);
+    if (mode === "plain") await plainBox(page);
+    const room = await here(page);
+    const { bodies, answer } = await holdFirstSend(page, 500);
+    await paste(page, null, "", true);
+    await expect(chips(page)).toHaveCount(1);
+    await page.keyboard.type("first");
+    await page.keyboard.press(`${MOD}+Enter`);
+    await expect.poll(() => bodies.length).toBe(1);
+    await page.getByRole("button", { name: "Manage library" }).click();
+    await expect(box(page)).toHaveCount(0);
+    await answer();
+    await room.click();
+    await expect(chips(page)).toHaveCount(1);
+    await box(page).click();
+    const { body, attachment_ids } = await send(page);
+    expect(body).toBe("first");
+    expect(attachment_ids).toEqual(bodies[0]?.attachment_ids);
+  });
+}
+
+test("closing the page asks first only while a message is being sent", async ({
+  page,
+}, info) => {
+  await open(page, info.project.name);
+  const { bodies, answer } = await holdFirstSend(page);
+  await page.keyboard.type("first");
+  await page.keyboard.press(`${MOD}+Enter`);
+  await expect.poll(() => bodies.length).toBe(1);
+  let asked = 0;
+  page.on("dialog", (dialog) => {
+    asked += 1;
+    void dialog.dismiss();
+  });
+  await page.close({ runBeforeUnload: true });
+  await expect.poll(() => asked).toBe(1);
+  await answer();
+  await expect(page.getByText("Sending…")).toHaveCount(0);
+  const closed = page.waitForEvent("close");
+  await page.close({ runBeforeUnload: true });
+  await closed;
+  expect(asked).toBe(1);
+});

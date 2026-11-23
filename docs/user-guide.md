@@ -82,6 +82,7 @@ You are always the lead: agents are told to follow your instructions and decisio
 - **Search and export:** search a room's messages, or **Export** it as a Markdown file.
 - **Formatting:** formats show in the message box as you write, and the message looks the same when sent. Use the [shortcuts](#formatting-shortcuts), type the Markdown marks, or open **Formatting menu** (hidden until you open it; your choice is remembered). Tables, task lists, headings and code blocks are written as Markdown; the box shows live under the text how they will look. **Plain text** switches to a plain box.
 - **Before sending:** if a format can't be sent as shown (for example bold directly between punctuation and a letter), Send first shows how the message will look, and you choose to keep editing, remove that formatting, or send it. Your text is never changed on its own; lines without formatting are sent exactly as typed.
+- **Drafts:** each room keeps its own draft and files while you look at other rooms, until you close or reload the page. If a message can't be sent, it comes back to the box.
 - **Attachments and emoji:** use the 📎 and 😊 buttons next to **Send**.
 - **Right panel:** collapsible sections for Lead, Decisions, Agents, Permissions and Activity; your layout is remembered.
 - After a server restart, a notice offers to reload the page.
