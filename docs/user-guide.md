@@ -106,7 +106,7 @@ Also under **Shortcuts** below the message box. On Windows and Linux, use Ctrl f
 | Undo, redo                     | ⌘Z, ⌘⇧Z |                                         |
 | Send                           | ⌘Enter  |                                         |
 
-Press the same keys again to remove a format. Backspace right after typing a mark takes the formatting back. Enter on an empty list item or quote line leaves it. Tab leaves the box.
+Press the same keys again to remove a format (for a link, choose **Remove link**). Ctrl+Y or ⌘Y also redoes. Backspace right after typing a mark takes the formatting back. Enter on an empty list item or quote line leaves it. Tab leaves the box.
 
 ## 5. Skills
 
