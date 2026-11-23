@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BRIDGE_PROTOCOL_VERSION } from "../../protocol.js";
 import fastifyStatic from "@fastify/static";
 import Fastify, {
+  LogController,
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
@@ -150,7 +151,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         }
       : false,
     // The page and the agents ask all the time; see onResponse below.
-    disableRequestLogging: true,
+    logController: new LogController({ disableRequestLogging: true }),
     forceCloseConnections: true,
   });
   // Changes and problems only, so the log isn't filled by routine requests.
