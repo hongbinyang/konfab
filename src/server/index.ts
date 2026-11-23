@@ -1,11 +1,17 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { buildApp } from "./api/app.js";
 import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
+import { LogFile, logDirectory, trimOutputFile } from "./log-file.js";
 import { createRuntime } from "./runtime.js";
 import { resolveGithubToken } from "./github-token.js";
 
 const home = konfabHome();
 ensureHome(home);
+const logs = logDirectory(home);
+// server.log is what earlier login items wrote to.
+for (const name of ["output.log", "server.log"])
+  trimOutputFile(join(logs, name));
+const logFile = new LogFile(logs);
 const config = loadConfig(home);
 const { db, service, skills, sources } = createRuntime(
   databasePath(home),
@@ -29,6 +35,7 @@ const app = await buildApp({
   port: config.server.port,
   webDir: resolve(import.meta.dirname, "../web"),
   logger: true,
+  logStream: logFile,
 });
 
 const tick = setInterval(
@@ -51,7 +58,11 @@ await app.listen({ host: "127.0.0.1", port: config.server.port });
 // the process itself, without probing the port.
 process.send?.({ type: "konfab-ready", port: config.server.port });
 
-// Printed directly, so the one-time code stays out of the structured logs.
+// Printed directly, so the one-time code stays out of the logs. Only to a
+// person's terminal: a login item's output is kept in a file.
 console.log(
-  `\nSign in to Konfab: http://127.0.0.1:${config.server.port}/login?code=${service.createLoginCode()}\n`,
+  process.stdout.isTTY
+    ? `\nSign in to Konfab: http://127.0.0.1:${config.server.port}/login?code=${service.createLoginCode()}\n`
+    : `Konfab is running on port ${config.server.port}. Run \`npm run login-link\` to sign in.`,
 );
+if (process.stdout.isTTY) console.log(`Logs: ${logFile.path}`);

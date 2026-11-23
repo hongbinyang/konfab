@@ -1,14 +1,16 @@
 import Database from "better-sqlite3";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
+  closeSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -453,4 +455,69 @@ describe("built app over real processes", () => {
     expect(statSync(join(home, "app-setup.md")).mode & 0o777).toBe(0o600);
     expect(statSync(join(home, "konfab.db")).mode & 0o777).toBe(0o600);
   });
+});
+
+describe("the running server's log", () => {
+  it("keeps running with a log it can't write, and keeps sign-in codes out of every file", async () => {
+    const home = mkdtempSync(join(tmpdir(), "konfab-log-smoke-"));
+    const port = await new Promise<number>((done) => {
+      const probe = createServer().listen(0, "127.0.0.1", () => {
+        const { port: free } = probe.address() as AddressInfo;
+        probe.close(() => done(free));
+      });
+    });
+    writeFileSync(join(home, "config.yaml"), `server:\n  port: ${port}\n`);
+    const env = {
+      PATH: process.env.PATH ?? "",
+      HOME: home,
+      KONFAB_HOME: home,
+      KONFAB_ISOLATED: "1",
+    };
+    /** Starts as a login item does, with output to a file, and stops it. */
+    const run = async () => {
+      const output = join(home, "output.txt");
+      const fd = openSync(output, "a");
+      const child = spawn(process.execPath, ["dist/server/index.js"], {
+        env,
+        stdio: ["ignore", fd, fd],
+      });
+      closeSync(fd);
+      try {
+        for (let wait = 0; wait < 100; wait += 1) {
+          try {
+            if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break;
+          } catch {
+            // Not listening yet.
+          }
+          await new Promise((done) => setTimeout(done, 100));
+        }
+        const answer = await fetch(`http://127.0.0.1:${port}/api/overview`);
+        expect(answer.status).toBe(401);
+        await fetch(`http://127.0.0.1:${port}/login?code=kfl_not-a-real-code`);
+      } finally {
+        child.kill("SIGTERM");
+        await new Promise((done) => child.once("exit", done));
+      }
+      return readFileSync(output, "utf8");
+    };
+    try {
+      writeFileSync(join(home, "logs"), "in the way");
+      expect(await run()).toContain("can't write its log");
+      rmSync(join(home, "logs"));
+      const output = await run();
+      await run();
+      const log = readFileSync(join(home, "logs", "konfab.log"), "utf8");
+      // Continued after a restart, with problems but no routine requests.
+      expect(log.match(/Server listening/g)).toHaveLength(2);
+      expect(log.match(/"statusCode":401/g)?.length).toBeGreaterThanOrEqual(2);
+      expect(log).toContain('"url":"/login"');
+      expect(log).not.toContain('"statusCode":200');
+      for (const text of [log, output]) {
+        expect(text).not.toContain("kfl_");
+        expect(text).not.toContain("code=");
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

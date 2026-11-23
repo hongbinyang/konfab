@@ -149,7 +149,26 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           },
         }
       : false,
+    // The page and the agents ask all the time; see onResponse below.
+    disableRequestLogging: true,
     forceCloseConnections: true,
+  });
+  // Changes and problems only, so the log isn't filled by routine requests.
+  app.addHook("onResponse", async (request, reply) => {
+    const path = request.url.split("?")[0] ?? "";
+    const routine =
+      request.method === "GET" ||
+      /^\/agent\/(wait|permission\/wait)/.test(path);
+    const { statusCode } = reply;
+    if (statusCode < 400 && routine && path !== "/login") return;
+    const entry = {
+      req: request,
+      statusCode,
+      ms: Math.round(reply.elapsedTime),
+    };
+    if (statusCode >= 500) request.log.error(entry, "request failed");
+    else if (statusCode >= 400) request.log.warn(entry, "request refused");
+    else request.log.info(entry, "request");
   });
 
   app.addContentTypeParser(

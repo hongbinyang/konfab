@@ -4,7 +4,9 @@ import {
   accessSync,
   constants,
   existsSync,
+  lstatSync,
   readFileSync,
+  readdirSync,
   realpathSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -145,6 +147,28 @@ export async function diagnose(
         fix: `Make it yours and writable: \`chmod u+rwx "${home}"\` (check its owner with \`ls -ld "${home}"\`).`,
       });
     }
+  }
+
+  if (existsSync(home)) {
+    const size = (path: string): number => {
+      try {
+        const info = lstatSync(path);
+        if (!info.isDirectory()) return info.isFile() ? info.size : 0;
+        return readdirSync(path).reduce(
+          (sum, name) => sum + size(join(path, name)),
+          0,
+        );
+      } catch {
+        return 0;
+      }
+    };
+    const mb = (...names: string[]) =>
+      `${(names.reduce((sum, name) => sum + size(join(home, name)), 0) / 1024 / 1024).toFixed(1)} MB`;
+    add({
+      check: "Disk use",
+      level: "ok",
+      detail: `database ${mb("konfab.db", "konfab.db-wal", "konfab.db-shm")}, files ${mb("files")}, backups ${mb("backups")}, logs ${mb("logs")}`,
+    });
   }
 
   let port = 8787;

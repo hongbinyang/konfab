@@ -276,6 +276,8 @@ When the token expires, create a new one and repeat steps 2 and 3. To stop using
 
 To stop, select **Take a break** (or press stop in each app), then press **Ctrl+C** in the `npm start` terminal. If that terminal is gone, `kill $(lsof -ti tcp:8787 -sTCP:LISTEN)` shuts Konfab down the same way.
 
+**Logs:** `~/.konfab/logs/konfab.log`, readable only by you. At 5 MB it becomes `konfab.log.1`; three older files are kept, so logs take at most about 20 MB. They record changes and problems, not routine requests, message text, tokens or sign-in links. If the log can't be written, Konfab keeps running. With start at login, other output such as a crash goes to `output.log`, which is cut to its last part at the next start when it has grown past 1 MB. `npm run doctor` shows how much space the database, files, backups and logs use; Konfab deletes none of the others by itself.
+
 To uninstall: run `npm run login-item -- uninstall` if you turned it on, delete the `konfab` entry from `~/.codex/config.toml` and `~/.claude.json` (and any old project `.mcp.json` files), optionally run `npm run setup -- --github-token --remove`, and delete `~/.konfab/` if you no longer need your rooms and skills.
 
 ## Configuration

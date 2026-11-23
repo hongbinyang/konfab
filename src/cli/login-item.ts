@@ -41,7 +41,7 @@ if (action === "install") {
       nodePath: process.execPath,
       serverPath: resolve(here, "../server/index.js"),
       workingDirectory: resolve(here, "../.."),
-      logPath: join(logDir, "server.log"),
+      logPath: join(logDir, "output.log"),
     }),
     { mode: 0o600 },
   );
