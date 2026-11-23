@@ -207,7 +207,7 @@ Rooms, messages, decisions and agent sessions live in `~/.konfab/konfab.db` and 
 
 Agents carry on in the same conversations, even if they were mid-turn, and a retried request is never applied twice. If Konfab is down for more than 60 seconds while an agent is mid-turn, the agent is told the request wasn't confirmed; bring it back as in [section 8](#8-bring-an-agent-back). To allow longer restarts, set `KONFAB_RETRY_TIMEOUT_MS` (up to `600000`) in each app's connector entry. If an agent never comes back, the room waits on its turn for up to `turn_timeout_minutes`.
 
-**After updating Konfab** (`git pull`, then `npm ci` if dependencies changed): restart the server, reload the tab, then restart the Konfab connector in each app (or quit and reopen it). A card showing **Reload connector** means that app still runs an older connector.
+**After updating Konfab** (stop the server, `git pull`, then `npm ci`; if you skip `npm ci` and the dependencies changed, `npm start` stops and says so): start the server, reload the tab, then restart the Konfab connector in each app (or quit and reopen it). A card showing **Reload connector** means that app still runs an older connector.
 
 ## 15. GitHub token (optional)
 
