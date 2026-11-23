@@ -1,9 +1,9 @@
 import Database from "better-sqlite3";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
-  closeSync,
+  existsSync,
+  mkdirSync,
   mkdtempSync,
-  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -458,66 +458,160 @@ describe("built app over real processes", () => {
 });
 
 describe("the running server's log", () => {
-  it("keeps running with a log it can't write, and keeps sign-in codes out of every file", async () => {
-    const home = mkdtempSync(join(tmpdir(), "konfab-log-smoke-"));
-    const port = await new Promise<number>((done) => {
+  let home: string;
+  let port: number;
+  let env: Record<string, string>;
+  const children: ChildProcess[] = [];
+  beforeEach(async () => {
+    home = mkdtempSync(join(tmpdir(), "konfab-log-smoke-"));
+    port = await new Promise<number>((done) => {
       const probe = createServer().listen(0, "127.0.0.1", () => {
         const { port: free } = probe.address() as AddressInfo;
         probe.close(() => done(free));
       });
     });
     writeFileSync(join(home, "config.yaml"), `server:\n  port: ${port}\n`);
-    const env = {
-      PATH: process.env.PATH ?? "",
+    // As little as macOS gives a login item.
+    env = {
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
       HOME: home,
       KONFAB_HOME: home,
       KONFAB_ISOLATED: "1",
     };
-    /** Starts as a login item does, with output to a file, and stops it. */
-    const run = async () => {
-      const output = join(home, "output.txt");
-      const fd = openSync(output, "a");
-      const child = spawn(process.execPath, ["dist/server/index.js"], {
-        env,
-        stdio: ["ignore", fd, fd],
-      });
-      closeSync(fd);
+  });
+  afterEach(() => {
+    for (const child of children.splice(0))
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill("SIGKILL");
+    rmSync(home, { recursive: true, force: true });
+  });
+  const log = (name: string) => readFileSync(join(home, "logs", name), "utf8");
+  const listening = async () => {
+    for (let wait = 0; wait < 100; wait += 1) {
       try {
-        for (let wait = 0; wait < 100; wait += 1) {
-          try {
-            if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break;
-          } catch {
-            // Not listening yet.
-          }
-          await new Promise((done) => setTimeout(done, 100));
-        }
-        const answer = await fetch(`http://127.0.0.1:${port}/api/overview`);
-        expect(answer.status).toBe(401);
-        await fetch(`http://127.0.0.1:${port}/login?code=kfl_not-a-real-code`);
-      } finally {
-        child.kill("SIGTERM");
-        await new Promise((done) => child.once("exit", done));
+        return (await fetch(`http://127.0.0.1:${port}/api/overview`)).status;
+      } catch {
+        await new Promise((done) => setTimeout(done, 100));
       }
-      return readFileSync(output, "utf8");
-    };
-    try {
-      writeFileSync(join(home, "logs"), "in the way");
-      expect(await run()).toContain("can't write its log");
-      rmSync(join(home, "logs"));
-      const output = await run();
-      await run();
-      const log = readFileSync(join(home, "logs", "konfab.log"), "utf8");
-      // Continued after a restart, with problems but no routine requests.
-      expect(log.match(/Server listening/g)).toHaveLength(2);
-      expect(log.match(/"statusCode":401/g)?.length).toBeGreaterThanOrEqual(2);
-      expect(log).toContain('"url":"/login"');
-      expect(log).not.toContain('"statusCode":200');
-      for (const text of [log, output]) {
-        expect(text).not.toContain("kfl_");
-        expect(text).not.toContain("code=");
-      }
-    } finally {
-      rmSync(home, { recursive: true, force: true });
     }
+    throw new Error("The server didn't start");
+  };
+  /** In its own group, away from a terminal, with its output thrown away. */
+  const start = (script: string, extra: Record<string, string> = {}) => {
+    const child = spawn(process.execPath, [join(ROOT, script)], {
+      cwd: ROOT,
+      env: { ...env, ...extra },
+      stdio: "ignore",
+      detached: true,
+    });
+    children.push(child);
+    return child;
+  };
+  const ended = (child: ChildProcess) =>
+    new Promise<number | null>((done) =>
+      child.exitCode !== null ? done(child.exitCode) : child.once("exit", done),
+    );
+
+  it("as a login item, keeps its logs bounded and private, without codes or secrets", async () => {
+    const runner = start("dist/cli/login-run.js");
+    expect(await listening()).toBe(401);
+    await fetch(`http://127.0.0.1:${port}/login?code=kfl_not-a-real-code`);
+    await fetch(`http://127.0.0.1:${port}/agent/post`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer kfb_secret-token",
+        cookie: "konfab_session=secret-session",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ body: "secret message text" }),
+    });
+    runner.kill("SIGTERM");
+    // A normal stop, so macOS doesn't start it again.
+    expect(await ended(runner)).toBe(0);
+    await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
+    expect(log("konfab.log")).toContain("Server listening");
+    expect(log("konfab.log")).toContain('"url":"/agent/post"');
+    expect(log("output.log")).toContain("npm run login-link");
+    for (const name of ["konfab.log", "output.log"]) {
+      expect(log(name)).not.toMatch(/kfl_|kfb_|code=|secret/);
+      if (process.platform !== "win32")
+        expect(statSync(join(home, "logs", name)).mode & 0o777).toBe(0o600);
+    }
+  }, 60_000);
+
+  it("as a login item, bounds endless output while it runs, and ends with the server after a crash", async () => {
+    const noisy = join(home, "noisy.mjs");
+    writeFileSync(
+      noisy,
+      `const line = "x".repeat(1000) + "\\n";
+       let sent = 0;
+       const more = () => {
+         for (; sent < 8000; sent += 1)
+           if (!process.stderr.write(line)) { sent += 1; return process.stderr.once("drain", more); }
+         setTimeout(() => { throw new Error("crashed on purpose"); }, 300);
+       };
+       if (process.argv[1].endsWith("server/index.js")) more();`,
+    );
+    const runner = start("dist/cli/login-run.js", {
+      NODE_OPTIONS: `--import=${noisy}`,
+    });
+    let largest = 0;
+    const watch = setInterval(() => {
+      for (const name of ["output.log", "output.log.1"])
+        try {
+          largest = Math.max(largest, statSync(join(home, "logs", name)).size);
+        } catch {
+          // Not there at this moment.
+        }
+    }, 5);
+    const code = await ended(runner);
+    clearInterval(watch);
+    expect(code).not.toBe(0);
+    expect(largest).toBeGreaterThan(500_000);
+    expect(largest).toBeLessThanOrEqual(1024 * 1024);
+    expect(
+      readdirSync(join(home, "logs")).filter((name) =>
+        /^output\.log(\.\d+)?$/.test(name),
+      ),
+    ).toEqual(["output.log", "output.log.1"]);
+    expect(log("output.log")).toContain("crashed on purpose");
+    expect(log("output.log")).toContain("Konfab stopped (exit code 1)");
+  }, 60_000);
+
+  it("a second start on the same port changes no log of the first, or of earlier versions", async () => {
+    mkdirSync(join(home, "logs"));
+    const legacy = "old history\n".repeat(600_000);
+    writeFileSync(join(home, "logs", "server.log"), legacy);
+    const first = start("dist/server/index.js");
+    await listening();
+    const second = start("dist/server/index.js");
+    expect(await ended(second)).not.toBe(0);
+    expect(await listening()).toBe(401);
+    const writers = log("konfab.log")
+      .trim()
+      .split("\n")
+      .map((line) => (JSON.parse(line) as { pid: number }).pid);
+    expect(new Set(writers)).toEqual(new Set([first.pid]));
+    expect(existsSync(join(home, "logs", "konfab.log.1"))).toBe(false);
+    first.kill("SIGTERM");
+    await ended(first);
+    expect(log("server.log")).toBe(legacy);
+  }, 60_000);
+
+  it("runs with a log it can't write, and writes it after a restart", async () => {
+    writeFileSync(join(home, "logs"), "in the way");
+    const first = start("dist/server/index.js");
+    expect(await listening()).toBe(401);
+    first.kill("SIGTERM");
+    expect(await ended(first)).toBe(0);
+    rmSync(join(home, "logs"));
+    for (let round = 0; round < 2; round += 1) {
+      const next = start("dist/server/index.js");
+      await listening();
+      next.kill("SIGTERM");
+      await ended(next);
+    }
+    expect(log("konfab.log").match(/Server listening/g)).toHaveLength(2);
+    expect(log("konfab.log")).not.toContain('"statusCode":200');
   }, 60_000);
 });

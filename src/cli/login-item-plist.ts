@@ -9,9 +9,9 @@ function escapeXml(value: string): string {
 
 export function loginItemPlist(options: {
   nodePath: string;
-  serverPath: string;
+  /** Runs the server and keeps what it prints in a bounded log. */
+  runnerPath: string;
   workingDirectory: string;
-  logPath: string;
 }): string {
   const text = (value: string): string =>
     `<string>${escapeXml(value)}</string>`;
@@ -24,7 +24,7 @@ export function loginItemPlist(options: {
   <key>ProgramArguments</key>
   <array>
     ${text(options.nodePath)}
-    ${text(options.serverPath)}
+    ${text(options.runnerPath)}
   </array>
   <key>WorkingDirectory</key>
   ${text(options.workingDirectory)}
@@ -36,9 +36,9 @@ export function loginItemPlist(options: {
     <false/>
   </dict>
   <key>StandardOutPath</key>
-  ${text(options.logPath)}
+  ${text("/dev/null")}
   <key>StandardErrorPath</key>
-  ${text(options.logPath)}
+  ${text("/dev/null")}
 </dict>
 </plist>
 `;

@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { konfabHome } from "../server/config.js";
 import { loginItemPlist, LOGIN_ITEM_LABEL } from "./login-item-plist.js";
 
 const plistPath = join(
@@ -29,9 +28,6 @@ const uninstall = (): void => {
 };
 
 if (action === "install") {
-  const home = konfabHome();
-  const logDir = join(home, "logs");
-  mkdirSync(logDir, { recursive: true, mode: 0o700 });
   uninstall();
   mkdirSync(dirname(plistPath), { recursive: true });
   const here = dirname(fileURLToPath(import.meta.url));
@@ -39,9 +35,8 @@ if (action === "install") {
     plistPath,
     loginItemPlist({
       nodePath: process.execPath,
-      serverPath: resolve(here, "../server/index.js"),
+      runnerPath: resolve(here, "login-run.js"),
       workingDirectory: resolve(here, "../.."),
-      logPath: join(logDir, "output.log"),
     }),
     { mode: 0o600 },
   );

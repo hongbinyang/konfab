@@ -6,14 +6,13 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readSync,
   renameSync,
   rmSync,
   writeSync,
-  ftruncateSync,
 } from "node:fs";
 import { join } from "node:path";
 import { Writable } from "node:stream";
+import Database from "better-sqlite3";
 
 export const LOG_NAME = "konfab.log";
 export const LOG_MAX_BYTES = 5 * 1024 * 1024;
@@ -22,9 +21,13 @@ export const LOG_KEEP = 3;
 const LINE_MAX_BYTES = 64 * 1024;
 const RETRY_MS = 60_000;
 
+/** What a login item prints, such as a crash. */
+export const OUTPUT_NAME = "output.log";
+
 export const logDirectory = (home: string): string => join(home, "logs");
 
 type Options = {
+  name?: string;
   maxBytes?: number;
   keep?: number;
   now?: () => number;
@@ -34,12 +37,14 @@ type Options = {
 
 /**
  * The server's log, in a bounded number of files that only this user can
- * read. A problem with the log never stops Konfab: lines are dropped, and
- * writing is tried again a minute later.
+ * read. Only one process writes or rotates them at a time. A problem with the
+ * log never stops Konfab: lines are dropped, and writing is tried again a
+ * minute later. Files with other names are never touched.
  */
 export class LogFile extends Writable {
   readonly path: string;
   private fd: number | null = null;
+  private lock: Database.Database | null = null;
   private size = 0;
   private retryAt = 0;
   private warned = false;
@@ -53,7 +58,7 @@ export class LogFile extends Writable {
     options: Options = {},
   ) {
     super({ decodeStrings: true });
-    this.path = join(directory, LOG_NAME);
+    this.path = join(directory, options.name ?? LOG_NAME);
     this.maxBytes = options.maxBytes ?? LOG_MAX_BYTES;
     this.keep = options.keep ?? LOG_KEEP;
     this.now = options.now ?? Date.now;
@@ -89,6 +94,8 @@ export class LogFile extends Writable {
     done: (error?: Error | null) => void,
   ): void {
     this.close();
+    this.lock?.close();
+    this.lock = null;
     done(error);
   }
 
@@ -115,6 +122,7 @@ export class LogFile extends Writable {
     if (!lstatSync(this.directory).isDirectory())
       throw new Error("the logs folder isn't a folder");
     chmodSync(this.directory, 0o700);
+    this.takeLock();
     const fd = openSync(
       this.path,
       constants.O_WRONLY |
@@ -134,6 +142,28 @@ export class LogFile extends Writable {
     this.size = info.size;
     chmodSync(this.path, 0o600);
     if (this.size >= this.maxBytes) this.rotate();
+  }
+
+  /** Held until this process ends, also by a crash; another can't rotate. */
+  private takeLock(): void {
+    if (this.lock) return;
+    const path = `${this.path}.lock`;
+    const existing = lstatSync(path, { throwIfNoEntry: false });
+    if (existing && !existing.isFile())
+      throw new Error("its lock isn't a regular file");
+    const lock = new Database(path, { timeout: 0 });
+    try {
+      chmodSync(path, 0o600);
+      // Nothing is stored in it, so no file beside it either.
+      lock.pragma("journal_mode = MEMORY");
+      lock.exec("BEGIN EXCLUSIVE");
+    } catch (error) {
+      lock.close();
+      throw (error as { code?: string }).code === "SQLITE_BUSY"
+        ? new Error("another Konfab is writing it")
+        : error;
+    }
+    this.lock = lock;
   }
 
   private rotate(): void {
@@ -162,35 +192,5 @@ export class LogFile extends Writable {
       // Nothing left to close.
     }
     this.fd = null;
-  }
-}
-
-/**
- * macOS writes what the login item prints, such as a crash, to a file that
- * nothing rotates. Keeps its last part when it has grown.
- */
-export function trimOutputFile(
-  path: string,
-  maxBytes = 1024 * 1024,
-  keepBytes = 256 * 1024,
-): void {
-  let fd: number | null = null;
-  try {
-    fd = openSync(
-      path,
-      constants.O_RDWR |
-        (constants.O_NOFOLLOW ?? 0) |
-        (constants.O_NONBLOCK ?? 0),
-    );
-    const info = fstatSync(fd);
-    if (!info.isFile() || info.size <= maxBytes) return;
-    const tail = Buffer.alloc(keepBytes);
-    const read = readSync(fd, tail, 0, keepBytes, info.size - keepBytes);
-    ftruncateSync(fd, 0);
-    writeSync(fd, tail, 0, read, 0);
-  } catch {
-    // There is none, or it can't be trimmed; that mustn't stop Konfab.
-  } finally {
-    if (fd !== null) closeSync(fd);
   }
 }

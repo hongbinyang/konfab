@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { configPath, parseConfig } from "../server/config.js";
 import { hashToken } from "../server/domain/service.js";
+import { LOGIN_ITEM_LABEL } from "./login-item-plist.js";
 import { readClaude, readCodex, tokenFrom } from "./connector-config.js";
 import { describeRoomPosts, roomPostsStatus } from "./room-posts.js";
 
@@ -361,6 +362,28 @@ export async function diagnose(
               : "Set KONFAB_GITHUB_TOKEN before starting Konfab.",
         },
   );
+  if (process.platform === "darwin") {
+    const plist = join(
+      env.HOME ?? homedir(),
+      "Library/LaunchAgents",
+      `${LOGIN_ITEM_LABEL}.plist`,
+    );
+    let text = "";
+    try {
+      text = readFileSync(plist, "utf8");
+    } catch {
+      // Not set up.
+    }
+    if (text && !text.includes("login-run.js"))
+      add({
+        check: "Start at login",
+        level: "warn",
+        detail:
+          "It was set up by an earlier version, whose output file has no size limit.",
+        fix: "Run `npm run login-item -- install` again.",
+      });
+    else if (text) add({ check: "Start at login", level: "ok", detail: plist });
+  }
   if (process.platform !== "darwin")
     add({
       check: "Start at login",

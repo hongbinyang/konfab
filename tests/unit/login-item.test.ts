@@ -7,9 +7,8 @@ import {
 describe("loginItemPlist", () => {
   const plist = loginItemPlist({
     nodePath: "/envs/konfab/bin/node",
-    serverPath: "/works/a&b/dist/server/index.js",
+    runnerPath: "/works/a&b/dist/cli/login-run.js",
     workingDirectory: "/works/a&b",
-    logPath: "/home/.konfab/logs/server.log",
   });
 
   it("uses absolute paths and starts at login", () => {
@@ -24,8 +23,16 @@ describe("loginItemPlist", () => {
     );
   });
 
+  it("keeps no file that macOS would let grow without a limit", () => {
+    expect(
+      plist.match(
+        /<key>Standard(Out|Error)Path<\/key>\s*<string>\/dev\/null<\/string>/g,
+      ),
+    ).toHaveLength(2);
+  });
+
   it("escapes special characters in paths", () => {
-    expect(plist).toContain("/works/a&amp;b/dist/server/index.js");
+    expect(plist).toContain("/works/a&amp;b/dist/cli/login-run.js");
     expect(plist).not.toContain("a&b");
   });
 });

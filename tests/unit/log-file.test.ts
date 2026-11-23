@@ -1,26 +1,20 @@
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
-  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  LOG_NAME,
-  LogFile,
-  trimOutputFile,
-} from "../../src/server/log-file.js";
+import { LOG_NAME, LogFile } from "../../src/server/log-file.js";
 
 describe("the server's log", () => {
   let root: string;
@@ -51,6 +45,7 @@ describe("the server's log", () => {
       LOG_NAME,
       `${LOG_NAME}.1`,
       `${LOG_NAME}.2`,
+      `${LOG_NAME}.lock`,
     ]);
     for (const name of readdirSync(dir))
       expect(statSync(join(dir, name)).size).toBeLessThanOrEqual(100);
@@ -62,8 +57,11 @@ describe("the server's log", () => {
   });
 
   it("continues after a restart, and rotates one that is already too big", () => {
-    open().write(line(1));
-    open().write(line(2));
+    for (const number of [1, 2]) {
+      const log = open();
+      log.write(line(number));
+      log.destroy();
+    }
     expect(read(LOG_NAME)).toBe(line(1) + line(2));
     appendFileSync(join(dir, LOG_NAME), "x".repeat(500));
     open().write(line(3));
@@ -120,20 +118,52 @@ describe("the server's log", () => {
     },
   );
 
-  it("cuts other output to its last part while it is open for appending", () => {
+  it("is written and rotated by one process at a time, and leaves other files alone", async () => {
     mkdirSync(dir);
-    const path = join(dir, "output.log");
-    trimOutputFile(path, 100, 20);
-    expect(existsSync(path)).toBe(false);
-    const writer = openSync(path, "a");
-    writeSync(writer, "a".repeat(90));
-    trimOutputFile(path, 100, 20);
-    expect(statSync(path).size).toBe(90);
-    writeSync(writer, "b".repeat(90));
-    trimOutputFile(path, 100, 20);
-    expect(readFileSync(path, "utf8")).toBe("b".repeat(20));
-    writeSync(writer, "c");
-    closeSync(writer);
-    expect(readFileSync(path, "utf8")).toBe(`${"b".repeat(20)}c`);
+    writeFileSync(join(dir, "server.log"), "x".repeat(5_000));
+    const first = open();
+    first.write(line(1));
+    const second = open();
+    for (let number = 2; number <= 20; number += 1) second.write(line(number));
+    expect(read(LOG_NAME)).toBe(line(1));
+    expect(existsSync(join(dir, `${LOG_NAME}.1`))).toBe(false);
+    expect(warnings).toEqual([
+      expect.stringContaining("another Konfab is writing it"),
+    ]);
+    // When the first ends, the second goes on a minute later.
+    await new Promise((done) => first.destroy().once("close", done));
+    second.write(line(21));
+    expect(read(LOG_NAME)).toBe(line(1));
+    time += 61_000;
+    second.write(line(22));
+    expect(read(LOG_NAME)).toBe(line(1) + line(22));
+    expect(statSync(join(dir, "server.log")).size).toBe(5_000);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "can be written again after the writer was killed",
+    async () => {
+      mkdirSync(dir);
+      const script = join(root, "hold.mjs");
+      writeFileSync(
+        script,
+        `import Database from ${JSON.stringify(import.meta.resolve("better-sqlite3"))};
+         const lock = new Database(${JSON.stringify(join(dir, `${LOG_NAME}.lock`))}, { timeout: 0 });
+         lock.exec("BEGIN EXCLUSIVE"); console.log("held"); setInterval(() => lock.open, 1000);`,
+      );
+      const holder = spawn(process.execPath, [script], {
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      await new Promise((done) => holder.stdout.once("data", done));
+      const log = open();
+      log.write(line(1));
+      expect(existsSync(join(dir, LOG_NAME))).toBe(false);
+      const gone = new Promise((done) => holder.once("exit", done));
+      holder.kill("SIGKILL");
+      await gone;
+      time += 61_000;
+      log.write(line(2));
+      expect(read(LOG_NAME)).toBe(line(2));
+    },
+  );
 });
