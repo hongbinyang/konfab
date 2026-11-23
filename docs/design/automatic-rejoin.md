@@ -24,13 +24,16 @@ A CLI can also continue a Codex conversation (`codex exec resume`), but then the
 | A normal turn ended by itself, then a message is queued                 | Delivered 7 seconds after queueing (small check with no Konfab)                      |
 | A turn interrupted, then a message is queued                            | Not delivered in 15 seconds; delivered after the next normal turn ended (same check) |
 
+| **An agent that ended its turn when the lead told it to: rejoin prompt queued, conversation loaded** | **Rejoined.** The same conversation started 1 second later, opened a new Konfab session, and answered a message in the room |
+| **The same, with the app closed: queued, app started, conversation then loaded** | **Rejoined.** Nothing until the conversation was loaded, then at once; one new session, and it answered |
+
 So a queued message waits when the conversation's last turn was **interrupted** (Stop pressed). That is the usual way an agent is stopped, and Konfab can't tell it from outside, so a button could leave a prompt waiting without saying why, to be delivered by some later message. A conversation whose agent simply ended its turn looks fine. After a usage limit or a crash: not tested.
 
-The rejoin itself, an agent calling `wait_for_turn` again after a queued prompt, is **still not proven**.
+The rejoin itself is proven once for each of the two last rows, with the server program the app uses. With the app's own window, only message delivery was seen, not a rejoin.
 
 ## Next tests (need the lead)
 
-1. From end to end with an agent whose turn ended by itself: a throwaway room and conversation; the agent stops; Konfab queues the rejoin prompt; the agent calls `wait_for_turn` again. Also with a conversation that isn't loaded, one that is busy, an archived one, two requests at once, and the app closed.
+1. In the app itself, with a real room (by the lead): from end to end, after Stop, after a usage limit, with a busy or archived conversation, and two requests at once.
 2. The same questions for Claude Code's desktop app.
 
 ## If it works
