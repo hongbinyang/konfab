@@ -76,6 +76,38 @@ A closed request costs one short turn. If the model ignores the instruction and 
 
 Activity shows "Rejoin asked", "Rejoined" and "Rejoin closed", without numbers.
 
+## What happens in each state of the Codex conversation
+
+| Conversation                                    | Expected                                                                                              | Known from              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------- |
+| Loaded, idle, last turn ended normally          | starts in seconds, rejoins                                                                            | seen                    |
+| Not loaded, or the app closed                   | waits until it is opened; the card says so after 60 seconds                                           | seen                    |
+| Interrupted (Stop)                              | waits for another turn to end normally; the card names Stop                                           | seen                    |
+| Busy with something else                        | waits for that turn to end                                                                            | expected, to be tested  |
+| After a usage limit or an error                 | may wait or fail again; the request expires                                                           | not known, to be tested |
+| Archived or deleted in Codex                    | refused, or waits; either way nothing is sent elsewhere and the request expires                       | not known, to be tested |
+| Its number is missing, not a UUID, or too old   | **Rejoin** isn't shown                                                                                | by design               |
+| It was continued as a new (forked) conversation | the prompt goes to the conversation that joined, never to another; the request is refused from others | by design               |
+
+Konfab never looks for another conversation, never falls back to a name, and never sends a second prompt by itself.
+
+## Detecting the command
+
+1. `rejoin.codex_command` if set; otherwise the app's own copy under `/Applications/ChatGPT.app` on macOS. Never a search through `PATH`.
+2. An absolute path to a regular, executable file; the file and its folders can be changed only by this user, an administrator or the system.
+3. `--version` answers within 5 seconds, and `queue --help` names `--thread` and `--message`. Checked when Konfab starts and before each use, so an app update is noticed. A version that hasn't been tried is allowed and shown as such in `npm run doctor`.
+4. On any failure the buttons aren't shown, and doctor says why.
+
+## Defaults
+
+| Setting                               | Default                   |
+| ------------------------------------- | ------------------------- |
+| `rejoin.enabled`                      | true, marked experimental |
+| `rejoin.wanted_minutes`               | 10 (1 to 60)              |
+| "Not back yet" after                  | 60 seconds                |
+| Open requests per agent, conversation | 1                         |
+| Automatic retries                     | none                      |
+
 ## Not included
 
 Starting or opening the Codex app, opening a conversation, starting by itself, Claude agents, changing approvals, reading Codex's own files, and withdrawing a queued message.
@@ -87,7 +119,27 @@ Starting or opening the Codex app, opening a conversation, starting by itself, C
 - Room names with quotes, line breaks, a leading dash or instructions: one argument, and no second prompt line.
 - The conversation's number and the request's number are in no page, export, log, activity or agent reply, apart from the request in its own prompt.
 - Page: both buttons, waiting, not back yet, cancel, keyboard, both themes, 375 px.
-- Real Codex, by hand with a throwaway room and conversation in the app: once each for loaded, not loaded, after Stop, late after expiry, and cancelled. Done only with the lead's OK, after checking the allowance.
+
+### Acceptance checks
+
+With the stand-in (automatic, every run):
+
+1. A wanted request brings the agent back once; the card changes from asked to waiting to back, and only `wait_for_turn` makes it "back".
+2. No situation in the tables sends to another conversation, sends twice by itself, or changes a room because of a late prompt.
+3. A crash or restart at any step leaves at most one wanted request, and it still expires.
+4. The manual prompts are there in every state.
+
+With the real server program and a temporary Konfab (by hand): loaded, not loaded, after Stop, busy, and a late prompt after expiry.
+
+In the app's own window (by hand, separate, with a throwaway room and conversation): loaded and idle; another conversation in front; the app closed and opened again; after Stop; cancelled before it arrives. Each is recorded as passed, failed or not run. The "experimental" mark stays until these pass. Both manual parts need the lead's OK and an allowance check first.
+
+## Remaining limitations
+
+- A model that ignores the prompt and calls `join_room` joins as with a pasted prompt.
+- A queued prompt can't be withdrawn; a late one costs a short turn.
+- It needs the Codex app and a running Konfab on the same computer and account. Only macOS is tried; Linux and Windows aren't offered until they are.
+- Codex may change `queue` or stop naming its conversation; then the buttons disappear.
+- Agents need a connector restart for the new tool, as after any connector change.
 
 ## Questions for the lead
 
