@@ -152,6 +152,25 @@ describe("getting started", () => {
     );
   });
 
+  it("Telegram setup needs a person at a terminal, and removing it needs nothing", () => {
+    const env = {
+      ...sentinelEnv,
+      KONFAB_HOME: join(sentinel, ".konfab"),
+      KONFAB_ISOLATED: "1",
+    };
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, ["dist/cli/setup.js", ...args], {
+        env,
+        encoding: "utf8",
+        input: "y\ny\ny\n",
+      });
+    const refused = run("--telegram");
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("interactive terminal");
+    expect(run("--telegram", "--token=x").status).toBe(1);
+    expect(existsSync(join(sentinel, ".konfab", "telegram.json"))).toBe(false);
+  });
+
   describe("quickstart's install policy", () => {
     const project = () => {
       const root = join(dir, "project");

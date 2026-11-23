@@ -23,6 +23,7 @@ import {
 } from "./composer-drafts";
 import { MessageInput } from "./message-editor/MessageInput";
 import type { EditorHandle } from "./message-editor/RichEditor";
+import { PhoneNotices, useActivity } from "./PhoneNotices";
 import { RichText } from "./RichText";
 import {
   request,
@@ -96,6 +97,7 @@ export function App() {
   const [libraryDirty, setLibraryDirty] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [pageConnected, setPageConnected] = useState(false);
+  useActivity();
   const [serverRestarted, setServerRestarted] = useState(false);
   const instanceId = useRef<string | undefined>(undefined);
   const [error, setError] = useState("");
@@ -2392,6 +2394,7 @@ function Panel({
             {pageConnected ? "Page connected" : "Page disconnected"}
           </p>
           <NotificationSetting />
+          <PhoneNotices />
         </CollapsibleSection>
         {overview.permissions.length > 0 && (
           <CollapsibleSection

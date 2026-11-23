@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import { buildApp } from "./api/app.js";
 import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
 import { LogFile, logDirectory } from "./log-file.js";
+import { TelegramNotices } from "./telegram/notices.js";
+import { resolveTelegramToken } from "./telegram/token.js";
 import { createRuntime } from "./runtime.js";
 import { resolveGithubToken } from "./github-token.js";
 
@@ -23,7 +25,16 @@ const { db, service, skills, sources } = createRuntime(
 service.recoverAfterRestart();
 service.recoverDeletedRooms();
 
+const notices = new TelegramNotices({
+  db,
+  home,
+  options: config.phone_notices,
+  token: resolveTelegramToken,
+  warn: (message) => app.log.warn(message),
+});
+
 const app = await buildApp({
+  notices,
   service,
   skills,
   sources,
@@ -39,8 +50,13 @@ const tick = setInterval(
   config.server.tick_seconds * 1000,
 );
 
+// Apart from the rooms' own clock, which must not wait for it.
+const noticesTick = setInterval(() => void notices.tick(), 15_000);
+
 const shutdown = async (): Promise<void> => {
   clearInterval(tick);
+  clearInterval(noticesTick);
+  await notices.settled();
   await sources.close();
   await app.close();
   db.close();

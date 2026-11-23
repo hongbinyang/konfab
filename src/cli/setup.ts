@@ -23,6 +23,7 @@ import {
   recover,
 } from "./setup-connectors.js";
 import { snapshot } from "./safe-config-files.js";
+import { runTelegramSetup } from "./telegram-setup.js";
 import { setupGithubToken } from "../server/github-token.js";
 import {
   allowRoomPosts,
@@ -60,7 +61,16 @@ function roomPostsStep(codexPath: string, statePath: string) {
 }
 
 const args = process.argv.slice(2);
-if (args.includes("--github-token")) {
+if (args.includes("--telegram")) {
+  try {
+    if (!(await runTelegramSetup(args))) process.exitCode = 1;
+  } catch (error) {
+    console.error(
+      error instanceof Error ? error.message : "Telegram setup failed.",
+    );
+    process.exitCode = 1;
+  }
+} else if (args.includes("--github-token")) {
   try {
     setupGithubToken(args);
   } catch (error) {

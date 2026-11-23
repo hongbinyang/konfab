@@ -112,6 +112,19 @@ Also under **Shortcuts** below the message box. On Windows and Linux, use Ctrl f
 
 Press the same keys again to remove a format (for a link, choose **Remove link**). Ctrl+Y or ⌘Y also redoes. Backspace right after typing a mark takes the formatting back. Enter on an empty list item or quote line leaves it, one level at a time; **Normal text** leaves everything at once. Tab leaves the box.
 
+### Notices on your phone (Telegram)
+
+Off unless you set it up. While you are away from the Konfab page, Konfab can send short notices to your own Telegram chat: an agent mentioned @lead, a permission request is waiting, or a room has stopped. They never contain message text, files, links or agent names. Telegram carries them, so it sees them and when they are sent.
+
+1. In Telegram, write to **@BotFather**, send `/newbot`, and make a bot **only for Konfab**.
+2. Run `npm run setup -- --telegram` and paste the token when asked. It isn't shown, and macOS keeps it in your Keychain (elsewhere, set `KONFAB_TELEGRAM_TOKEN` for setup and the server from a file only you can read). Never post it in a room.
+3. Setup shows a code to send to the bot from your phone, so it knows the chat is yours. It asks before contacting Telegram, before sending a test and before turning notices on.
+
+- **When:** after 10 minutes without a click, key or scroll on the page; at most one notice per room in 10 minutes and 20 a day. Change this under `phone_notices` in `config.yaml` (see [Configuration](#configuration)).
+- **Turn off:** the switch under **Lead** in the right panel. `npm run setup -- --telegram --remove` removes the chat and the stored token; tell @BotFather to end the bot.
+- **One way:** after setup Konfab reads nothing from Telegram; writing to the bot does nothing.
+- **Who can reach the token:** programs running as you that macOS lets read that Keychain item, which can include an agent that runs commands. With it, someone could send as this bot, but not use your Telegram account.
+
 ## 5. Skills
 
 A **skill** is a folder with a `SKILL.md`, in the open Agent Skills format. A skill can describe responsibilities ("you are the reviewer…"), a procedure ("how to review a diff"), or both. Each agent has an ordered list of skills in each room, plus optional **room instructions**. Skills are instructions only: they never grant permissions, and Konfab never runs their scripts.
@@ -286,31 +299,36 @@ Nothing needs configuring: every setting has a default, and the first start writ
 
 Environment variables (all optional):
 
-| Variable              | Default          | What it does                                                                          |
-| --------------------- | ---------------- | ------------------------------------------------------------------------------------- |
-| `KONFAB_HOME`         | `~/.konfab`      | Where rooms, skills, the database and `config.yaml` live                              |
-| `CODEX_HOME`          | `~/.codex`       | Where setup finds Codex's `config.toml`                                               |
-| `CLAUDE_CONFIG_DIR`   | your home folder | Where setup finds Claude Code's `.claude.json`                                        |
-| `KONFAB_GITHUB_TOKEN` | none             | GitHub token for public skill search (on macOS it can also be stored in the Keychain) |
+| Variable                | Default          | What it does                                                                                    |
+| ----------------------- | ---------------- | ----------------------------------------------------------------------------------------------- |
+| `KONFAB_HOME`           | `~/.konfab`      | Where rooms, skills, the database and `config.yaml` live                                        |
+| `CODEX_HOME`            | `~/.codex`       | Where setup finds Codex's `config.toml`                                                         |
+| `CLAUDE_CONFIG_DIR`     | your home folder | Where setup finds Claude Code's `.claude.json`                                                  |
+| `KONFAB_GITHUB_TOKEN`   | none             | GitHub token for public skill search (on macOS it can also be stored in the Keychain)           |
+| `KONFAB_TELEGRAM_TOKEN` | none             | Bot token for [phone notices](#notices-on-your-phone-telegram) where there is no macOS Keychain |
 
 Settings in `config.yaml`:
 
-| Setting                                   | Default   | What it does                                                      |
-| ----------------------------------------- | --------- | ----------------------------------------------------------------- |
-| `server.port`                             | 8787      | Port for the page and the connectors                              |
-| `defaults.run_hours`                      | 5         | Usable hours per agent session (also per agent under `agents`)    |
-| `defaults.run_warnings_minutes`           | 30, 10, 5 | When run-window warnings appear                                   |
-| `defaults.max_consecutive_agent_messages` | 50        | Agent messages in a row before the room waits for you             |
-| `defaults.wait_timeout_seconds`           | 50        | How long a waiting agent's call lasts; longer uses less allowance |
-| `defaults.turn_timeout_minutes`           | 30        | When a silent turn is flagged and recovered                       |
-| `defaults.auto_continue_delay_seconds`    | 180       | Delay before automatic continuation                               |
-| `defaults.parallel_lead_mentions`         | false     | Parallel answers to your mentions in new rooms                    |
-| `defaults.max_parallel_lead_turns`        | 3         | Parallel turns per room                                           |
-| `defaults.checkin_minutes`                | 2         | Busy-agent check-in interval (1, 2, 5 or 10)                      |
-| `defaults.max_attachment_mb`              | 10        | Largest attachment                                                |
-| `multi_agent.max_per_app`                 | 4         | Agents per desktop app                                            |
-| `connectors.install`                      | user      | `manual` makes setup write instructions instead of editing apps   |
-| `pre_approvals`                           | none      | Actions agents may take without asking (still logged)             |
+| Setting                                           | Default   | What it does                                                      |
+| ------------------------------------------------- | --------- | ----------------------------------------------------------------- |
+| `server.port`                                     | 8787      | Port for the page and the connectors                              |
+| `defaults.run_hours`                              | 5         | Usable hours per agent session (also per agent under `agents`)    |
+| `defaults.run_warnings_minutes`                   | 30, 10, 5 | When run-window warnings appear                                   |
+| `defaults.max_consecutive_agent_messages`         | 50        | Agent messages in a row before the room waits for you             |
+| `defaults.wait_timeout_seconds`                   | 50        | How long a waiting agent's call lasts; longer uses less allowance |
+| `defaults.turn_timeout_minutes`                   | 30        | When a silent turn is flagged and recovered                       |
+| `defaults.auto_continue_delay_seconds`            | 180       | Delay before automatic continuation                               |
+| `defaults.parallel_lead_mentions`                 | false     | Parallel answers to your mentions in new rooms                    |
+| `defaults.max_parallel_lead_turns`                | 3         | Parallel turns per room                                           |
+| `defaults.checkin_minutes`                        | 2         | Busy-agent check-in interval (1, 2, 5 or 10)                      |
+| `defaults.max_attachment_mb`                      | 10        | Largest attachment                                                |
+| `multi_agent.max_per_app`                         | 4         | Agents per desktop app                                            |
+| `connectors.install`                              | user      | `manual` makes setup write instructions instead of editing apps   |
+| `phone_notices.away_minutes`                      | 10        | Minutes without activity before phone notices are sent            |
+| `phone_notices.quiet_from`, `quiet_to`            | none      | Quiet hours, such as "22:00" and "07:30"                          |
+| `phone_notices.room_names`                        | false     | Whether phone notices name the room                               |
+| `phone_notices.room_every_minutes`, `max_per_day` | 10, 20    | Limits for phone notices                                          |
+| `pre_approvals`                                   | none      | Actions agents may take without asking (still logged)             |
 
 Room settings (brief, project folder, parallel mentions, check-in interval) are in each room's **Edit** form.
 

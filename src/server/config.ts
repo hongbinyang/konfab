@@ -47,6 +47,10 @@ const defaultsSchema = z.object({
   max_attachment_mb: z.number().int().min(1).max(100).default(10),
 });
 
+const clock = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 22:00");
+
 const configSchema = z.object({
   multi_agent: z
     .object({ max_per_app: z.number().int().min(1).max(100).default(4) })
@@ -78,6 +82,23 @@ const configSchema = z.object({
     .default({
       claude: { display_name: "Claude" },
       codex: { display_name: "Codex" },
+    }),
+  phone_notices: z
+    .object({
+      away_minutes: z.number().int().min(1).max(1440).default(10),
+      quiet_from: clock.nullable().default(null),
+      quiet_to: clock.nullable().default(null),
+      room_names: z.boolean().default(false),
+      room_every_minutes: z.number().int().min(1).max(1440).default(10),
+      max_per_day: z.number().int().min(1).max(200).default(20),
+    })
+    .default({
+      away_minutes: 10,
+      quiet_from: null,
+      quiet_to: null,
+      room_names: false,
+      room_every_minutes: 10,
+      max_per_day: 20,
     }),
   pre_approvals: z
     .array(z.object({ recipient: z.string().min(1), data: z.string().min(1) }))

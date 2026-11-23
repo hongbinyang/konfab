@@ -101,6 +101,8 @@ export async function startKonfab(
       CLAUDE_CONFIG_DIR: join(fakeHome, ".claude"),
       KONFAB_HOME: home,
       KONFAB_GITHUB_TOKEN: SYNTHETIC_GITHUB_TOKEN,
+      // Not a token, so a real one in the Keychain is never used.
+      KONFAB_TELEGRAM_TOKEN: "konfab-e2e-no-token",
     };
     execFileSync("node", ["dist/cli/setup.js", "--manual"], {
       env,

@@ -15,6 +15,7 @@ import { SkillError } from "../domain/skill-error.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
+import type { NoticesView, TelegramNotices } from "../telegram/notices.js";
 
 const MAX_SERVER_WAIT_SECONDS = 30;
 const SESSION_COOKIE = "konfab_session";
@@ -117,6 +118,7 @@ const extendBody = z.object({ minutes: z.number().int().min(1).max(1440) });
 
 export interface AppOptions {
   service: KonfabService;
+  notices?: TelegramNotices;
   skills?: SkillLibrary;
   sources?: SkillSources;
   skillsHome?: string;
@@ -159,7 +161,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const path = request.url.split("?")[0] ?? "";
     const routine =
       request.method === "GET" ||
-      /^\/agent\/(wait|permission\/wait)/.test(path);
+      /^\/(agent\/(wait|permission\/wait)|api\/activity)/.test(path);
     const { statusCode } = reply;
     if (statusCode < 400 && routine && path !== "/login") return;
     const entry = {
@@ -1755,6 +1757,30 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.post("/api/reports/:id/dismiss", async (request) => {
     service.dismissReport(idParams.parse(request.params).id);
     return { ok: true };
+  });
+
+  // The lead's phone notices. Agents have no route to these.
+  app.post("/api/activity", async () => {
+    options.notices?.active();
+    return { ok: true };
+  });
+  const noPhoneNotices: NoticesView = {
+    state: "not_set_up",
+    chat_name: null,
+    away_minutes: 10,
+    problem: null,
+  };
+  app.get(
+    "/api/phone-notices",
+    async () => options.notices?.view() ?? noPhoneNotices,
+  );
+  app.put("/api/phone-notices", async (request) => {
+    const { enabled } = z
+      .object({ enabled: z.boolean() })
+      .strict()
+      .parse(request.body);
+    options.notices?.active();
+    return options.notices?.setEnabled(enabled) ?? noPhoneNotices;
   });
 
   app.get("/api/events", (request, reply) => {
