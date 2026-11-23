@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./emoji-picker.css";
 
 // A small, local set; the operating system renders the Unicode characters.
@@ -194,11 +194,9 @@ const groups = {
 type Category = keyof typeof groups;
 
 export function EmojiPicker({
-  textarea,
   onInsert,
 }: {
-  textarea: RefObject<HTMLTextAreaElement | null>;
-  onInsert: (value: string) => void;
+  onInsert: (emoji: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState<Category>("Smileys");
@@ -237,19 +235,7 @@ export function EmojiPicker({
     : groups[category];
 
   function insert(emoji: string) {
-    const input = textarea.current;
-    if (!input) return;
-    input.focus();
-    // insertText participates in the browser's native undo history.
-    if (!document.execCommand("insertText", false, emoji)) {
-      input.setRangeText(
-        emoji,
-        input.selectionStart,
-        input.selectionEnd,
-        "end",
-      );
-    }
-    onInsert(input.value);
+    onInsert(emoji);
     setOpen(false);
   }
 

@@ -71,7 +71,7 @@ test("add an agent with an app and skills, change them, then talk to the room", 
   await expect(card.getByText(/^Skills: qa rev \d+ \+ 1 skill$/)).toBeVisible();
 
   await page
-    .getByPlaceholder(/Message the room/)
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill("Hello team, this is an end-to-end check.");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(
@@ -86,7 +86,9 @@ test("warns when a mentioned agent can't hear the lead", async ({
   page,
 }, testInfo) => {
   await openRoom(page, `mention-${testInfo.project.name}`);
-  await page.getByPlaceholder(/Message the room/).fill("@codex are you there?");
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("@codex are you there?");
   await page.getByRole("button", { name: "Send" }).click();
   const notice = page.locator(".unreachable-notice");
   await expect(notice).toContainText(
@@ -125,7 +127,7 @@ test("name an agent in the room and mention it by that name", async ({
   await expect(codexCard.getByRole("alert")).toContainText("would mean both");
 
   await page
-    .getByPlaceholder(/Message the room/)
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(`@${roomName.toLowerCase()} are you there?`);
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.locator(".unreachable-notice")).toContainText(

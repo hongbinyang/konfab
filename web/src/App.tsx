@@ -8,13 +8,14 @@ import {
   useId,
   useMemo,
   Fragment,
-  type KeyboardEvent,
 } from "react";
 import { EmojiPicker } from "./EmojiPicker";
 import { Library } from "./Library";
 import { AssignSkills } from "./AssignSkills";
 import { TeamSkills } from "./TeamSkills";
 import { DecisionReferences } from "./DecisionReferences";
+import { MessageInput } from "./message-editor/MessageInput";
+import type { EditorHandle } from "./message-editor/RichEditor";
 import { RichText } from "./RichText";
 import {
   request,
@@ -1299,7 +1300,8 @@ function Composer({
   onSent: () => void;
 }) {
   const [body, setBody] = useState("");
-  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const messageRef = useRef<EditorHandle>(null);
+  const sending = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -1335,25 +1337,31 @@ function Composer({
     });
   };
 
-  const send = () => {
-    if (uploading || (!body.trim() && !attachments.length)) return;
+  /** `checked`: the lead has reviewed how the message will look. */
+  const send = (checked = false) => {
+    if (sending.current || uploading || (!body.trim() && !attachments.length))
+      return;
+    if (!checked && messageRef.current?.ready() === false) return;
+    sending.current = true;
     void act(async () => {
-      const result = await request<{ unreachable?: Unreachable[] }>(
-        `/api/rooms/${roomId}/messages`,
-        {
-          method: "POST",
-          body: { body, attachment_ids: attachments.map((item) => item.id) },
-        },
-      );
+      let result: { unreachable?: Unreachable[] };
+      try {
+        result = await request<{ unreachable?: Unreachable[] }>(
+          `/api/rooms/${roomId}/messages`,
+          {
+            method: "POST",
+            body: { body, attachment_ids: attachments.map((item) => item.id) },
+          },
+        );
+      } finally {
+        // Before the page refreshes, so the next message can be sent at once.
+        sending.current = false;
+      }
       setUnreachable(result.unreachable ?? []);
-      setBody("");
+      messageRef.current?.clear();
       setAttachments([]);
       onSent();
     });
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) send();
   };
 
   return (
@@ -1367,7 +1375,13 @@ function Composer({
         void addFiles(Array.from(event.dataTransfer.files));
       }}
     >
-      <label htmlFor="message">Message</label>
+      <label
+        id="message-label"
+        htmlFor="message"
+        onClick={() => messageRef.current?.focus()}
+      >
+        Message
+      </label>
       <UnreachableNotice
         items={unreachable}
         agents={agents}
@@ -1401,32 +1415,20 @@ function Composer({
           {uploading && <span>Uploading…</span>}
         </div>
       )}
-      <textarea
-        id="message"
+      <MessageInput
         ref={messageRef}
-        rows={3}
         value={body}
-        onChange={(event) => setBody(event.target.value)}
-        onKeyDown={onKeyDown}
-        onPaste={(event) => {
-          const files = Array.from(event.clipboardData.items)
-            .filter(
-              (item) => item.kind === "file" && item.type.startsWith("image/"),
-            )
-            .map((item) => item.getAsFile())
-            .filter((file): file is File => file !== null);
-          if (files.length) {
-            event.preventDefault();
-            void addFiles(files);
-          }
-        }}
+        labelId="message-label"
         placeholder={`Message the room, or use ${[
           ...agents.map((agent) => `@${mentionName(agent)}`),
           "@lead",
           "@all",
         ].join(", ")}`}
+        onChange={setBody}
+        onSend={send}
+        onImages={(files) => void addFiles(files)}
       />
-      <EmojiPicker textarea={messageRef} onInsert={setBody} />
+      <EmojiPicker onInsert={(emoji) => messageRef.current?.insert(emoji)} />
       <input
         type="file"
         ref={fileRef}
@@ -1444,7 +1446,7 @@ function Composer({
       >
         📎
       </button>
-      <button type="button" onClick={send} disabled={uploading}>
+      <button type="button" onClick={() => send()} disabled={uploading}>
         Send
       </button>
     </div>

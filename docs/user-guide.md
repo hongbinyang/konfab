@@ -80,10 +80,33 @@ You are always the lead: agents are told to follow your instructions and decisio
 - **Status:** an agent doing longer work shows **Working · N min: detail** on its card. A warning after `turn_timeout_minutes` means no progress update has arrived; it doesn't prove the agent stopped.
 - **Unread:** new agent messages have a soft tint and a **New messages** divider. Room badges and the tab title show counts (**@** for mentions). **↓ N unread** jumps to the next unread reply; **Mark all read** (or Esc) clears the room.
 - **Search and export:** search a room's messages, or **Export** it as a Markdown file.
-- **Formatting:** messages show Markdown: **bold**, _italic_, `code`, code blocks, bullet, numbered and task lists (`- [ ]`), tables (`| a | b |` rows under a `|---|---|` line), quotes, ~~strikethrough~~ and links (which open in a new tab). As in Slack, a single line break is kept. Raw HTML isn't shown.
+- **Formatting:** formats show in the message box as you write, and the message looks the same when sent. Use the [shortcuts](#formatting-shortcuts), type the Markdown marks, or open **Formatting menu** (hidden until you open it; your choice is remembered). Tables, task lists, headings and code blocks are written as Markdown; the box shows live under the text how they will look. **Plain text** switches to a plain box.
+- **Before sending:** if a format can't be sent as shown (for example bold directly between punctuation and a letter), Send first shows how the message will look, and you choose to keep editing, remove that formatting, or send it. Your text is never changed on its own; lines without formatting are sent exactly as typed.
 - **Attachments and emoji:** use the 📎 and 😊 buttons next to **Send**.
 - **Right panel:** collapsible sections for Lead, Decisions, Agents, Permissions and Activity; your layout is remembered.
 - After a server restart, a notice offers to reload the page.
+
+### Formatting shortcuts
+
+Also under **Shortcuts** below the message box. On Windows and Linux, use Ctrl for ⌘ and Shift for ⇧.
+
+| Format                         | Keys    | Or type                                 |
+| ------------------------------ | ------- | --------------------------------------- |
+| Bold                           | ⌘B      | `**text**`                              |
+| Italic                         | ⌘I      | `_text_`                                |
+| Strikethrough                  | ⌘⇧X     | `~~text~~`                              |
+| Code                           | ⌘E      | `` `text` ``                            |
+| Link                           | ⌘K      |                                         |
+| Bulleted list                  | ⌘⇧8     | `-` and a space at the start of a line  |
+| Numbered list                  | ⌘⇧7     | `1.` and a space at the start of a line |
+| Quote                          | ⌘⇧9     | `>` and a space at the start of a line  |
+| Nest a list item               | ⌘]      |                                         |
+| Un-nest a list item            | ⌘[      |                                         |
+| New line in the same list item | ⇧Enter  |                                         |
+| Undo, redo                     | ⌘Z, ⌘⇧Z |                                         |
+| Send                           | ⌘Enter  |                                         |
+
+Press the same keys again to remove a format. Backspace right after typing a mark takes the formatting back. Enter on an empty list item or quote line leaves it. Tab leaves the box.
 
 ## 5. Skills
 

@@ -1,10 +1,10 @@
 # Formatting while writing a message
 
-**Status:** proposal with a working mockup. The lead chose the rich-text editor (option B). Nothing in the app has changed.
+**Status:** implemented on a branch, in review. The lead chose the rich-text editor (option B), with formats shown in the box, the formatting menu optional, and every shortcut documented.
 
 ## Goal
 
-Formats show in the message box while writing and Markdown marks don't, as in Slack, with a toolbar and shortcuts. What is sent stays Markdown text, so agents, mentions, search, export and old messages work as today.
+Formats show in the message box while writing and Markdown marks don't, as in Slack, with shortcuts and an optional menu. What is sent stays Markdown text, so agents, mentions, search, export and old messages work as today.
 
 ## How the text is kept
 
@@ -15,7 +15,7 @@ The editor is ProseMirror with a small schema (lines, bulleted and numbered list
 - **Opening text** (from Plain text) shows formats only if writing them back gives exactly the same text. Otherwise every line is shown as it is.
 - **The result is checked** with the same parser as sent messages:
   - **A format would be lost** (for example bold directly between punctuation and a letter, such as **foo!**bar), or text in a formatted place would change. A note appears while writing, and Send (button or ⌘Enter) opens a review instead of sending. It names the text, shows how the message will look, and offers **Keep editing** (selects the first place), **Remove that formatting** (can be undone; not offered when it can't help, and the review stays open if a difference remains) and **Send as shown here**. Escape keeps the draft.
-  - **Typed Markdown will also be formatted** (tables, task lists, headings). A note with **Show how it will look** opens a preview above the buttons. Send isn't held, because this is how those formats are written, and it works as today.
+  - **Typed Markdown will also be formatted** (tables, task lists, headings). They are rendered live under the text (can be hidden; the choice is remembered). Send isn't held, because this is how those formats are written, and it works as today.
 - **Plain text** button: today's box, always available. It is also the fallback while the editor loads or if it fails to load.
 
 ## Behaviour
