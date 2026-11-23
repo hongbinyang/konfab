@@ -10,12 +10,12 @@ import {
   Fragment,
   type KeyboardEvent,
 } from "react";
-import Markdown from "react-markdown";
 import { EmojiPicker } from "./EmojiPicker";
 import { Library } from "./Library";
 import { AssignSkills } from "./AssignSkills";
 import { TeamSkills } from "./TeamSkills";
 import { DecisionReferences } from "./DecisionReferences";
+import { RichText } from "./RichText";
 import {
   request,
   uploadAttachment,
@@ -957,7 +957,7 @@ function Room({
                 </span>
                 <span className="time">{formatTime(message.created_at)}</span>
                 <div className="body">
-                  <Markdown>{message.body}</Markdown>
+                  <RichText chat>{message.body}</RichText>
                 </div>
                 <MessageAttachments
                   roomId={room.id}
@@ -1057,7 +1057,7 @@ function Room({
                 </span>
                 <span className="time">{formatTime(item.created_at)}</span>
                 <div className="body">
-                  <Markdown>{item.body}</Markdown>
+                  <RichText chat>{item.body}</RichText>
                 </div>
                 <MessageAttachments
                   roomId={room.id}

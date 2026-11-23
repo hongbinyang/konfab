@@ -365,23 +365,141 @@ select {
   overflow-wrap: anywhere;
 }
 
-.body > :first-child {
+.body .rich-text > :first-child {
   margin-top: 2px;
 }
 
-.body > :last-child {
+.body .rich-text > :last-child {
   margin-bottom: 0;
 }
 
-.body pre {
+/* Basic Markdown formats in messages and skill previews. */
+.rich-text p,
+.rich-text ul,
+.rich-text ol,
+.rich-text blockquote,
+.rich-text pre,
+.rich-text .table-scroll {
+  margin: 0 0 8px;
+}
+
+.rich-text ul,
+.rich-text ol {
+  padding-left: 24px;
+}
+
+/* The message list hides its own markers; lists inside a message keep theirs. */
+.rich-text ul {
+  list-style: disc;
+}
+
+.rich-text ul ul {
+  list-style: circle;
+}
+
+.rich-text ol {
+  list-style: decimal;
+}
+
+.rich-text li {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rich-text li + li,
+.rich-text li > ul,
+.rich-text li > ol {
+  margin-top: 2px;
+}
+
+.rich-text li > ul,
+.rich-text li > ol {
+  margin-bottom: 0;
+}
+
+.rich-text li.task-list-item {
+  list-style: none;
+}
+
+.rich-text li.task-list-item input {
+  margin: 0 6px 0 -20px;
+}
+
+.rich-text h1,
+.rich-text h2,
+.rich-text h3,
+.rich-text h4,
+.rich-text h5,
+.rich-text h6 {
+  margin: 12px 0 6px;
+  font-size: 1em;
+}
+
+.rich-text h1 {
+  font-size: 1.25em;
+}
+
+.rich-text h2 {
+  font-size: 1.12em;
+}
+
+.rich-text blockquote {
+  padding: 0 0 0 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.rich-text hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.rich-text pre {
   padding: 10px;
   overflow-x: auto;
   border-radius: 6px;
   background: var(--surface);
 }
 
-.body code {
+.rich-text code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface);
   font-size: 0.92em;
+}
+
+.rich-text pre code {
+  padding: 0;
+  background: none;
+}
+
+.rich-text .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.rich-text table {
+  border-collapse: collapse;
+  overflow-wrap: normal;
+}
+
+.rich-text th,
+.rich-text td {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.rich-text th {
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.rich-text td {
+  min-width: 4em;
 }
 
 .composer {

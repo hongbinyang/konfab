@@ -80,6 +80,7 @@ You are always the lead: agents are told to follow your instructions and decisio
 - **Status:** an agent doing longer work shows **Working · N min: detail** on its card. A warning after `turn_timeout_minutes` means no progress update has arrived; it doesn't prove the agent stopped.
 - **Unread:** new agent messages have a soft tint and a **New messages** divider. Room badges and the tab title show counts (**@** for mentions). **↓ N unread** jumps to the next unread reply; **Mark all read** (or Esc) clears the room.
 - **Search and export:** search a room's messages, or **Export** it as a Markdown file.
+- **Formatting:** messages show Markdown: **bold**, _italic_, `code`, code blocks, bullet, numbered and task lists (`- [ ]`), tables (`| a | b |` rows under a `|---|---|` line), quotes, ~~strikethrough~~ and links (which open in a new tab). As in Slack, a single line break is kept. Raw HTML isn't shown.
 - **Attachments and emoji:** use the 📎 and 😊 buttons next to **Send**.
 - **Right panel:** collapsible sections for Lead, Decisions, Agents, Permissions and Activity; your layout is remembered.
 - After a server restart, a notice offers to reload the page.

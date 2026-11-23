@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import Markdown from "react-markdown";
+import { RichText } from "./RichText";
 import { request } from "./api";
 import { NameField } from "./NameField";
 import { validName } from "./name-validation";
@@ -448,9 +448,9 @@ export function Library({
                     />
                   </label>
                   <h3>Preview</h3>
-                  <Markdown>
+                  <RichText>
                     {body.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")}
-                  </Markdown>
+                  </RichText>
                   <h3>Files</h3>
                   <ul>
                     {selected.files.map((file) => (
@@ -763,12 +763,12 @@ export function Library({
               {historyText && (
                 <section>
                   <h4>Historical revision</h4>
-                  <Markdown>
+                  <RichText>
                     {historyText.replace(
                       /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,
                       "",
                     )}
-                  </Markdown>
+                  </RichText>
                   <button onClick={() => setHistoryText("")}>Close</button>
                 </section>
               )}
