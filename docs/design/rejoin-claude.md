@@ -36,7 +36,7 @@ The sentence in step 1 is **an instruction to a model, not an authorization boun
 
 - **Authentication:** `Authorization: Bearer <ticket>`. A ticket (130 random bits, its own prefix) is accepted on these two routes and nowhere else; the connector's token isn't accepted here, and the ticket can't join, read or post.
 - **Where the ticket is:** the server writes it to `~/.konfab/watch/<watch number>`, mode 0600 in a 0700 folder, made exclusively and never through a link. The watcher reads it from there and refuses a file of another owner or mode. So it is in no conversation, process list, log, page or backup; the database has its hash. It is deleted when the ticket ends.
-- **Calls:** `watch` is held for at most 25 seconds and answers `{"status":"wait"}`, `{"status":"print","request":…,"handover":…}` or `{"status":"rest"}`. `printed` takes the handover number, once. Anything else is refused without saying why; 20 wrong tickets in a minute stop the route for a minute.
+- **Calls:** `watch` is held for at most 25 seconds and answers `{"status":"wait"}`, `{"status":"print","request":…,"handover":…}`, `{"status":"rest"}` or `{"status":"leave"}`. A ticket that has ended is still good for `rest` and `leave`, and for nothing else. `printed` takes the handover number, once. Anything else is refused without saying why; 20 wrong tickets in a minute stop the route for a minute.
 - The requests are in no log, as for the other waiting calls.
 
 ## The life of a ticket
@@ -48,22 +48,31 @@ The sentence in step 1 is **an instruction to a model, not an authorization boun
 | `used`   | a request was handed to it (stored **before** the answer is sent)                                                                                                                        | stays; its file is deleted                                    |
 | `ended`  | the agent left the room's members or was archived, its app's token changed, the setting was turned off, 7 days, or no call for 24 hours (a sleep or a stopped Konfab is usually shorter) | stays; its file is deleted                                    |
 
+- `gone` follows `used` or `ended` when its watcher has said goodbye, or hasn't called for 24 hours while Konfab was running.
 - A ticket belongs to one app, agent, room and conversation, not to one session, so an ordinary rejoin keeps it. The conversation's id comes from the connector's own environment; missing or not a UUID means no watcher.
 - At most one `issued` or `live` ticket per agent, room and conversation (unique in the database), and 20 new ones a day for each agent. Past that: manual prompts.
 
 ## Old and duplicate watchers
 
-**Every end of a watcher wakes the agent and costs a turn.** So it ends only (a) after printing a request, (b) at once at its start, saying why, if it can't work at all (no file, wrong owner, no server in 10 seconds, network blocked), or (c) with the app.
+**Every end of a watcher wakes the agent and costs a turn.** Only one that ends while the agent's turn is running is taken into that turn (seen once, in the Stop test that wasn't stopped). So it ends only (a) after printing a request, (b) at once at its start, saying why, if it can't work at all (no file, wrong owner, no server in 10 seconds, network blocked), (c) when it is cleaned up, or (d) with the app.
 
 | Case                                            | What happens                                                                                                                                      |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The ticket ended                                | `rest`: the watcher closes its connection and sleeps without calling, so it wakes nobody; it ends with the app                                    |
+| The ticket ended                                | `rest`: the watcher does nothing but call once a minute, so that it can be counted and cleaned up; it wakes nobody                                |
 | Started a second time with the same number      | the first call in has the place (a lock file beside the ticket); the second prints one line and ends at once, in the turn in which it was started |
 | The agent joins again while its watcher is live | the answer says that one is running and gives no command                                                                                          |
 | Konfab is stopped                               | it tries again after 1, 2, 4 … 30 seconds, silently, for as long as the app runs                                                                  |
 | The app is gone                                 | it looks at its parent every 5 seconds and ends when that has changed; nobody is there to wake                                                    |
 
-A resting watcher keeps about 40 MB until the app closes. At most 20 can exist per agent and day, and only by the cases above; test 7 measures it. If it matters, the agent can be told to stop it during a turn.
+### A fixed limit, and cleaning up
+
+A resting watcher keeps about 40 MB (to be measured, test 7). The app may stay open for weeks, so a daily limit isn't enough:
+
+- **Limit:** at most 3 watchers per conversation, 6 per app, whatever their state. A watcher counts from its ticket until Konfab knows that it is gone: it said goodbye, or hasn't called for 24 hours while Konfab was running. At the limit `join_room` gives no command and the manual prompts stay; the button says "Its watcher isn't running. Use the rejoin prompt." So at most about 240 MB per app, however long it runs.
+- **Cleaning up:** a resting watcher is told `leave` only while its own agent has a `wait_for_turn` call open in that conversation. It then says goodbye, prints one fixed line ("Konfab watcher ended; nothing to do.") and ends. One at a time.
+- **If it wakes the conversation all the same** (the turn ended in that moment, or the app behaves differently): the line carries no request, and the join prompt says that such a line means _end your turn, start nothing_. That is one short turn. It can't repeat, because that watcher is gone. Konfab can't see a wake-up in which the agent calls nothing, so the cost is bounded instead: **at most 2 clean-ups per conversation a day**, whatever happens. A call from that conversation within 60 seconds of a `leave`, without an open wait, switches cleaning up off for it; the limit still holds.
+- **If cleaning up isn't possible** (the agent never comes back): they rest, within the limit, until the app closes. Nothing else ends them, and Konfab never kills a process: it doesn't know the numbers, and it wouldn't be sure whose they are.
+- **By hand:** stopping the background commands in the app, or closing it. The page shows the count on the card when it is more than one: "2 old watchers are resting; they end when Claude is closed."
 
 ## Delivery: at most once
 
@@ -91,13 +100,13 @@ Then as for Codex: 10 minutes, one use, closed by a cancel, pause, break, archiv
 
 ## What the card says
 
-| Situation                             | Button                                                                                                  |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Away, watcher called in the last 60 s | **Rejoin**                                                                                              |
-| Waiting or working                    | Greyed out: "Available when the agent is away."                                                         |
-| Away, no watcher                      | Greyed out: "Its watcher isn't running. Use the rejoin prompt."                                         |
-| Joined before this existed            | Greyed out: "Not yet: restart the Konfab connector in Claude, then paste the rejoin prompt once."       |
-| Asked, over 60 seconds                | "Not back yet. Look at its conversation in Claude: it may ask you something or have reached a limit. …" |
+| Situation                      | Button                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Away, and a watch call is open | **Rejoin**                                                                                              |
+| Waiting or working             | Greyed out: "Available when the agent is away."                                                         |
+| Away, no watcher               | Greyed out: "Its watcher isn't running. Use the rejoin prompt."                                         |
+| Joined before this existed     | Greyed out: "Not yet: restart the Konfab connector in Claude, then paste the rejoin prompt once."       |
+| Asked, over 60 seconds         | "Not back yet. Look at its conversation in Claude: it may ask you something or have reached a limit. …" |
 
 The texts name the app they are about. The room shows "… is back" after the first `wait_for_turn`, as for every agent.
 
@@ -113,19 +122,23 @@ The app may ask the lead to allow the command. Konfab changes no Claude setting.
 
 Each is recorded as passed, failed or not run. **If 1 or 2 fails, the rest isn't built** without a new decision.
 
-| #   | Test                                                    | Why                                         |
-| --- | ------------------------------------------------------- | ------------------------------------------- |
-| 1   | Stop pressed while waiting, then the command ends       | the usual way to stop an agent              |
-| 2   | A command ended by the lead's own act, after 60 minutes | the real use, not a timer                   |
-| 3   | The app quit and opened again                           | expected to fail; then the card must say so |
-| 4   | The conversation compacted, or its window closed        | long rooms                                  |
-| 5   | Allowing the command                                    | whether the lead is asked every time        |
-| 6   | A usage limit (only if one happens)                     | does the wake-up wait, fail or repeat?      |
+| #   | Test                                                                            | Why                                              |
+| --- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 1   | Stop pressed while waiting, then the command ends                               | the usual way to stop an agent                   |
+| 2   | A command ended by the lead's own act, after 60 minutes                         | the real use, not a timer                        |
+| 3   | The app quit and opened again                                                   | expected to fail; then the card must say so      |
+| 4   | The conversation compacted, or its window closed                                | long rooms                                       |
+| 5   | Allowing the command                                                            | whether the lead is asked every time             |
+| 6   | A usage limit (only if one happens)                                             | does the wake-up wait, fail or repeat?           |
+| 7   | A command stopped by the agent; one that ends during its turn; one left resting | does either wake it; the memory of a resting one |
+
+Tests 1 and 2 are the condition for building anything. They need no new code: the agent starts `until [ -e <file> ]; do sleep 5; done`, and the lead makes the file.
 
 ## Automated tests
 
 - Ticket: wrong, ended, used, another app's, agent's, room's or conversation's; every state change in its table; only its hash is stored; it is refused on every other route, and the connector's token on these; its file's owner, mode, link and deletion.
 - Watcher against a stand-in server: silent while waiting and resting; one line and an end for a request; server down, restarted, slow, endless, not Konfab; redirect; parent gone; started twice.
+- Limits and cleaning up: 3 per conversation and 6 per app over simulated weeks, with restarts; `leave` only with an open wait and one at a time; a wake-up in between stops it, two switch it off; never a process killed.
 - Output: full, short and failed writes, a closed pipe, a full pipe, and a kill before and after the write and the confirmation.
 - Delivery: each row and field of both tables, with each side killed before and after each step; a handover racing with a second click, a cancel, an expiry and a new ticket; never handed out twice.
 - The Codex tests for requests, races, secrets and wording, run for this path too.
