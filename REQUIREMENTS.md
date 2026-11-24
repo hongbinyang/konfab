@@ -522,7 +522,7 @@ Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Wi
 | RJ2 | MUST | The manual prompts are there in every state. Agents of other apps keep only those. |
 | RJ3 | MUST | The prompt is a fixed text with a one-time request. Nothing anyone wrote is in it. |
 | RJ4 | MUST | A request is accepted once, for 10 minutes, from its own agent and conversation, and only while the room, the agent and its session are as they were. All of it is checked and changed in one transaction, or nothing is. |
-| RJ5 | MUST | Cancelling, expiry, a pause, a break, archiving, removal or an ordinary join makes a request unwanted. A late prompt changes nothing in the room and never ends a break. |
+| RJ5 | MUST | Cancelling, expiry, a pause, a break, archiving, removal, an ordinary join or any other call from that session or conversation makes a request unwanted, also if contact is lost again afterwards. A late prompt changes nothing in the room and never ends a break. |
 | RJ6 | MUST | A repeated call answers the same session, never a second one. An agent is shown as back only after its own `wait_for_turn`, also after a crash or a lost answer. |
 | RJ7 | MUST | A prompt is sent at most once for each time the lead asks. Only a known refusal, or no process at all, counts as not sent; anything else is shown as unsure and isn't sent again. A second prompt while an earlier one may still be in Codex needs its own yes. |
 | RJ8 | MUST | The conversation comes from the app's call metadata, not from a tool argument; a missing or malformed one means none. It is a routing signal, not proof, and the documentation says what it doesn't protect against. |

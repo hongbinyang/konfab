@@ -439,13 +439,76 @@ describe("asking agents to rejoin", () => {
     expect(sessions()).toBe(2);
   });
 
-  it("closes a request when the agent has called again by itself", () => {
+  it.each([
+    ["waits", () => void service.poll("codex", session, true)],
+    [
+      "is polled by its connector",
+      () => void service.poll("codex", session, false),
+    ],
+    [
+      "reports work",
+      () => void service.reportStatus("codex", session, "working", "Reading"),
+    ],
+    ["joins another room in that conversation", () => void other()],
+  ] as [string, () => void][])(
+    "closes a request when the agent %s, also after its contact is lost again",
+    (_name, call) => {
+      const { id, number } = ask();
+      service.rejoin.sent(id, "taken");
+      now += 1000;
+      call();
+      expect(states()).toEqual(["closed:contact"]);
+      // Longer than a working agent may be quiet, and well before it expires.
+      now += 6 * 60_000;
+      service.tick();
+      expect(view().offer).toBe("ready");
+      expect(now).toBeLessThan(
+        (
+          db.prepare("SELECT expires_at AS at FROM rejoin_requests").get() as {
+            at: number;
+          }
+        ).at,
+      );
+      expect(rejoin(number)).toEqual(CLOSED);
+      expect(sessions()).toBe(1);
+      expect(events()).toEqual(["rejoin_asked", "rejoin_closed"]);
+    },
+  );
+
+  it.each([["here"], ["elsewhere"]])(
+    "doesn't rely on triggers alone to see a call %s since the request",
+    (where) => {
+      const there = other();
+      loseContact();
+      const { number } = ask();
+      db.exec("DROP TRIGGER rejoin_called_again");
+      now += 1000;
+      service.poll("codex", where === "here" ? session : there, true);
+      loseContact();
+      expect(states()).toEqual(["sending"]);
+      expect(rejoin(number)).toEqual(CLOSED);
+      expect(states()).toEqual(["closed:changed"]);
+    },
+  );
+
+  it("isn't closed by another agent's or conversation's calls", () => {
+    const claude = service.join("claude", ROOM, OTHER).session_id;
     const { number } = ask();
     now += 1000;
+    service.poll("claude", claude, true);
+    service.join("claude", ROOM, OTHER);
+    expect(rejoin(number).session_id).toBeTruthy();
+  });
+
+  it("is closed for what it was asked for, and can be asked again after contact was lost again", () => {
+    const first = ask();
+    now += 1000;
     service.poll("codex", session, true);
-    expect(rejoin(number)).toEqual(CLOSED);
-    expect(states()).toEqual(["closed:changed"]);
-    expect(sessions()).toBe(1);
+    loseContact();
+    expect(view().earlier).toBe(true);
+    const second = ask(true);
+    expect(rejoin(first.number)).toEqual(CLOSED);
+    expect(rejoin(second.number).session_id).toBeTruthy();
   });
 
   it("keeps a joined request through a stop of Konfab, and it is still not back", () => {
@@ -501,7 +564,7 @@ describe("asking agents to rejoin", () => {
     const { number } = ask();
     other();
     expect(rejoin(number)).toEqual(CLOSED);
-    expect(states()).toEqual(["closed:changed"]);
+    expect(states()).toEqual(["closed:contact"]);
   });
 
   it("allows one open request per conversation over all rooms", () => {

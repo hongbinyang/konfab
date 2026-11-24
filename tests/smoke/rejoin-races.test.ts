@@ -34,6 +34,7 @@ const actions = {
   break: (r) => service.startBreak(r.room),
   archive: (r) => service.archiveRoom(r.room),
   remove: (r) => service.setMembers(r.room, ["claude"]),
+  call: (r) => service.poll("codex", r.session, true).status,
   join: (r) => service.join("codex", r.name, r.conversation).session_id,
 };
 const results = [];
@@ -60,6 +61,7 @@ type Round = {
   name: string;
   number: string;
   conversation: string;
+  session: string;
 };
 type Outcome = { ok: boolean; value: string | null };
 type Request = {
@@ -87,7 +89,7 @@ describe("rejoin races between two processes", () => {
       const room = service["room"](name).id;
       const asked = service.rejoin.ask(room, "codex", false);
       service.rejoin.sent(asked.id, "taken");
-      return { room, name, number: asked.number, conversation };
+      return { room, name, number: asked.number, conversation, session };
     });
   const run = (action: string, rounds: Round[], start: number, later = 0) =>
     new Promise<Outcome[]>((done, fail) => {
@@ -164,6 +166,7 @@ describe("rejoin races between two processes", () => {
     ["archive", "changed"],
     ["remove", "changed"],
     ["join", "replaced"],
+    ["call", "contact"],
   ])(
     "either rejoins or is closed, never half: %s",
     async (other, reason) => {
@@ -196,6 +199,9 @@ describe("rejoin races between two processes", () => {
         if (other === "pause") expect(room.paused).toBe(1);
         if (other === "break") expect(room.on_break).toBe(1);
         if (other === "archive") expect(room.archived_at).not.toBeNull();
+        // A call that began just before a rejoin in another process may still
+        // be answered; the next one is told that it was replaced.
+        if (other === "call" && !first.value) expect(second.value).toBe("idle");
         if (other === "cancel") expect(second.ok).toBe(first.value === null);
         if (other === "join")
           expect(request).toMatchObject({
@@ -223,6 +229,7 @@ describe("rejoin races between two processes", () => {
     ["before", "expire"],
     ["before", "pause"],
     ["before", "join"],
+    ["before", "call"],
     ["after", "cancel"],
     ["after", "expire"],
     ["after", "pause"],
@@ -230,6 +237,7 @@ describe("rejoin races between two processes", () => {
     ["after", "archive"],
     ["after", "remove"],
     ["after", "join"],
+    ["after", "call"],
   ])(
     "gives the stated outcome in a fixed order: rejoin %s %s",
     async (order, other) => {

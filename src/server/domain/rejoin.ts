@@ -8,7 +8,7 @@ import { KonfabError } from "./errors.js";
  * number, and only Konfab decides whether it is still wanted when the agent
  * calls rejoin_room. See docs/design/rejoin-agents.md.
  *
- * Pausing, breaks, archiving, removal and ordinary joins close open requests
+ * Pausing, breaks, archiving, removal, ordinary joins and calls close open requests
  * by database triggers, in the same transaction as the change itself.
  */
 
@@ -195,13 +195,12 @@ export class RejoinRequests {
     roomId: number,
     agentId: string,
     conversation: string,
-    calledAfter = -1,
   ): boolean {
     const others = this.db
       .prepare(
-        "SELECT DISTINCT room_id, agent_id FROM sessions WHERE conversation_id = ? AND state = 'active' AND NOT (room_id = ? AND agent_id = ?) AND last_call_at >= ?",
+        "SELECT DISTINCT room_id, agent_id FROM sessions WHERE conversation_id = ? AND state = 'active' AND NOT (room_id = ? AND agent_id = ?)",
       )
-      .all(conversation, roomId, agentId, calledAfter) as {
+      .all(conversation, roomId, agentId) as {
       room_id: number;
       agent_id: string;
     }[];
@@ -298,14 +297,18 @@ export class RejoinRequests {
   }
 
   /**
-   * A restart of Konfab counts as contact for a while, also with agents that
-   * were away when the lead asked. Only a call since then means one is back.
+   * Whether this conversation has called again, here or elsewhere. Triggers
+   * close the request at that moment, so contact that is lost again later
+   * doesn't make it wanted. A restart of Konfab counts as contact on the page,
+   * but not here.
    */
-  private calledAfter(sessionId: string, at: number): boolean {
+  private calledSince(row: Row): boolean {
     return Boolean(
       this.db
-        .prepare("SELECT 1 FROM sessions WHERE id = ? AND last_call_at >= ?")
-        .get(sessionId, at),
+        .prepare(
+          "SELECT 1 FROM sessions WHERE (id = ? OR conversation_id = ?) AND last_call_at >= ?",
+        )
+        .get(row.session_id, row.conversation_id, row.created_at),
     );
   }
 
@@ -463,9 +466,7 @@ export class RejoinRequests {
           this.roomReason(row.room_id) ||
           !this.deps.isMember(row.room_id, row.agent_id) ||
           this.newest(row.room_id, row.agent_id)?.id !== row.session_id ||
-          (this.calledAfter(row.session_id, row.created_at) &&
-            !this.deps.isAway(row.room_id, row.agent_id)) ||
-          this.isElsewhere(row.room_id, row.agent_id, from, row.created_at)
+          this.calledSince(row)
         ) {
           this.close("id = ?", [row.id], "changed");
           return null;

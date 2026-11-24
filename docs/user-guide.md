@@ -202,16 +202,16 @@ Instead of pasting the prompt, select **Rejoin** on a Codex agent's card, or **R
 
 It is shown when the agent isn't waiting or working and its last join came through a connector that names its conversation, so **restart the Konfab connector once after this update**. It uses the agent's allowance. `npm run doctor` says whether it is available, and why not.
 
-| The card says                                      | What it means                                                                                          |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **Rejoin asked 12:03 · waiting**                   | Codex took the prompt                                                                                  |
-| **… Konfab couldn't tell whether Codex took it**   | It may be there or not; Konfab doesn't send it again                                                   |
-| **Not back yet**                                   | Open its conversation in Codex. After **Stop**, Codex holds the prompt until another turn has ended    |
-| **Codex didn't take it; nothing is waiting there** | Use the rejoin prompt                                                                                  |
-| **Joined · waiting for its first check**           | It is in the room, but hasn't called `wait_for_turn` yet                                               |
-| **Joined, but not waiting yet**                    | Look at its conversation, or paste the rejoin prompt                                                   |
-| **Rejoin closed**                                  | Cancelled, over 10 minutes old, or the room has changed (pause, break, archive, removal, another join) |
-| **Waiting for a turn**                             | It is back                                                                                             |
+| The card says                                      | What it means                                                                                                                             |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rejoin asked 12:03 · waiting**                   | Codex took the prompt                                                                                                                     |
+| **… Konfab couldn't tell whether Codex took it**   | It may be there or not; Konfab doesn't send it again                                                                                      |
+| **Not back yet**                                   | Open its conversation in Codex. After **Stop**, Codex holds the prompt until another turn has ended                                       |
+| **Codex didn't take it; nothing is waiting there** | Use the rejoin prompt                                                                                                                     |
+| **Joined · waiting for its first check**           | It is in the room, but hasn't called `wait_for_turn` yet                                                                                  |
+| **Joined, but not waiting yet**                    | Look at its conversation, or paste the rejoin prompt                                                                                      |
+| **Rejoin closed**                                  | Cancelled, over 10 minutes old, or the room has changed (pause, break, archive, removal, another join), or the agent was in contact again |
+| **Waiting for a turn**                             | It is back                                                                                                                                |
 
 - **A prompt can't be taken back.** Codex may deliver it hours later. It carries a one-time request that Konfab has closed by then, so the agent is told to end its turn and nothing changes in the room; that costs one short turn. If the model ignores this and joins in the ordinary way, Konfab can't tell that from a pasted prompt.
 - **Sending a second one** while an earlier prompt may still be in Codex asks you first. Only the newest can rejoin.

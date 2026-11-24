@@ -566,6 +566,7 @@ const MIGRATIONS: readonly Migration[] = [
   );
   CREATE UNIQUE INDEX one_open_rejoin ON rejoin_requests(room_id, agent_id) WHERE state IN ('sending','waiting','joined');
   CREATE UNIQUE INDEX one_open_rejoin_per_conversation ON rejoin_requests(conversation_id) WHERE state IN ('sending','waiting','joined');
+  CREATE INDEX rejoin_by_state ON rejoin_requests(state);
   CREATE TRIGGER rejoin_room_changed AFTER UPDATE OF paused, on_break, archived_at ON rooms
   WHEN NEW.paused = 1 OR NEW.on_break = 1 OR NEW.archived_at IS NOT NULL
   BEGIN
@@ -592,6 +593,13 @@ const MIGRATIONS: readonly Migration[] = [
     UPDATE rejoin_requests SET state = 'closed', reason = 'replaced'
       WHERE room_id = NEW.room_id AND agent_id = NEW.agent_id AND state IN ('sending','waiting','joined')
         AND joined_session_id IS NOT NEW.id;
+    UPDATE rejoin_requests SET state = 'closed', reason = 'contact'
+      WHERE conversation_id = NEW.conversation_id AND state IN ('sending','waiting');
+  END;
+  CREATE TRIGGER rejoin_called_again AFTER UPDATE OF last_call_at ON sessions
+  BEGIN
+    UPDATE rejoin_requests SET state = 'closed', reason = 'contact'
+      WHERE (session_id = NEW.id OR conversation_id = NEW.conversation_id) AND state IN ('sending','waiting');
   END;
   `,
 ];
