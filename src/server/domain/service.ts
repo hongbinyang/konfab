@@ -2572,7 +2572,7 @@ export class KonfabService {
         )
         .get(room.id, agentId) as TurnRow | undefined;
       if (ownActive) {
-        if (isModelCall) this.rejoin.waited(session.id);
+        if (isModelCall) this.waited(session.id);
         return this.buildTurn(room, ownActive);
       }
       const active = this.db
@@ -2592,7 +2592,7 @@ export class KonfabService {
         return closed("run_window_ended");
       }
       const parallel = this.activateParallel(room, agentId, session.id);
-      if (isModelCall) this.rejoin.waited(session.id);
+      if (isModelCall) this.waited(session.id);
       if (parallel) return this.buildTurn(room, parallel);
       if (active) return { status: "idle", wait_seconds: waitSeconds };
 
@@ -4632,24 +4632,28 @@ export class KonfabService {
     }));
   }
 
+  /** A wait that counts, not one that only learns that it is over. */
+  private waited(sessionId: string): void {
+    this.db
+      .prepare(
+        "UPDATE sessions SET first_wait_at = ? WHERE id = ? AND first_wait_at IS NULL",
+      )
+      .run(this.now(), sessionId);
+    this.rejoin.waited(sessionId);
+  }
+
   /** When agents that had joined before were waiting again after a new join. */
   private listReturns(roomId: number, since: number): ReturnView[] {
     return this.db
       .prepare(
-        `SELECT events.id, events.agent_id, events.created_at FROM (
-           SELECT (
-             SELECT w.id FROM events w
-             WHERE w.type = 'wait_call' AND w.agent_id = j.agent_id
-               AND w.room_id = j.room_id AND w.id > j.id
-               AND w.id < COALESCE((SELECT MIN(n.id) FROM events n
-                 WHERE n.type = 'rejoin' AND n.agent_id = j.agent_id
-                   AND n.room_id = j.room_id AND n.id > j.id), w.id + 1)
-             ORDER BY w.id LIMIT 1) AS wait_id
-           FROM events j
-           WHERE j.type = 'rejoin' AND j.room_id = ? AND j.created_at >= ?
-         ) JOIN events ON events.id = wait_id ORDER BY events.id`,
+        `SELECT s.rowid AS id, s.agent_id, s.first_wait_at AS created_at
+         FROM sessions s
+         WHERE s.room_id = ? AND s.first_wait_at >= ? AND EXISTS (
+           SELECT 1 FROM sessions e WHERE e.room_id = s.room_id
+             AND e.agent_id = s.agent_id AND e.rowid < s.rowid)
+         ORDER BY s.first_wait_at, s.rowid`,
       )
-      .all(roomId, since) as ReturnView[];
+      .all(roomId, Math.max(since, 1)) as ReturnView[];
   }
 
   private replaceMembers(roomId: number, agentIds: readonly string[]): void {

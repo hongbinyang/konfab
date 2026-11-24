@@ -219,7 +219,7 @@ It can be used when the agent isn't waiting or working and its last join came th
 - **What it protects against:** mistakes and late prompts, not a hostile program running as you, which could already use Codex and the connector.
 - **What it runs:** only the Codex app's own command, after checking its place, owner, signature and version. Untried versions are off. Set `rejoin.codex_command` or `rejoin.allow_untested_version` to change that (see [Configuration](#configuration)).
 
-When an agent that had joined before is waiting again, the room shows **… is back**, also after a pasted prompt.
+When an agent that had joined before is really waiting again (not only told that the room is on a break or its run window is over), the room shows **… is back**, also after a pasted prompt.
 
 Tested once in the Codex app's own window (conversation open, the agent had ended its turn). Not yet tested there after **Stop**, after a usage limit, or with a closed or archived conversation.
 

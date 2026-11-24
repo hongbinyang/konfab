@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import {
@@ -608,6 +611,85 @@ describe("asking agents to rejoin", () => {
     expect(() => service.rejoin.ask(roomId, "claude", true)).toThrow(
       /can't be asked/,
     );
+  });
+
+  it.each([
+    ["a break", () => service["startBreak"](roomId), "on_break"],
+    [
+      "the end of its run window",
+      () => void (now += 6 * 3_600_000),
+      "run_window_ended",
+    ],
+  ] as [string, () => void, string][])(
+    "doesn't say that an agent is back when its first wait only learns of %s",
+    (_name, change, reason) => {
+      const back = () => service.roomState(ROOM).returns;
+      // A pasted prompt, and the lead's request.
+      for (const joinAgain of [
+        () => service.join("codex", ROOM, HERE).session_id,
+        () => {
+          loseContact();
+          return rejoin(ask(view().earlier).number).session_id!;
+        },
+      ]) {
+        const joined = joinAgain();
+        change();
+        expect(service.poll("codex", joined, true)).toMatchObject({
+          status: "closed",
+          reason,
+        });
+        expect(back()).toEqual([]);
+        // Nor when it asks again.
+        service.poll("codex", joined, true);
+        expect(back()).toEqual([]);
+        db.prepare("UPDATE rooms SET on_break = 0").run();
+      }
+      expect(states()).toEqual(["joined"]);
+      // Once it really waits, it is back.
+      service.poll("codex", service.join("codex", ROOM, HERE).session_id, true);
+      expect(back()).toHaveLength(1);
+    },
+  );
+
+  it("doesn't announce agents that were already there before the update", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "konfab-back-")), "konfab.db");
+    try {
+      const old = openDatabase(path);
+      old.exec(
+        "ALTER TABLE sessions DROP COLUMN first_wait_at; PRAGMA user_version = 35",
+      );
+      old.exec(`INSERT INTO apps (id, display_name, default_agent_id) VALUES ('codex', 'Codex', 'codex');
+        INSERT INTO agents (id, display_name, created_at, app_id) VALUES ('codex', 'Codex', 1, 'codex');
+        INSERT INTO rooms (id, name, topic, created_at) VALUES (1, '${ROOM}', '', 1);
+        INSERT INTO room_members (room_id, agent_id, position) VALUES (1, 'codex', 0);`);
+      const add = old.prepare(
+        "INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at) VALUES (?, 1, 'codex', ?, 1, ?, ?)",
+      );
+      add.run("a", "replaced", now, now + 3_600_000);
+      add.run("b", "active", now, now + 3_600_000);
+      old.close();
+      db.close();
+      db = openDatabase(path);
+      service = createService();
+      service.poll("codex", "b", true);
+      expect(service.roomState(ROOM).returns).toEqual([]);
+      const joined = service.join("codex", ROOM).session_id;
+      service.poll("codex", joined, true);
+      expect(service.roomState(ROOM).returns).toHaveLength(1);
+    } finally {
+      rmSync(dirname(path), { recursive: true, force: true });
+    }
+  });
+
+  it("says that an agent is back when its first wait is a turn, or in a paused room", () => {
+    const back = () => service.roomState(ROOM).returns.length;
+    const joined = service.join("codex", ROOM, HERE).session_id;
+    service.postUserMessage(ROOM, "@codex hello");
+    expect(service.poll("codex", joined, true).status).toBe("turn");
+    expect(back()).toBe(1);
+    service.setRoomPaused(roomId, true);
+    service.poll("codex", service.join("codex", ROOM, HERE).session_id, true);
+    expect(back()).toBe(2);
   });
 
   it("tells the room when an agent is back: at its first wait after joining again", () => {

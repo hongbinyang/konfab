@@ -601,6 +601,11 @@ const MIGRATIONS: readonly Migration[] = [
     UPDATE rejoin_requests SET state = 'closed', reason = 'contact'
       WHERE (session_id = NEW.id OR conversation_id = NEW.conversation_id) AND state IN ('sending','waiting');
   END;
+  `, // When a session was first really waiting (or got a turn). Those from before
+  // are 0: they aren't news.
+  `
+  ALTER TABLE sessions ADD COLUMN first_wait_at INTEGER;
+  UPDATE sessions SET first_wait_at = 0;
   `,
 ];
 

@@ -45,22 +45,20 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
   };
   // As if the agent had joined, come back and were waiting.
   const now = Date.now();
-  write(
-    `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, conversation_id)
-     SELECT ?, id, 'codex', 'active', ?, ?, ?, ? FROM rooms WHERE name = ?`,
-    `e2e-${name}`,
-    now,
-    now,
-    now + 3_600_000,
-    conversation,
-    name,
-  );
-  for (const type of ["rejoin", "wait_call"])
+  for (const [id, state, wait] of [
+    [`e2e-old-${name}`, "replaced", 0],
+    [`e2e-${name}`, "active", now],
+  ])
     write(
-      `INSERT INTO events (type, room_id, agent_id, payload, created_at)
-       SELECT ?, id, 'codex', '{}', ? FROM rooms WHERE name = ?`,
-      type,
+      `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, conversation_id, first_wait_at)
+       SELECT ?, id, 'codex', ?, ?, ?, ?, ?, ? FROM rooms WHERE name = ?`,
+      id,
+      state,
       now,
+      now,
+      now + 3_600_000,
+      conversation,
+      wait,
       name,
     );
   // Below 900 px the right panel is closed unless the lead opened it.
