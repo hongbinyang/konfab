@@ -33,11 +33,11 @@ The rejoin itself is proven once for each of the two last rows, with the server 
 
 ## In the apps' own windows (2026-11-23, with the lead)
 
-| App                                                                                   | Result                                                                                                               |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Codex: **Rejoin** selected, conversation open, the agent had ended its turn           | **Rejoined**, once: joined after 19 seconds, back 5 seconds later                                                    |
-| Claude: a 2-minute background command started by the agent, which then ended its turn | **Started again by itself**, once, 4 seconds after the command ended; the agent joined again without a pasted prompt |
-| Claude: the same after **Stop**                                                       | Not run                                                                                                              |
+| App                                                                                   | Result                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Codex: **Rejoin** selected, conversation open, the agent had ended its turn           | **Rejoined**, once: joined after 19 seconds, back 5 seconds later                                                                                                                                                  |
+| Claude: a 2-minute background command started by the agent, which then ended its turn | **Started again by itself**, once, 4 seconds after the command ended; the agent joined again without a pasted prompt                                                                                               |
+| Claude: a 4-minute command, then **Stop** pressed by the lead while waiting           | **Started again by itself**, once, when the command ended. The agent **didn't join again**: it had been told to stop and wait for the lead, and the wake-up isn't the lead's word. It joined after a pasted prompt |
 
 So Claude has a way that needs the agent's own help in advance: see [a background watcher](rejoin-claude.md). No documented way to send a prompt into an open Claude conversation was found.
 
