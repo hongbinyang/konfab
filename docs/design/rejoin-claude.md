@@ -135,15 +135,15 @@ The app may ask the lead to allow the command. Konfab changes no Claude setting.
 
 Each is recorded as passed, failed or not run. **If 1 or 2 fails, the rest isn't built** without a new decision.
 
-| #   | Test                                                                                                                                       | Why                                              |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| 1   | Stop pressed while waiting, then the command ends. **Run once (2026-11-23): the app woke it; the agent didn't come back** (see After Stop) | the usual way to stop an agent                   |
-| 2   | A command ended by the lead's own act, after 60 minutes                                                                                    | the real use, not a timer                        |
-| 3   | The app quit and opened again                                                                                                              | expected to fail; then the card must say so      |
-| 4   | The conversation compacted, or its window closed                                                                                           | long rooms                                       |
-| 5   | Allowing the command                                                                                                                       | whether the lead is asked every time             |
-| 6   | A usage limit (only if one happens)                                                                                                        | does the wake-up wait, fail or repeat?           |
-| 7   | A command stopped by the agent; one that ends during its turn; one left resting                                                            | does either wake it; the memory of a resting one |
+| #   | Test                                                                                                                                                               | Why                                              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| 1   | Stop pressed while waiting, then the command ends. **Run once (2026-11-23): the app woke it; the agent didn't come back** (see After Stop)                         | the usual way to stop an agent                   |
+| 2   | A command ended by the lead's own act, after 60 minutes. **Run once (2026-11-23) with 32 minutes, as the lead chose a shorter one: passed**, back without a prompt | the real use, not a timer                        |
+| 3   | The app quit and opened again                                                                                                                                      | expected to fail; then the card must say so      |
+| 4   | The conversation compacted, or its window closed                                                                                                                   | long rooms                                       |
+| 5   | Allowing the command                                                                                                                                               | whether the lead is asked every time             |
+| 6   | A usage limit (only if one happens)                                                                                                                                | does the wake-up wait, fail or repeat?           |
+| 7   | A command stopped by the agent; one that ends during its turn; one left resting                                                                                    | does either wake it; the memory of a resting one |
 
 Tests 1 and 2 are the condition for building anything. They need no new code: the agent starts `until [ -e <file> ]; do sleep 5; done`, and the lead makes the file.
 
