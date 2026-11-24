@@ -565,8 +565,35 @@ describe("asking agents to rejoin", () => {
     expect(states()).toEqual([]);
   });
 
+  it("works for the same app under another name", () => {
+    service.ensureAgent("builder", "Builder");
+    service.setMembers(roomId, ["claude", "codex", "builder"]);
+    const of = () => service.rejoin.view(roomId, "builder");
+    // Nothing tells it apart before its connector has named a conversation.
+    service.join("builder", ROOM);
+    loseContact();
+    expect(of().offer).toBeNull();
+    const joined = service.join("builder", ROOM, OTHER).session_id;
+    service.poll("builder", joined, true);
+    expect(of().offer).toBe("connected");
+    loseContact();
+    expect(of().offer).toBe("ready");
+    const { number } = service.rejoin.ask(roomId, "builder", false);
+    expect(rejoin(number, OTHER, "codex")).toEqual(CLOSED);
+    const back = rejoin(number, OTHER, "builder").session_id!;
+    service.poll("builder", back, true);
+    expect(states()).toEqual(["back"]);
+    // An older connector in one of its conversations is explained.
+    service.join("builder", ROOM);
+    loseContact();
+    expect(of().offer).toBe("old_join");
+    service.rejoin.available = () => false;
+    service.rejoin.problem = () => true;
+    expect(of().offer).toBe("unavailable");
+  });
+
   it("shows nothing for agents of other apps and ones that never joined", () => {
-    service.join("claude", ROOM, OTHER);
+    service.join("claude", ROOM);
     loseContact();
     service.ensureAgent("codex2", "Second");
     db.prepare("UPDATE agents SET app_id = 'codex' WHERE id = 'codex2'").run();

@@ -184,11 +184,19 @@ export class RejoinRequests {
     return rows.length > 0;
   }
 
-  /** The only app with a way to do this. */
+  /**
+   * The only app with a way to do this, whatever it is called in config.yaml:
+   * its connector names the conversation. Before it first has, only the usual
+   * name tells it apart, and that is only used to explain what is missing.
+   */
   private isCodex(agentId: string): boolean {
     return Boolean(
       this.db
-        .prepare("SELECT 1 FROM agents WHERE id = ? AND app_id = 'codex'")
+        .prepare(
+          `SELECT 1 FROM agents a WHERE a.id = ? AND (a.app_id = 'codex' OR EXISTS (
+             SELECT 1 FROM sessions s JOIN agents b ON b.id = s.agent_id
+             WHERE b.app_id = a.app_id AND s.conversation_id IS NOT NULL))`,
+        )
         .get(agentId),
     );
   }
