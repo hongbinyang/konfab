@@ -14,6 +14,7 @@ import { z, ZodError } from "zod";
 import { SkillError } from "../domain/skill-error.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
+import type { SendResult } from "../domain/rejoin.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 import type { NoticesView, TelegramNotices } from "../telegram/notices.js";
 
@@ -119,6 +120,7 @@ const extendBody = z.object({ minutes: z.number().int().min(1).max(1440) });
 export interface AppOptions {
   service: KonfabService;
   notices?: TelegramNotices;
+  sendRejoin?: (conversation: string, number: string) => Promise<SendResult>;
   skills?: SkillLibrary;
   sources?: SkillSources;
   skillsHome?: string;
@@ -311,7 +313,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const requireAgent = (request: FastifyRequest): string => {
     const appId = requireApp(request);
     const path = request.url.split("?")[0];
-    if (path === "/agent/join" || path === "/agent/protocol")
+    if (
+      path === "/agent/join" ||
+      path === "/agent/rejoin" ||
+      path === "/agent/protocol"
+    )
       return service.appAgent(appId);
     const body = request.body as { session_id?: unknown } | null;
     if (typeof body?.session_id !== "string" || !body.session_id)
@@ -334,6 +340,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { durable_receipts: 1, bridge_protocol: BRIDGE_PROTOCOL_VERSION };
   });
 
+  /** From the connector, as the app named it. Not proof of anything. */
+  const conversationOf = (request: FastifyRequest): unknown =>
+    request.headers["x-konfab-conversation"];
   const repeatMutation = <T>(
     request: FastifyRequest,
     agentId: string,
@@ -435,8 +444,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const body = joinBody.parse(request.body);
     const agentId = service.appAgent(appId, body.as);
     return repeatMutation(request, agentId, () =>
-      service.join(agentId, body.room),
+      service.join(agentId, body.room, conversationOf(request)),
     );
+  });
+
+  // Repeating it is safe by itself, so its number is in no stored receipt.
+  app.post("/agent/rejoin", async (request) => {
+    const appId = requireApp(request);
+    const { request: number } = z
+      .object({ request: z.string().max(200) })
+      .parse(request.body);
+    return service.rejoin.rejoin(appId, number, conversationOf(request));
   });
 
   app.post("/agent/wait", async (request) => {
@@ -1756,6 +1774,44 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.post("/api/reports/:id/dismiss", async (request) => {
     service.dismissReport(idParams.parse(request.params).id);
+    return { ok: true };
+  });
+
+  // The lead asks a Codex agent to rejoin. Agents have no route to this.
+  const askToRejoin = async (
+    roomId: number,
+    agentId: string,
+    again: boolean,
+  ): Promise<void> => {
+    const send = options.sendRejoin;
+    if (!send)
+      throw new KonfabError(
+        "rejoin_unavailable",
+        409,
+        "This agent can't be asked to rejoin now; use its rejoin prompt",
+      );
+    const asked = service.rejoin.ask(roomId, agentId, again);
+    let result: SendResult = "unsure";
+    try {
+      result = await send(asked.conversation, asked.number);
+    } finally {
+      service.rejoin.sent(asked.id, result);
+    }
+  };
+  const rejoinParams = z.object({
+    id: z.coerce.number().int().positive(),
+    agent: z.string().min(1).max(100),
+  });
+  const again = z.object({ again: z.boolean().default(false) }).strict();
+  app.post("/api/rooms/:id/agents/:agent/rejoin", async (request) => {
+    const { id, agent } = rejoinParams.parse(request.params);
+    const body = again.parse(request.body ?? {});
+    await askToRejoin(id, agent, body.again);
+    return { ok: true };
+  });
+  app.delete("/api/rooms/:id/agents/:agent/rejoin", async (request) => {
+    const { id, agent } = rejoinParams.parse(request.params);
+    service.rejoin.cancel(id, agent);
     return { ok: true };
   });
 

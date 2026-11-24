@@ -1,5 +1,11 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,7 +99,23 @@ export async function startKonfab(
     const fakeHome = join(root, "home");
     mkdirSync(home);
     mkdirSync(fakeHome);
-    writeFileSync(join(home, "config.yaml"), `server:\n  port: ${port}\n`);
+    // Stands in for the app's command that asks agents to rejoin, so that the
+    // real one is never used. It keeps what it was given in the same folder.
+    const command = join(realpathSync(root), "codex");
+    writeFileSync(
+      command,
+      `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
+if [ "$2" = "--help" ]; then echo "--thread --message"; exit 0; fi
+printf '%s\\n' "$@" >> "${command}.calls"
+echo "Queued message 11111111-2222-7333-8444-555555555555 for thread \${2#--thread=}."
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(home, "config.yaml"),
+      `server:\n  port: ${port}\nrejoin:\n  codex_command: ${JSON.stringify(command)}\n`,
+    );
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
       HOME: fakeHome,

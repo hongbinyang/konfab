@@ -1,7 +1,7 @@
 # Konfab: Requirements
 
-**Status:** Current requirements include the shipped additions in sections 16–18.
-**Updated:** 2026-11-13
+**Status:** Current requirements include the shipped additions in sections 16–22.
+**Updated:** 2026-11-23
 
 Priority levels:
 
@@ -22,7 +22,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 - Connecting through a model provider's API or a model's CLI
 - Measuring token use
 - Grok, Muse, and any public connection to the room
-- Starting or restarting agents automatically
+- Starting or restarting agents automatically (the lead can ask for it; section 23)
 - Multiple human users or access from other devices
 
 ## 2. Participants
@@ -37,7 +37,7 @@ Give the user a simple, Slack-like chat on their Mac where they can create rooms
 
 | ID | Priority | Requirement |
 |---|---|---|
-| C1 | MUST | Agents take part through their installed desktop apps and subscriptions. Konfab does not use provider APIs, API keys, or model CLIs. |
+| C1 | MUST | Agents take part through their installed desktop apps and subscriptions. Konfab does not use provider APIs, API keys, or model CLIs. The one exception is the app's own queue command, which hands a fixed prompt to a conversation of the app when the lead asks (section 23); it runs no model itself. |
 | C2 | MUST | Konfab, including its chat history, config, and logs, runs and is stored on the user's Mac. |
 | C3 | MUST | Desktop apps may use public services and send data to their own providers. |
 | C4 | MUST | Sending the data types in section 9 to recipients other than Anthropic, OpenAI, Meta, or xAI requires the user's permission. |
@@ -496,7 +496,7 @@ Not yet verified: a real macOS login item.
 
 ## 22. Phone notices
 
-**Status:** Implemented on `feature/telegram-notices`; in review. Design: [Telegram notifications](docs/design/telegram-notifications.md).
+**Status:** Implemented. Design: [Telegram notifications](docs/design/telegram-notifications.md).
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
@@ -511,3 +511,23 @@ Not yet verified: a real macOS login item.
 | PN9 | MUST | Automated tests use a local stand-in and never contact Telegram. |
 
 Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Windows.
+
+## 23. Asking agents to rejoin
+
+**Status:** Implemented on `feature/rejoin-agents`, marked experimental; in review. Design: [Rejoin agents button](docs/design/rejoin-agents.md).
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RJ1 | MUST | The lead can ask a Codex agent, or all that can be asked in a room, to come back in the conversation it last joined from. Konfab never does this by itself, and agents have no route to it. |
+| RJ2 | MUST | The manual prompts are there in every state. Agents of other apps keep only those. |
+| RJ3 | MUST | The prompt is a fixed text with a one-time request. Nothing anyone wrote is in it. |
+| RJ4 | MUST | A request is accepted once, for 10 minutes, from its own agent and conversation, and only while the room, the agent and its session are as they were. All of it is checked and changed in one transaction, or nothing is. |
+| RJ5 | MUST | Cancelling, expiry, a pause, a break, archiving, removal or an ordinary join makes a request unwanted. A late prompt changes nothing in the room and never ends a break. |
+| RJ6 | MUST | A repeated call answers the same session, never a second one. An agent is shown as back only after its own `wait_for_turn`, also after a crash or a lost answer. |
+| RJ7 | MUST | A prompt is sent at most once for each time the lead asks. Only a known refusal, or no process at all, counts as not sent; anything else is shown as unsure and isn't sent again. A second prompt while an earlier one may still be in Codex needs its own yes. |
+| RJ8 | MUST | The conversation comes from the app's call metadata, not from a tool argument; a missing or malformed one means none. It is a routing signal, not proof, and the documentation says what it doesn't protect against. |
+| RJ9 | MUST | Only a command whose path, owner, folders, signature (for the app's own copy) and version were checked is run, without a shell. Anything else turns the button off, and `npm run doctor` says why. |
+| RJ10 | MUST | The request is stored only as a hash, and is in no page, log, activity, export, receipt or agent reply. The conversation is only in the database, its backups and the command's arguments. |
+| RJ11 | MUST | Automated tests use a stand-in and never send with the real command. |
+
+Not yet verified: the app's own window, a conversation stopped with Stop in it, usage limits, archived conversations, and any system but macOS. The experimental mark stays until the window checks pass.

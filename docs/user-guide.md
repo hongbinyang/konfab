@@ -196,6 +196,31 @@ Konfab shows **No contact since 5:00 PM** when a waiting agent hasn't checked in
 
 Rejoining after a break restores the saved balance once; other rejoins start a fresh window. Paste the join prompt into a new conversation only if the old one has become very long or slow; the old one then stops by itself.
 
+### The Rejoin button (Codex agents, macOS, experimental)
+
+Instead of pasting the prompt, select **Rejoin** on a Codex agent's card, or **Rejoin agents** in the room's header for all that can be asked. Konfab asks the Codex app to bring back the conversation the agent last joined from. The manual prompts always stay, and Claude agents have only those. Konfab never does this by itself.
+
+It is shown when the agent isn't waiting or working and its last join came through a connector that names its conversation, so **restart the Konfab connector once after this update**. It uses the agent's allowance. `npm run doctor` says whether it is available, and why not.
+
+| The card says                                      | What it means                                                                                          |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Rejoin asked 12:03 · waiting**                   | Codex took the prompt                                                                                  |
+| **… Konfab couldn't tell whether Codex took it**   | It may be there or not; Konfab doesn't send it again                                                   |
+| **Not back yet**                                   | Open its conversation in Codex. After **Stop**, Codex holds the prompt until another turn has ended    |
+| **Codex didn't take it; nothing is waiting there** | Use the rejoin prompt                                                                                  |
+| **Joined · waiting for its first check**           | It is in the room, but hasn't called `wait_for_turn` yet                                               |
+| **Joined, but not waiting yet**                    | Look at its conversation, or paste the rejoin prompt                                                   |
+| **Rejoin closed**                                  | Cancelled, over 10 minutes old, or the room has changed (pause, break, archive, removal, another join) |
+| **Waiting for a turn**                             | It is back                                                                                             |
+
+- **A prompt can't be taken back.** Codex may deliver it hours later. It carries a one-time request that Konfab has closed by then, so the agent is told to end its turn and nothing changes in the room; that costs one short turn. If the model ignores this and joins in the ordinary way, Konfab can't tell that from a pasted prompt.
+- **Sending a second one** while an earlier prompt may still be in Codex asks you first. Only the newest can rejoin.
+- **What is sent:** a fixed text with that request, and nothing anyone wrote, not even the room's name.
+- **What it protects against:** mistakes and late prompts, not a hostile program running as you, which could already use Codex and the connector.
+- **What it runs:** only the Codex app's own command, after checking its place, owner, signature and version. Untried versions are off. Set `rejoin.codex_command` or `rejoin.allow_untested_version` to change that (see [Configuration](#configuration)).
+
+Not yet tested in the Codex app's own window, after a usage limit, or with archived conversations.
+
 ## 9. Several agents per app
 
 Every agent has two attributes: its **app** (the desktop app that runs it, such as Claude or Codex) and its **skills** in each room. You can have several agents on the same app, for example `claude` and `reviewer`.
@@ -309,26 +334,30 @@ Environment variables (all optional):
 
 Settings in `config.yaml`:
 
-| Setting                                           | Default   | What it does                                                      |
-| ------------------------------------------------- | --------- | ----------------------------------------------------------------- |
-| `server.port`                                     | 8787      | Port for the page and the connectors                              |
-| `defaults.run_hours`                              | 5         | Usable hours per agent session (also per agent under `agents`)    |
-| `defaults.run_warnings_minutes`                   | 30, 10, 5 | When run-window warnings appear                                   |
-| `defaults.max_consecutive_agent_messages`         | 50        | Agent messages in a row before the room waits for you             |
-| `defaults.wait_timeout_seconds`                   | 50        | How long a waiting agent's call lasts; longer uses less allowance |
-| `defaults.turn_timeout_minutes`                   | 30        | When a silent turn is flagged and recovered                       |
-| `defaults.auto_continue_delay_seconds`            | 180       | Delay before automatic continuation                               |
-| `defaults.parallel_lead_mentions`                 | false     | Parallel answers to your mentions in new rooms                    |
-| `defaults.max_parallel_lead_turns`                | 3         | Parallel turns per room                                           |
-| `defaults.checkin_minutes`                        | 2         | Busy-agent check-in interval (1, 2, 5 or 10)                      |
-| `defaults.max_attachment_mb`                      | 10        | Largest attachment                                                |
-| `multi_agent.max_per_app`                         | 4         | Agents per desktop app                                            |
-| `connectors.install`                              | user      | `manual` makes setup write instructions instead of editing apps   |
-| `phone_notices.away_minutes`                      | 10        | Minutes without activity before phone notices are sent            |
-| `phone_notices.quiet_from`, `quiet_to`            | none      | Quiet hours, such as "22:00" and "07:30"                          |
-| `phone_notices.room_names`                        | false     | Whether phone notices name the room                               |
-| `phone_notices.room_every_minutes`, `max_per_day` | 10, 20    | Limits for phone notices                                          |
-| `pre_approvals`                                   | none      | Actions agents may take without asking (still logged)             |
+| Setting                                           | Default   | What it does                                                                                   |
+| ------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `server.port`                                     | 8787      | Port for the page and the connectors                                                           |
+| `defaults.run_hours`                              | 5         | Usable hours per agent session (also per agent under `agents`)                                 |
+| `defaults.run_warnings_minutes`                   | 30, 10, 5 | When run-window warnings appear                                                                |
+| `defaults.max_consecutive_agent_messages`         | 50        | Agent messages in a row before the room waits for you                                          |
+| `defaults.wait_timeout_seconds`                   | 50        | How long a waiting agent's call lasts; longer uses less allowance                              |
+| `defaults.turn_timeout_minutes`                   | 30        | When a silent turn is flagged and recovered                                                    |
+| `defaults.auto_continue_delay_seconds`            | 180       | Delay before automatic continuation                                                            |
+| `defaults.parallel_lead_mentions`                 | false     | Parallel answers to your mentions in new rooms                                                 |
+| `defaults.max_parallel_lead_turns`                | 3         | Parallel turns per room                                                                        |
+| `defaults.checkin_minutes`                        | 2         | Busy-agent check-in interval (1, 2, 5 or 10)                                                   |
+| `defaults.max_attachment_mb`                      | 10        | Largest attachment                                                                             |
+| `multi_agent.max_per_app`                         | 4         | Agents per desktop app                                                                         |
+| `connectors.install`                              | user      | `manual` makes setup write instructions instead of editing apps                                |
+| `phone_notices.away_minutes`                      | 10        | Minutes without activity before phone notices are sent                                         |
+| `phone_notices.quiet_from`, `quiet_to`            | none      | Quiet hours, such as "22:00" and "07:30"                                                       |
+| `phone_notices.room_names`                        | false     | Whether phone notices name the room                                                            |
+| `phone_notices.room_every_minutes`, `max_per_day` | 10, 20    | Limits for phone notices                                                                       |
+| `rejoin.enabled`                                  | true      | Whether the [Rejoin button](#the-rejoin-button-codex-agents-macos-experimental) is offered     |
+| `rejoin.wanted_minutes`                           | 10        | How long a request to rejoin stays wanted (1 to 60)                                            |
+| `rejoin.codex_command`                            | none      | Absolute path of the Codex command, instead of the app's own copy; its signature isn't checked |
+| `rejoin.allow_untested_version`                   | false     | Use a Codex version this hasn't been tried with                                                |
+| `pre_approvals`                                   | none      | Actions agents may take without asking (still logged)                                          |
 
 Room settings (brief, project folder, parallel mentions, check-in interval) are in each room's **Edit** form.
 

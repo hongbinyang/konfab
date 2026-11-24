@@ -44,7 +44,7 @@ function CopyPrompt({
  * The short prompt brings back the conversation that already joined; a new
  * conversation needs the full join prompt with the loop and permission rule.
  */
-function RejoinPrompts({
+export function RejoinPrompts({
   agent,
 }: {
   agent: Pick<RoomAgent, "join_prompt" | "rejoin_prompt">;

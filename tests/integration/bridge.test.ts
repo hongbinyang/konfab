@@ -779,6 +779,7 @@ describe("server and bridge", () => {
       "read_role",
       "read_role_file",
       "read_skill_file",
+      "rejoin_room",
       "release_lock",
       "report_status",
       "request_permission",

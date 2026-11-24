@@ -1,6 +1,6 @@
 # Rejoin agents button
 
-**Status:** proposal for review. Nothing is built. Evidence: [automatic rejoin](automatic-rejoin.md).
+**Status:** built on `feature/rejoin-agents` and marked experimental; the checks in the app's own window are still to be done. Evidence: [automatic rejoin](automatic-rejoin.md).
 
 ## Goal
 
@@ -44,22 +44,22 @@ A closed request costs one short turn. If the model ignores the instruction and 
 1. Find the request by the SHA-256 of its number; it must be `waiting` (or `sending`, if the call is faster than the command's own answer).
 2. The calling app's token, agent and `_meta.threadId` must be the request's own.
 3. It must be younger than its limit, by the server's clock at that moment.
-4. The room isn't archived, paused (itself or all rooms) or on a break; the agent is still a member; its **newest session is the one the request was made for**, and isn't waiting or working again.
+4. The room isn't archived, paused (itself or all rooms) or on a break; the agent is still a member; its **newest session is the one the request was made for**, and it hasn't called Konfab again since. (A restart of Konfab counts as contact with every agent for 90 seconds; that alone doesn't close a request.)
 5. That conversation has no waiting or working session in another room.
 6. Make the session, as `join_room` does, but **never ending a break**; mark the request `joined` with the new session's id.
 
 Everything that can race takes the same lock, so one comes first:
 
-| First                                          | Then                                                                                          | Outcome                                                                                                                                                            |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cancel, expiry, pause, break, archive, removal | `rejoin_room`                                                                                 | closed; no session, the break and pause stay                                                                                                                       |
-| `rejoin_room`                                  | Cancel                                                                                        | too late to cancel; the card shows "Joined · waiting for its first check"; pausing and breaks work as for any joined agent                                         |
-| `rejoin_room`                                  | expiry                                                                                        | no effect; a joined request doesn't expire                                                                                                                         |
-| An ordinary join by the agent                  | `rejoin_room`                                                                                 | closed: the newest session isn't the request's                                                                                                                     |
-| `rejoin_room`                                  | an ordinary join                                                                              | the ordinary join replaces the session, as today; the request is closed as replaced                                                                                |
-| `rejoin_room`                                  | the same call again (a retry by the connector after a lost answer, or the model repeating it) | **the same session** is answered, while it is still active and hasn't been replaced, for the same agent and conversation; otherwise closed. Never a second session |
-| `rejoin_room`                                  | Konfab or the agent stops before the first `wait_for_turn`                                    | stays `joined`, never `back`. After 60 seconds: "Joined, but not waiting yet"; contact is lost after the usual time, and the manual prompts show                   |
-| `rejoin_room`                                  | the room is paused or on a break before `wait_for_turn`                                       | that call is answered as for any agent in such a room; the request is `back` only if the call counts as waiting                                                    |
+| First                                          | Then                                                                                          | Outcome                                                                                                                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cancel, expiry, pause, break, archive, removal | `rejoin_room`                                                                                 | closed; no session, the break and pause stay                                                                                                                                                   |
+| `rejoin_room`                                  | Cancel                                                                                        | too late to cancel; the card shows "Joined · waiting for its first check"; pausing and breaks work as for any joined agent                                                                     |
+| `rejoin_room`                                  | expiry                                                                                        | no effect; a joined request doesn't expire                                                                                                                                                     |
+| An ordinary join by the agent                  | `rejoin_room`                                                                                 | closed: the newest session isn't the request's                                                                                                                                                 |
+| `rejoin_room`                                  | an ordinary join                                                                              | the ordinary join replaces the session, as today; the request is closed as replaced                                                                                                            |
+| `rejoin_room`                                  | the same call again (a retry by the connector after a lost answer, or the model repeating it) | **the same session** is answered, while it is still active and hasn't been replaced, for the same agent and conversation; otherwise closed. Never a second session                             |
+| `rejoin_room`                                  | Konfab or the agent stops before the first `wait_for_turn`                                    | stays `joined`, never `back`. After 60 seconds: "Joined, but not waiting yet"; contact is lost after the usual time, and the manual prompts show. The lead can then ask again, which closes it |
+| `rejoin_room`                                  | the room is paused or on a break before `wait_for_turn`                                       | that call is answered as for any agent in such a room; the request is `back` only if the call counts as waiting                                                                                |
 
 `joined` (a session was made) and `back` (its first `wait_for_turn` was received) are different states, and only `back` is shown as success. `back` is recorded in the same transaction as that wait.
 
@@ -120,6 +120,7 @@ Only the two "refused" rows say "not queued". An unsure request is never sent ag
 - After a restart of Konfab, `sending` becomes `waiting`, unsure. Nothing is started again.
 - Expiry is checked when it matters (a call, the page), not only by a timer, so a sleeping computer doesn't extend it. Times before the request's own start (a changed clock) count as expired.
 - The number is made with a secure random source (about 130 bits), compared by hash, and is in no page, log, activity, export or agent reply; only in its own prompt and the command's arguments.
+- Pauses, breaks, archiving, removal and ordinary joins close a request in their own transaction, by database triggers. The service adds the time and the activity entry.
 - Activity shows "Rejoin asked", "Rejoin joined", "Rejoined" and "Rejoin closed", without numbers.
 
 ### What the card says
@@ -136,7 +137,7 @@ Only the two "refused" rows say "not queued". An unsure request is never sent ag
 | `joined`, over 60 seconds  | Joined, but not waiting yet. Look at its conversation in Codex, or paste the rejoin prompt.                                                                                                                                                         |
 | `back`                     | The usual card: Waiting for a turn.                                                                                                                                                                                                                 |
 
-The manual prompts are there in every one of these. **Rejoin** is offered again only after `closed`; with an earlier prompt possibly still in Codex, it asks first: "Another prompt may already be waiting there. Send a new one? Only the newest can rejoin."
+The manual prompts are there in every one of these. **Rejoin** is offered again only after `closed`, or after `joined` once contact is lost; with an earlier prompt possibly still in Codex, it asks first: "Another prompt may already be waiting there. Send a new one? Only the newest can rejoin."
 
 ## What happens in each state of the Codex conversation
 
@@ -158,10 +159,10 @@ Konfab never looks for another conversation, never falls back to a name, and nev
 1. `rejoin.codex_command` if set (absolute path only); otherwise the app's own copy under `/Applications/ChatGPT.app` on macOS. Never a search through `PATH`.
 2. The path is resolved once. The file must be regular and executable, and it and **every folder above it** must be owned by the system or this user and not writable by anyone else (an administrators' group counts as the system). Links are followed first and the resolved path is checked.
 3. On macOS, the app's own copy must have a valid code signature with the identifier `codex` and the team `2DC432GLL2` (as on the tested app). A path from the setting skips this, and doctor says so.
-4. `--version`, then `queue --help` naming `--thread` and `--message`, each within 5 seconds.
+4. `--version`, then `queue --help` naming `--thread` and `--message`, each within 5 seconds. They run with a temporary folder as `HOME` and `CODEX_HOME`, because the command writes to its own folder even then; only sending uses the user's.
 5. Only versions on a short list that was tried (at first 0.171.x) are offered. **Any other version is off** until it is added or the lead sets `rejoin.allow_untested_version: true`.
 
-This is done when Konfab starts and again before each use. **Replacement in between:** after the checks, device, inode, size and modification time are compared once more just before starting. A change closes the request without starting anything. A tiny moment remains, and this user's own programs can replace the app at any time; that is the same boundary as above, not something these checks can stop.
+This is done when Konfab starts, again before each use, and every 10 minutes while it can't be used. **Replacement in between:** after the checks, device, inode, size and modification time are compared once more just before starting. A change closes the request without starting anything. A tiny moment remains, and this user's own programs can replace the app at any time; that is the same boundary as above, not something these checks can stop.
 
 On any failure the buttons aren't shown, the manual prompts stay, and doctor says which check failed.
 
@@ -211,7 +212,7 @@ In the app's own window (by hand, separate, with a throwaway room and conversati
 - Codex may change `queue` or stop naming its conversation; then the buttons disappear.
 - Agents need a connector restart for the new tool, as after any connector change.
 
-## Questions for the lead
+## Decided by the lead
 
-1. Is 10 minutes right for how long a request stays wanted?
-2. Should **Rejoin agents** be shown as experimental until the app's own window has been tested?
+1. A request stays wanted for 10 minutes.
+2. It is shown as experimental until the app's own window has been tested.

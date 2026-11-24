@@ -101,6 +101,18 @@ export interface Pass {
   created_at: number;
 }
 
+export interface RejoinState {
+  offer: "ready" | "elsewhere" | "archived" | "paused" | "on_break" | null;
+  request: {
+    state: "waiting" | "joined" | "closed";
+    unsure: boolean;
+    refused: boolean;
+    slow: boolean;
+    asked_at: number;
+  } | null;
+  earlier: boolean;
+}
+
 export interface RoomAgent {
   id: string;
   /** In a room view: the room name if set, otherwise the display name. */
@@ -131,6 +143,8 @@ export interface RoomAgent {
   join_prompt: string;
   /** Short prompt for the conversation that already joined. */
   rejoin_prompt: string;
+  /** Asking the agent's app to bring it back. Absent from older servers. */
+  rejoin?: RejoinState;
   assignment: {
     label: string;
     skill_count: number;

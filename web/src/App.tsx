@@ -24,6 +24,7 @@ import {
 import { MessageInput } from "./message-editor/MessageInput";
 import type { EditorHandle } from "./message-editor/RichEditor";
 import { PhoneNotices, useActivity } from "./PhoneNotices";
+import { RejoinAgents, RejoinControls } from "./Rejoin";
 import { RichText } from "./RichText";
 import {
   request,
@@ -879,6 +880,7 @@ function Room({
                 >
                   {room.paused ? "Resume" : "Pause"}
                 </button>
+                <RejoinAgents roomId={room.id} agents={agents} act={act} />
                 {!room.on_break && (
                   <button
                     type="button"
@@ -3029,6 +3031,7 @@ function AgentDetails({
   return (
     <>
       <ContactNotice agent={agent} />
+      <RejoinControls roomId={roomId} agent={agent} act={act} />
       {agent.working && (
         <p className={workingStale ? "warning-text" : "muted"}>
           {workingStale

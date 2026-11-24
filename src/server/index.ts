@@ -4,6 +4,7 @@ import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
 import { LogFile, logDirectory } from "./log-file.js";
 import { TelegramNotices } from "./telegram/notices.js";
 import { resolveTelegramToken } from "./telegram/token.js";
+import { checkCommand, sendRejoin } from "./rejoin/codex.js";
 import { createRuntime } from "./runtime.js";
 import { resolveGithubToken } from "./github-token.js";
 
@@ -25,6 +26,25 @@ const { db, service, skills, sources } = createRuntime(
 service.recoverAfterRestart();
 service.recoverDeletedRooms();
 
+// The lead's button that asks Codex agents to rejoin.
+const rejoinCommand = {
+  enabled: config.rejoin.enabled,
+  command: config.rejoin.codex_command,
+  allowUntested: config.rejoin.allow_untested_version,
+};
+service.rejoin.wantedMs = config.rejoin.wanted_minutes * 60_000;
+let rejoinReady = false;
+service.rejoin.available = () => rejoinReady;
+/** At the start, after a refusal, and now and then while it can't be used. */
+let recheck: NodeJS.Timeout | undefined;
+const checkRejoin = async (): Promise<void> => {
+  clearTimeout(recheck);
+  rejoinReady = (await checkCommand(rejoinCommand)).ok;
+  if (!rejoinReady && config.rejoin.enabled)
+    recheck = setTimeout(() => void checkRejoin(), 10 * 60_000).unref();
+};
+void checkRejoin();
+
 const notices = new TelegramNotices({
   db,
   home,
@@ -35,6 +55,11 @@ const notices = new TelegramNotices({
 
 const app = await buildApp({
   notices,
+  sendRejoin: async (conversation, number) => {
+    const result = await sendRejoin(rejoinCommand, conversation, number);
+    if (result === "refused") void checkRejoin();
+    return result;
+  },
   service,
   skills,
   sources,

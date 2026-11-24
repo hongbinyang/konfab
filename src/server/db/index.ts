@@ -542,6 +542,57 @@ const MIGRATIONS: readonly Migration[] = [
     revision_id TEXT REFERENCES skill_revisions(id), path TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('previous','edits','other')), created_at INTEGER NOT NULL
   );
+  `, // Requests to come back to a room. Changes that make one unwanted close it
+  // here, so that no code path can forget to, in the change's own transaction.
+  // The service adds closed_at and the event, by its own clock.
+  `
+  ALTER TABLE sessions ADD COLUMN conversation_id TEXT;
+  CREATE TABLE rejoin_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES rooms(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    app_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    number_hash TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK (state IN ('sending','waiting','joined','back','closed')),
+    unsure INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    joined_session_id TEXT,
+    joined_at INTEGER,
+    closed_at INTEGER
+  );
+  CREATE UNIQUE INDEX one_open_rejoin ON rejoin_requests(room_id, agent_id) WHERE state IN ('sending','waiting','joined');
+  CREATE UNIQUE INDEX one_open_rejoin_per_conversation ON rejoin_requests(conversation_id) WHERE state IN ('sending','waiting','joined');
+  CREATE TRIGGER rejoin_room_changed AFTER UPDATE OF paused, on_break, archived_at ON rooms
+  WHEN NEW.paused = 1 OR NEW.on_break = 1 OR NEW.archived_at IS NOT NULL
+  BEGIN
+    UPDATE rejoin_requests SET state = 'closed', reason = 'changed'
+      WHERE room_id = NEW.id AND state IN ('sending','waiting');
+  END;
+  CREATE TRIGGER rejoin_all_paused AFTER UPDATE ON settings
+  WHEN NEW.key = 'paused_all' AND NEW.value = '1'
+  BEGIN
+    UPDATE rejoin_requests SET state = 'closed', reason = 'changed' WHERE state IN ('sending','waiting');
+  END;
+  CREATE TRIGGER rejoin_all_paused_first AFTER INSERT ON settings
+  WHEN NEW.key = 'paused_all' AND NEW.value = '1'
+  BEGIN
+    UPDATE rejoin_requests SET state = 'closed', reason = 'changed' WHERE state IN ('sending','waiting');
+  END;
+  CREATE TRIGGER rejoin_member_removed AFTER DELETE ON room_members
+  BEGIN
+    UPDATE rejoin_requests SET state = 'closed', reason = 'changed'
+      WHERE room_id = OLD.room_id AND agent_id = OLD.agent_id AND state IN ('sending','waiting','joined');
+  END;
+  CREATE TRIGGER rejoin_joined_otherwise AFTER INSERT ON sessions
+  BEGIN
+    UPDATE rejoin_requests SET state = 'closed', reason = 'replaced'
+      WHERE room_id = NEW.room_id AND agent_id = NEW.agent_id AND state IN ('sending','waiting','joined')
+        AND joined_session_id IS NOT NEW.id;
+  END;
   `,
 ];
 

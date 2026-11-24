@@ -1247,8 +1247,23 @@ dd {
   white-space: pre-wrap;
 }
 
-.contact-notice p {
+.contact-notice p,
+.rejoin p {
   margin: 2px 0;
+}
+
+.rejoin {
+  margin: 4px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rejoin button {
+  font-size: 13px;
+}
+
+.rejoin button.secondary {
+  padding: 4px 8px;
 }
 
 .unreachable-notice {

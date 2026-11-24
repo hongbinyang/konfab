@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -96,8 +97,8 @@ describe("built app over real processes", () => {
       child.kill("SIGTERM");
     });
 
-  const connect = async (token: string): Promise<Client> => {
-    const client = new Client({ name: "smoke", version: "1.0.0" });
+  const connect = async (token: string, name = "smoke"): Promise<Client> => {
+    const client = new Client({ name, version: "1.0.0" });
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -113,11 +114,13 @@ describe("built app over real processes", () => {
     client: Client,
     name: string,
     args: Record<string, unknown>,
+    meta?: Record<string, unknown>,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> => {
     const result = (await client.callTool({
       name,
       arguments: args,
+      ...(meta ? { _meta: meta } : {}),
     })) as ToolResult;
     if (result.isError) throw new Error(result.content[0]?.text);
     return JSON.parse(result.content[0]?.text ?? "null");
@@ -154,6 +157,8 @@ describe("built app over real processes", () => {
       [
         `server:\n  port: ${port}\n  tick_seconds: 1`,
         "connectors:\n  install: manual",
+        // Never the real command.
+        `rejoin:\n  codex_command: ${JSON.stringify(join(realpathSync(home), "codex"))}`,
         "defaults:",
         `  wait_timeout_seconds: ${WAIT_SECONDS}`,
         "  auto_continue_delay_seconds: 10",
@@ -188,6 +193,113 @@ describe("built app over real processes", () => {
     if (server) await stopServer(server);
     rmSync(home, { recursive: true, force: true });
   });
+
+  // The whole way with a stand-in for the app's command.
+  it.runIf(process.platform === "darwin")(
+    "brings an agent back when the lead asks, and survives a kill of Konfab in between",
+    async () => {
+      const conversation = "019a0000-0000-7000-8000-000000000001";
+      const meta = { threadId: conversation };
+      const calls = join(home, "calls");
+      writeFileSync(
+        join(home, "codex"),
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
+if [ "$2" = "--help" ]; then echo "--thread --message"; exit 0; fi
+printf '%s\\n' "$@" >> "${calls}"
+echo "Queued message 11111111-2222-7333-8444-555555555555 for thread ${conversation}."
+`,
+        { mode: 0o755 },
+      );
+      // It is looked for at the start.
+      const restart = async (signal: NodeJS.Signals) => {
+        const gone = new Promise((done) => server!.once("exit", done));
+        server!.kill(signal);
+        await gone;
+        server = await startServer();
+      };
+      await restart("SIGTERM");
+      const agent = await connect(tokens[1] ?? "", "codex-mcp-client");
+      const first = await tool(agent, "join_room", { room: ROOM }, meta);
+      const db = new Database(join(home, "konfab.db"), { timeout: 5000 });
+      const card = async () =>
+        (
+          (await roomState()) as unknown as {
+            agents: { id: string; rejoin: Record<string, unknown> }[];
+          }
+        ).agents.find((item) => item.id === "codex")!.rejoin;
+      const ask = () =>
+        page(`/api/rooms/${roomId}/agents/codex/rejoin`, {
+          method: "POST",
+          body: "{}",
+        });
+      try {
+        // As if its conversation had stopped a while ago.
+        db.prepare(
+          "UPDATE sessions SET state = 'ended', end_reason = 'run_window_ended' WHERE id = ?",
+        ).run(first.session_id);
+        await expect.poll(async () => (await card()).offer).toBe("ready");
+        expect((await ask()).status).toBe(200);
+        expect(await card()).toMatchObject({ request: { state: "waiting" } });
+        const sent = readFileSync(calls, "utf8");
+        const number = /request "([A-Z0-9]{26})"/.exec(sent)?.[1];
+        expect(sent).toContain(`--thread=${conversation}`);
+
+        await restart("SIGKILL");
+        expect(await card()).toMatchObject({ request: { state: "waiting" } });
+        const joined = await tool(
+          agent,
+          "rejoin_room",
+          { request: number },
+          meta,
+        );
+        expect(await card()).toMatchObject({ request: { state: "joined" } });
+
+        await restart("SIGKILL");
+        expect(await card()).toMatchObject({ request: { state: "joined" } });
+        const again = await tool(
+          agent,
+          "rejoin_room",
+          { request: number },
+          meta,
+        );
+        expect(again.session_id).toBe(joined.session_id);
+        await tool(agent, "wait_for_turn", { session_id: joined.session_id });
+        expect(await card()).toMatchObject({ request: null });
+        expect(db.prepare("SELECT state FROM rejoin_requests").all()).toEqual([
+          { state: "back" },
+        ]);
+        expect(
+          db.prepare("SELECT 1 FROM sessions WHERE agent_id = 'codex'").all(),
+        ).toHaveLength(2);
+        // It was sent once.
+        expect(readFileSync(calls, "utf8")).toBe(sent);
+
+        // A late prompt after a break changes nothing.
+        db.prepare(
+          "UPDATE sessions SET state = 'ended', end_reason = 'run_window_ended' WHERE id = ?",
+        ).run(joined.session_id);
+        expect((await ask()).status).toBe(200);
+        const late = [
+          ...readFileSync(calls, "utf8").matchAll(/request "([A-Z0-9]{26})"/g),
+        ].at(-1)![1];
+        expect(late).not.toBe(number);
+        await page(`/api/rooms/${roomId}/break`, {
+          method: "POST",
+          body: "{}",
+        });
+        expect(
+          await tool(agent, "rejoin_room", { request: late }, meta),
+        ).toMatchObject({ status: "closed" });
+        expect(
+          db.prepare("SELECT on_break FROM rooms WHERE id = ?").get(roomId),
+        ).toEqual({ on_break: 1 });
+      } finally {
+        db.close();
+      }
+    },
+    60_000,
+  );
 
   it("recovers self, watchdog and timeout continuations across real processes", async () => {
     const agent = await connect(tokens[0] ?? "");

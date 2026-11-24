@@ -100,6 +100,19 @@ const configSchema = z.object({
       room_every_minutes: 10,
       max_per_day: 20,
     }),
+  rejoin: z
+    .object({
+      enabled: z.boolean().default(true),
+      wanted_minutes: z.number().int().min(1).max(60).default(10),
+      codex_command: z.string().min(1).nullable().default(null),
+      allow_untested_version: z.boolean().default(false),
+    })
+    .default({
+      enabled: true,
+      wanted_minutes: 10,
+      codex_command: null,
+      allow_untested_version: false,
+    }),
   pre_approvals: z
     .array(z.object({ recipient: z.string().min(1), data: z.string().min(1) }))
     .default([]),

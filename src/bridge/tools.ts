@@ -127,6 +127,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     path: string,
     body: object,
     signal?: AbortSignal,
+    conversation?: string,
   ): Promise<T> => {
     const requestKey = randomUUID();
     const receiptProtected = [
@@ -184,6 +185,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           "X-Konfab-Protocol": String(BRIDGE_PROTOCOL_VERSION),
           Authorization: `Bearer ${options.token}`,
           "Content-Type": "application/json",
+          ...(conversation ? { "X-Konfab-Conversation": conversation } : {}),
         },
         body: JSON.stringify(body),
         signal: signal
@@ -196,6 +198,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     };
     // Mutations use stable turn/proposal IDs or durable server receipts.
     const repeatSafe = new Set([
+      "/agent/rejoin",
       "/agent/lock/acquire",
       "/agent/lock/release",
       "/agent/join",
@@ -259,6 +262,20 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   };
 
   const server = new McpServer({ name: "konfab", version: "0.1.0" });
+
+  /**
+   * The conversation a call came from, as Codex names it in the call's
+   * metadata. The model can't set it. Missing or odd means none.
+   */
+  const conversationOf = (meta: unknown): string | undefined => {
+    if (server.server.getClientVersion()?.name !== "codex-mcp-client")
+      return undefined;
+    const thread = (meta as { threadId?: unknown } | undefined)?.threadId;
+    return typeof thread === "string" &&
+      /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(thread)
+      ? thread
+      : undefined;
+  };
 
   server.registerTool(
     "acquire_lock",
@@ -408,6 +425,33 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
             "/agent/join",
             { room, ...(as ? { as } : {}) },
             extra.signal,
+            conversationOf(extra._meta),
+          ),
+        );
+      } catch (error) {
+        return asToolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "rejoin_room",
+    {
+      ...toolHints("rejoin_room"),
+      description:
+        "Only when a message from Konfab gives you a request: come back to a room the lead asked you to rejoin. Returns what join_room returns; then call wait_for_turn and continue the loop. If the status is closed, end your turn and do nothing else; don't call join_room instead.",
+      inputSchema: {
+        request: z.string().max(200).describe("The request from the message"),
+      },
+    },
+    async ({ request }, extra) => {
+      try {
+        return asToolResult(
+          await call(
+            "/agent/rejoin",
+            { request },
+            extra.signal,
+            conversationOf(extra._meta),
           ),
         );
       } catch (error) {

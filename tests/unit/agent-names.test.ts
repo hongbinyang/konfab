@@ -418,7 +418,7 @@ describe("room name persistence", () => {
       await app.close();
       db.close();
       raw = new Database(path);
-      expect(raw.pragma("user_version", { simple: true })).toBe(34);
+      expect(raw.pragma("user_version", { simple: true })).toBe(35);
       raw.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

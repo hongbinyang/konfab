@@ -82,6 +82,7 @@ The bridge offers these MCP tools; each returns JSON.
 | Tool                                 | Purpose                                                                                     |
 | ------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `join_room`                          | Join a room (optionally `as` a named agent). Returns session, topic, rules, members, assignment, recent messages. |
+| `rejoin_room`                        | Only with a one-time request the lead sent: come back to its room ([design](docs/design/rejoin-agents.md)). Answers as `join_room`, or `closed`. |
 | `wait_for_turn`                      | `turn`, `idle`, `closed` or `replaced`. A turn carries rules, unseen messages, decisions, assignment and any format step. |
 | `post_message`, `pass_turn`          | End the turn. A post sets `next`: `self`, `agent`, `lead` or `done`.                         |
 | `hand_off`                           | Queue a continuation for another member after a post that left none.                         |

@@ -127,6 +127,7 @@ export function deleteRoomRows(
         `DELETE FROM ${table} WHERE session_id IN (SELECT id FROM sessions WHERE room_id=?)`,
       ).run(id);
     for (const table of [
+      "rejoin_requests",
       "automatic_continuations",
       "lead_seen_messages",
       "attachments",

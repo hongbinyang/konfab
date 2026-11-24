@@ -41,6 +41,7 @@ import {
 } from "./agent-names.js";
 
 import { KonfabError } from "./errors.js";
+import { conversationId, RejoinRequests } from "./rejoin.js";
 export { KonfabError };
 
 export interface PreApproval {
@@ -771,11 +772,41 @@ export class KonfabService {
   private readonly maxTurnChars: number;
   private readonly startedAt: number;
 
+  readonly rejoin: RejoinRequests;
+
   constructor(
     private readonly db: Db,
     private readonly options: ServiceOptions,
   ) {
     this.now = options.now ?? Date.now;
+    this.rejoin = new RejoinRequests({
+      db,
+      now: () => this.now(),
+      room: (id) => this.roomById(id),
+      allPaused: () => this.isAllPaused(),
+      isMember: (roomId, agentId) =>
+        Boolean(
+          this.db
+            .prepare(
+              "SELECT 1 FROM room_members WHERE room_id = ? AND agent_id = ?",
+            )
+            .get(roomId, agentId),
+        ),
+      isAway: (roomId, agentId) =>
+        ["not_responding", "window_ended", "not_joined", "on_break"].includes(
+          this.agentState(roomId, agentId),
+        ),
+      newSessionId: randomUUID,
+      startSession: (roomId, agentId, sessionId, conversation) => {
+        this.startSession(roomId, agentId, sessionId, conversation);
+        this.syncRunPauses();
+      },
+      reply: (roomId, agentId, sessionId) =>
+        this.joinReply(roomId, agentId, sessionId),
+      logEvent: (type, roomId, agentId, payload) =>
+        this.logEvent(type, roomId, agentId, payload),
+      notify: () => this.notify(),
+    });
     this.startedAt = this.now();
     this.liveWindowMs = options.liveWindowMs ?? DEFAULT_LIVE_WINDOW_MS;
     this.maxTurnChars = options.maxTurnChars ?? DEFAULT_MAX_TURN_CHARS;
@@ -2308,6 +2339,7 @@ export class KonfabService {
           stats: this.agentStats(room.id, agent.id),
           join_prompt: this.joinPrompt(room.name, agent.id),
           rejoin_prompt: this.rejoinPrompt(room.name, agent.id),
+          rejoin: this.rejoin.view(room.id, agent.id),
         };
       }),
       queued: queued.map((turn) => turn.agent_id),
@@ -2380,7 +2412,7 @@ export class KonfabService {
 
   // Agent sessions and turns
 
-  join(agentId: string, roomName: string) {
+  join(agentId: string, roomName: string, conversation: unknown = null) {
     const room = this.room(roomName);
     if (room.archived_at !== null) {
       throw new KonfabError(
@@ -2391,8 +2423,35 @@ export class KonfabService {
     }
     this.requireMember(room.id, agentId);
     const sessionId = randomUUID();
-    const now = this.now();
     this.db.transaction(() => {
+      this.startSession(
+        room.id,
+        agentId,
+        sessionId,
+        conversationId(conversation),
+      );
+      if (room.on_break === 1) {
+        this.db
+          .prepare("UPDATE rooms SET on_break = 0 WHERE id = ?")
+          .run(room.id);
+        this.logEvent("break_ended", room.id, agentId, {});
+      }
+      this.syncRunPauses();
+    })();
+    this.notify();
+    return this.joinReply(room.id, agentId, sessionId);
+  }
+
+  /** Replaces the agent's session in the room. Inside a transaction. */
+  private startSession(
+    roomId: number,
+    agentId: string,
+    sessionId: string,
+    conversation: string | null,
+  ): void {
+    const room = this.roomById(roomId);
+    const now = this.now();
+    {
       const previous = this.activeSession(room.id, agentId);
       if (previous) {
         this.releaseSessionLocks(previous.id, "replaced");
@@ -2423,10 +2482,10 @@ export class KonfabService {
         .run(room.id, agentId);
       this.db
         .prepare(
-          `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at)
-           VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+          `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, conversation_id)
+           VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`,
         )
-        .run(sessionId, room.id, agentId, now, now, now + budget);
+        .run(sessionId, room.id, agentId, now, now, now + budget, conversation);
       this.logEvent("run_window_started", room.id, agentId, {
         ends_at: now + budget,
       });
@@ -2447,15 +2506,11 @@ export class KonfabService {
       this.logEvent(earlierSession ? "rejoin" : "join", room.id, agentId, {
         session_id: sessionId,
       });
-      if (room.on_break === 1) {
-        this.db
-          .prepare("UPDATE rooms SET on_break = 0 WHERE id = ?")
-          .run(room.id);
-        this.logEvent("break_ended", room.id, agentId, {});
-      }
-      this.syncRunPauses();
-    })();
-    this.notify();
+    }
+  }
+
+  private joinReply(roomId: number, agentId: string, sessionId: string) {
+    const room = this.roomById(roomId);
     return {
       session_id: sessionId,
       room: room.name,
@@ -2509,7 +2564,10 @@ export class KonfabService {
           "SELECT * FROM turns WHERE room_id = ? AND agent_id = ? AND state = 'active'",
         )
         .get(room.id, agentId) as TurnRow | undefined;
-      if (ownActive) return this.buildTurn(room, ownActive);
+      if (ownActive) {
+        if (isModelCall) this.rejoin.waited(session.id);
+        return this.buildTurn(room, ownActive);
+      }
       const active = this.db
         .prepare(
           "SELECT * FROM turns WHERE room_id = ? AND state = 'active' AND parallel_source_message_id IS NULL",
@@ -2527,6 +2585,7 @@ export class KonfabService {
         return closed("run_window_ended");
       }
       const parallel = this.activateParallel(room, agentId, session.id);
+      if (isModelCall) this.rejoin.waited(session.id);
       if (parallel) return this.buildTurn(room, parallel);
       if (active) return { status: "idle", wait_seconds: waitSeconds };
 
@@ -3979,7 +4038,7 @@ export class KonfabService {
       .prepare(
         `SELECT id, type, agent_id, created_at, payload FROM events
       WHERE (room_id = ? OR (room_id IS NULL AND type IN ('all_paused', 'all_resumed')))
-      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','handoff_repaired','automatic_scheduled','automatic_cancelled','automatic_capped','automatic_continuation','automatic_setting','lock_acquired','lock_renewed','lock_released','lock_expired','lock_force_released','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning')
+      AND type IN ('join','rejoin','turn_started','pass','turn_skipped','turn_abandoned','room_paused','room_resumed','all_paused','all_resumed','break_started','break_ended','status_report','working_started','working_cleared','handoff_repaired','automatic_scheduled','automatic_cancelled','automatic_capped','automatic_continuation','automatic_setting','lock_acquired','lock_renewed','lock_released','lock_expired','lock_force_released','contact_lost','contact_restored','run_window_started','run_window_extended','run_window_ended','run_window_paused','run_window_resumed','run_warning','rejoin_asked','rejoin_joined','rejoined','rejoin_closed')
       AND id < ? ORDER BY id DESC LIMIT ?`,
       )
       .all(room.id, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as {
@@ -4177,6 +4236,7 @@ export class KonfabService {
   /** Preserve work owned by surviving sessions; requeue orphaned turns. */
   recoverAfterRestart(): void {
     this.db.transaction(() => {
+      this.rejoin.recover();
       this.syncRunPauses();
       const active = this.db
         .prepare("SELECT * FROM turns WHERE state = 'active'")
@@ -4306,6 +4366,7 @@ export class KonfabService {
         }
       }
       this.expireLocks();
+      this.rejoin.closeStale();
       this.processAutomaticContinuations();
     })();
     this.notify();

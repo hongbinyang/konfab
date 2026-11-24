@@ -1,6 +1,6 @@
 # Automatic rejoin
 
-**Status:** feasibility findings (2026-11-23, macOS, Codex CLI 0.171.0-alpha.13 from the ChatGPT app, Claude Code 2.1.220). Nothing is built. Copying the rejoin prompt stays in any case.
+**Status:** feasibility findings (2026-11-23, macOS, Codex CLI 0.171.0-alpha.13 from the ChatGPT app, Claude Code 2.1.220). Built since as the [Rejoin agents button](rejoin-agents.md). Copying the rejoin prompt stays in any case.
 
 | Question                                                  | Codex                                                                                                                                                                                                                          | Claude Code                                                                                                                  |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |

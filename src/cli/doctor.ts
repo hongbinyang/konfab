@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { configPath, parseConfig } from "../server/config.js";
+import { checkCommand } from "../server/rejoin/codex.js";
 import { hashToken } from "../server/domain/service.js";
 import { LOGIN_ITEM_LABEL } from "./login-item-plist.js";
 import { readClaude, readCodex, tokenFrom } from "./connector-config.js";
@@ -173,10 +174,13 @@ export async function diagnose(
   }
 
   let port = 8787;
+  let rejoin = parseConfig("").rejoin;
   const config = configPath(home);
   if (existsSync(config)) {
     try {
-      port = parseConfig(readFileSync(config, "utf8")).server.port;
+      const settings = parseConfig(readFileSync(config, "utf8"));
+      port = settings.server.port;
+      rejoin = settings.rejoin;
       add({ check: "Config", level: "ok", detail: config });
     } catch (error) {
       add({
@@ -360,6 +364,26 @@ export async function diagnose(
             process.platform === "darwin"
               ? "If you haven't stored one in the Keychain, add one with `npm run setup -- --github-token` or set KONFAB_GITHUB_TOKEN."
               : "Set KONFAB_GITHUB_TOKEN before starting Konfab.",
+        },
+  );
+  // Runs the app's command only for its version and help.
+  const command = await checkCommand({
+    enabled: rejoin.enabled,
+    command: rejoin.codex_command,
+    allowUntested: rejoin.allow_untested_version,
+    env,
+  });
+  add(
+    command.ok
+      ? {
+          check: "Rejoin button (experimental)",
+          level: command.tested ? "ok" : "warn",
+          detail: `Available for Codex agents; Codex ${command.version}${command.tested ? "" : ", which hasn't been tried (rejoin.allow_untested_version)"}${rejoin.codex_command ? "; its signature isn't checked (rejoin.codex_command)" : ""}`,
+        }
+      : {
+          check: "Rejoin button (experimental)",
+          level: "ok",
+          detail: `Not available: ${command.reason}. The manual rejoin prompts work.`,
         },
   );
   if (process.platform === "darwin") {
