@@ -17,6 +17,10 @@ export const CANCEL_HELP =
   "Cancel closes Konfab's request. It can't take back the prompt in Codex: that may still start a short turn, which will be told to end.";
 
 const OFFER: Record<string, string> = {
+  connected: "Available when the agent is away.",
+  old_join:
+    "Not yet: restart the Konfab connector in Codex, then paste the rejoin prompt once.",
+  unavailable: "The Codex command can't be used; npm run doctor says why.",
   elsewhere: "Its conversation is in another room now.",
   archived: "The room is archived.",
   paused: "The room is paused.",
@@ -111,7 +115,7 @@ export function RejoinControls({
         </>
       )}
       {/* Beside the contact notice, which has them, they'd be there twice. */}
-      {agent.state !== "not_responding" && (
+      {agent.state !== "not_responding" && rejoin.offer !== "connected" && (
         <p>
           <RejoinPrompts agent={agent} />
         </p>
@@ -141,14 +145,19 @@ export function RejoinAgents({
       if (element?.open) element.close();
     };
   }, [open]);
-  if (!ready.length && !open) return null;
+  if (!open && !agents.some((agent) => agent.rejoin?.offer)) return null;
   const earlier = ready.some((agent) => agent.rejoin?.earlier);
   return (
     <>
       <button
         type="button"
-        className="secondary"
-        title="Experimental"
+        className="secondary rejoin-agents"
+        disabled={!ready.length}
+        title={
+          ready.length
+            ? "Experimental"
+            : "Experimental. Available when an agent is away; its card says more."
+        }
         onClick={() => setOpen(true)}
       >
         Rejoin agents

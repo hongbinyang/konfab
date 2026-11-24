@@ -34,12 +34,16 @@ const rejoinCommand = {
 };
 service.rejoin.wantedMs = config.rejoin.wanted_minutes * 60_000;
 let rejoinReady = false;
+let rejoinProblem = false;
 service.rejoin.available = () => rejoinReady;
+service.rejoin.problem = () => rejoinProblem;
 /** At the start, after a refusal, and now and then while it can't be used. */
 let recheck: NodeJS.Timeout | undefined;
 const checkRejoin = async (): Promise<void> => {
   clearTimeout(recheck);
-  rejoinReady = (await checkCommand(rejoinCommand)).ok;
+  const checked = await checkCommand(rejoinCommand);
+  rejoinReady = checked.ok;
+  rejoinProblem = !checked.ok && !checked.off;
   if (!rejoinReady && config.rejoin.enabled)
     recheck = setTimeout(() => void checkRejoin(), 10 * 60_000).unref();
 };

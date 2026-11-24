@@ -44,7 +44,8 @@ export type CommandOptions = {
 
 export type Checked =
   | { ok: true; path: string; version: string; tested: boolean; stamp: string }
-  | { ok: false; reason: string };
+  /** `off`: by choice or on this system; there is nothing to look into. */
+  | { ok: false; reason: string; off: boolean };
 
 export type RunResult = {
   started: boolean;
@@ -189,11 +190,15 @@ export async function checkCommand(options: CommandOptions): Promise<Checked> {
       };
     }
   };
-  const no = (reason: string): Checked => ({ ok: false, reason });
-  if (!options.enabled) return no("it is turned off (rejoin.enabled)");
+  const no = (reason: string, off = false): Checked => ({
+    ok: false,
+    reason,
+    off,
+  });
+  if (!options.enabled) return no("it is turned off (rejoin.enabled)", true);
   // An isolated run uses nothing of the user's.
-  if (env.KONFAB_ISOLATED === "1") return no("this is an isolated run");
-  if (platform !== "darwin") return no("it has only been tried on macOS");
+  if (env.KONFAB_ISOLATED === "1") return no("this is an isolated run", true);
+  if (platform !== "darwin") return no("it has only been tried on macOS", true);
   if (options.command !== null && !isAbsolute(options.command))
     return no("rejoin.codex_command isn't an absolute path");
   let path: string;

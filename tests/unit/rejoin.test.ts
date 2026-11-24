@@ -543,21 +543,79 @@ describe("asking agents to rejoin", () => {
     expect(states()).toEqual([]);
   });
 
-  it("isn't offered without a command, a conversation, or while in contact", () => {
+  it("says why it can't be used now, and can't be used then", () => {
     service.rejoin.available = () => false;
     expect(view().offer).toBeNull();
+    service.rejoin.problem = () => true;
+    expect(view().offer).toBe("unavailable");
+    expect(() => ask()).toThrow(/can't be asked/);
     service.rejoin.available = () => true;
     expect(view().offer).toBe("ready");
     const joined = service.join("codex", ROOM, HERE).session_id;
-    expect(view().offer).toBeNull();
+    expect(view().offer).toBe("connected");
     service.poll("codex", joined, true);
-    expect(view().offer).toBeNull();
+    expect(view().offer).toBe("connected");
+    expect(() => ask()).toThrow(/can't be asked/);
     // A newer join that named none: an older one isn't used instead.
     service.join("codex", ROOM, "not-one");
+    expect(view().offer).toBe("old_join");
     loseContact();
-    expect(view().offer).toBeNull();
+    expect(view().offer).toBe("old_join");
     expect(() => ask()).toThrow(/can't be asked/);
-    expect(service.rejoin.view(roomId, "claude").offer).toBeNull();
+    expect(states()).toEqual([]);
+  });
+
+  it("shows nothing for agents of other apps and ones that never joined", () => {
+    service.join("claude", ROOM, OTHER);
+    loseContact();
+    service.ensureAgent("codex2", "Second");
+    db.prepare("UPDATE agents SET app_id = 'codex' WHERE id = 'codex2'").run();
+    service.setMembers(roomId, ["claude", "codex", "codex2"]);
+    service.rejoin.problem = () => true;
+    for (const available of [true, false]) {
+      service.rejoin.available = () => available;
+      expect(service.rejoin.view(roomId, "claude").offer).toBeNull();
+      expect(service.rejoin.view(roomId, "codex2").offer).toBeNull();
+    }
+    service.rejoin.available = () => true;
+    expect(() => service.rejoin.ask(roomId, "claude", true)).toThrow(
+      /can't be asked/,
+    );
+  });
+
+  it("tells the room when an agent is back: at its first wait after joining again", () => {
+    const back = () =>
+      service
+        .roomState(ROOM)
+        .returns.map((item) => [item.agent_id, item.created_at]);
+    // The first join isn't a return, and neither is a join without a wait.
+    expect(back()).toEqual([]);
+    service.poll("claude", service.join("claude", ROOM).session_id, true);
+    const joined = service.join("codex", ROOM, HERE).session_id;
+    expect(back()).toEqual([]);
+    service.poll("codex", joined, false);
+    expect(back()).toEqual([]);
+    now += 1000;
+    service.poll("codex", joined, true);
+    const first = now;
+    now += 1000;
+    service.poll("codex", joined, true);
+    expect(back()).toEqual([["codex", first]]);
+    // A join that never waits is not counted by the next one's wait.
+    service.join("codex", ROOM, HERE);
+    now += 1000;
+    loseContact();
+    const again = rejoin(ask().number).session_id!;
+    expect(back()).toEqual([["codex", first]]);
+    service.poll("codex", again, true);
+    expect(back()).toEqual([
+      ["codex", first],
+      ["codex", now],
+    ]);
+    // Other rooms have their own.
+    service.poll("codex", other(), true);
+    expect(back()).toHaveLength(2);
+    expect(service.roomState("elsewhere").returns).toEqual([]);
   });
 
   it("doesn't take the conversation from a room where it is waiting", () => {

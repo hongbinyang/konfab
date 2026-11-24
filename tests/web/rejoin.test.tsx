@@ -142,6 +142,15 @@ describe("asking an agent to rejoin", () => {
   });
 
   it.each([
+    ["connected", "Available when the agent is away."],
+    [
+      "old_join",
+      "Not yet: restart the Konfab connector in Codex, then paste the rejoin prompt once.",
+    ],
+    [
+      "unavailable",
+      "The Codex command can't be used; npm run doctor says why.",
+    ],
     ["elsewhere", "Its conversation is in another room now."],
     ["archived", "The room is archived."],
     ["paused", "The room is paused."],
@@ -155,6 +164,12 @@ describe("asking an agent to rejoin", () => {
     expect(screen.getByText(new RegExp(text))).toBeTruthy();
     await userEvent.click(button);
     expect(calls).toEqual([]);
+    // Nothing to paste while the agent is there.
+    cleanup();
+    card(rejoin({ offer }), { state: "waiting" });
+    expect(
+      screen.queryByRole("button", { name: "Copy rejoin prompt" }) === null,
+    ).toBe(offer === "connected");
   });
 
   it("asks before sending a second prompt", async () => {
@@ -236,10 +251,22 @@ describe("asking an agent to rejoin", () => {
     ]);
   });
 
-  it("has no room button when nobody can be asked", () => {
-    const { container } = render(
+  it("has no room button where it is for nobody, and a greyed-out one while nobody can be asked", () => {
+    const { container, rerender } = render(
       <RejoinAgents roomId={4} agents={[agent(rejoin())]} act={act} />,
     );
     expect(container.textContent).toBe("");
+    rerender(
+      <RejoinAgents
+        roomId={4}
+        agents={[agent(rejoin({ offer: "connected" }))]}
+        act={act}
+      />,
+    );
+    const button = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Rejoin agents",
+    });
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("Available when an agent is away");
   });
 });

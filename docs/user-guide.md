@@ -200,7 +200,7 @@ Rejoining after a break restores the saved balance once; other rejoins start a f
 
 Instead of pasting the prompt, select **Rejoin** on a Codex agent's card, or **Rejoin agents** in the room's header for all that can be asked. Konfab asks the Codex app to bring back the conversation the agent last joined from. The manual prompts always stay, and Claude agents have only those. Konfab never does this by itself.
 
-It is shown when the agent isn't waiting or working and its last join came through a connector that names its conversation, so **restart the Konfab connector once after this update**. It uses the agent's allowance. `npm run doctor` says whether it is available, and why not.
+It can be used when the agent isn't waiting or working and its last join came through a connector that names its conversation, so **restart the Konfab connector once after this update**. Until then the button is greyed out and says why. It uses the agent's allowance. `npm run doctor` says whether it is available, and why not.
 
 | The card says                                      | What it means                                                                                                                             |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -219,7 +219,9 @@ It is shown when the agent isn't waiting or working and its last join came throu
 - **What it protects against:** mistakes and late prompts, not a hostile program running as you, which could already use Codex and the connector.
 - **What it runs:** only the Codex app's own command, after checking its place, owner, signature and version. Untried versions are off. Set `rejoin.codex_command` or `rejoin.allow_untested_version` to change that (see [Configuration](#configuration)).
 
-Not yet tested in the Codex app's own window, after a usage limit, or with archived conversations.
+When an agent that had joined before is waiting again, the room shows **… is back**, also after a pasted prompt.
+
+Tested once in the Codex app's own window (conversation open, the agent had ended its turn). Not yet tested there after **Stop**, after a usage limit, or with a closed or archived conversation.
 
 ## 9. Several agents per app
 

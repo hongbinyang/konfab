@@ -1,6 +1,6 @@
 # Rejoin agents button
 
-**Status:** built on `feature/rejoin-agents` and marked experimental; the checks in the app's own window are still to be done. Evidence: [automatic rejoin](automatic-rejoin.md).
+**Status:** built and marked experimental; one check in the app's own window has passed, the others are still to be done. Evidence: [automatic rejoin](automatic-rejoin.md).
 
 ## Goal
 
@@ -106,10 +106,12 @@ Only the two "refused" rows say "not queued". An unsure request is never sent ag
 | Situation                                                                             | Button                                              |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | The agent isn't waiting or working, its last join named a conversation, command found | **Rejoin**                                          |
-| It is waiting or working                                                              | Not shown                                           |
+| It is waiting or working                                                              | Disabled: "Available when the agent is away."       |
 | That conversation is waiting or working in another room                               | Disabled: "Its conversation is in another room now" |
 | The room is archived, paused or on a break                                            | Disabled: says which; nothing is resumed for it     |
-| Joined with an older connector, Claude, or no command                                 | Not shown; the manual prompts are                   |
+| A Codex agent that joined with an older connector                                     | Disabled: says to restart it and join once by hand  |
+| A Codex agent, and the command can't be used                                          | Disabled: says that doctor knows why                |
+| Other apps, not joined, turned off, isolated, or not macOS                            | Not shown; the manual prompts are                   |
 | A request is open                                                                     | **Rejoin asked 12:03 · waiting** and **Cancel**     |
 
 **Rejoin agents** in the room's header does the same for each agent it is offered for, after showing which and that it uses their allowance.
@@ -205,6 +207,14 @@ With the stand-in (automatic, every run):
 With the real server program and a temporary Konfab (by hand): loaded, not loaded, after Stop, busy, and a late prompt after expiry.
 
 In the app's own window (by hand, separate, with a throwaway room and conversation): loaded and idle; another conversation in front; the app closed and opened again; after Stop; cancelled before it arrives. Each is recorded as passed, failed or not run. The "experimental" mark stays until these pass. Both manual parts need the lead's OK and an allowance check first.
+
+| In the app's own window              | Result                                                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Loaded and idle, turn ended normally | **passed**, once (2026-11-23, by the lead): joined after 19 seconds, back 5 seconds later, sent once |
+| Another conversation in front        | not run                                                                                              |
+| The app closed and opened again      | not run                                                                                              |
+| After Stop                           | not run                                                                                              |
+| Cancelled before it arrives          | not run                                                                                              |
 
 ## Remaining limitations
 

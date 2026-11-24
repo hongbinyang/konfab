@@ -514,7 +514,7 @@ Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Wi
 
 ## 23. Asking agents to rejoin
 
-**Status:** Implemented on `feature/rejoin-agents`, marked experimental; in review. Design: [Rejoin agents button](docs/design/rejoin-agents.md).
+**Status:** Implemented, marked experimental. Design: [Rejoin agents button](docs/design/rejoin-agents.md).
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
@@ -529,5 +529,7 @@ Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Wi
 | RJ9 | MUST | Only a command whose path, owner, folders, signature (for the app's own copy) and version were checked is run, without a shell. Anything else turns the button off, and `npm run doctor` says why. |
 | RJ10 | MUST | The request is stored only as a hash, and is in no page, log, activity, export, receipt or agent reply. The conversation is only in the database, its backups and the command's arguments. |
 | RJ11 | MUST | Automated tests use a stand-in and never send with the real command. |
+| RJ12 | MUST | While a Codex agent can't be asked, the button is greyed out and says why. It isn't shown where nothing the lead does would make it work. |
+| RJ13 | MUST | The room shows that an agent is back at its first `wait_for_turn` after joining again, however it came back. |
 
-Not yet verified: the app's own window, a conversation stopped with Stop in it, usage limits, archived conversations, and any system but macOS. The experimental mark stays until the window checks pass.
+Verified once in the app's own window: conversation open, turn ended normally (2026-11-23). Not yet verified: a conversation stopped with Stop in it, one that is closed or not in front, usage limits, archived conversations, and any system but macOS. The experimental mark stays until the window checks pass.

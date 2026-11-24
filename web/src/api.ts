@@ -102,7 +102,16 @@ export interface Pass {
 }
 
 export interface RejoinState {
-  offer: "ready" | "elsewhere" | "archived" | "paused" | "on_break" | null;
+  offer:
+    | "ready"
+    | "connected"
+    | "old_join"
+    | "unavailable"
+    | "elsewhere"
+    | "archived"
+    | "paused"
+    | "on_break"
+    | null;
   request: {
     state: "waiting" | "joined" | "closed";
     unsure: boolean;
@@ -254,6 +263,8 @@ export interface RoomState {
   }>;
   messages: Message[];
   passes?: Pass[];
+  /** Agents that came back. Absent from older servers. */
+  returns?: Array<{ id: number; agent_id: string; created_at: number }>;
   activity: ActivityEvent[];
   permissions: Permission[];
   decisions: Decision[];

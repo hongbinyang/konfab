@@ -57,8 +57,17 @@ type Row = {
 };
 
 export type RejoinView = {
-  /** Whether the lead can ask now; null where it isn't offered at all. */
-  offer: "ready" | "elsewhere" | "archived" | "paused" | "on_break" | null;
+  /** Whether the lead can ask now, or why not; null where it isn't shown. */
+  offer:
+    | "ready"
+    | "connected"
+    | "old_join"
+    | "unavailable"
+    | "elsewhere"
+    | "archived"
+    | "paused"
+    | "on_break"
+    | null;
   request: {
     state: "waiting" | "joined" | "closed";
     unsure: boolean;
@@ -85,6 +94,8 @@ type Room = {
 export class RejoinRequests {
   /** Whether a checked Codex command is there. Set by the server. */
   available: () => boolean = () => false;
+  /** Whether it is missing because of something the lead can look into. */
+  problem: () => boolean = () => false;
   wantedMs = 10 * 60_000;
 
   constructor(
@@ -171,6 +182,15 @@ export class RejoinRequests {
       });
     }
     return rows.length > 0;
+  }
+
+  /** The only app with a way to do this. */
+  private isCodex(agentId: string): boolean {
+    return Boolean(
+      this.db
+        .prepare("SELECT 1 FROM agents WHERE id = ? AND app_id = 'codex'")
+        .get(agentId),
+    );
   }
 
   private newest(roomId: number, agentId: string) {
@@ -272,8 +292,12 @@ export class RejoinRequests {
           : null,
       earlier: false,
     };
-    if (!this.available() || asked || !session?.conversation_id || !away)
-      return base;
+    if (asked || !session || !this.isCodex(agentId)) return base;
+    const no = (offer: RejoinView["offer"]) => ({ ...base, offer });
+    if (!this.available()) return this.problem() ? no("unavailable") : base;
+    if (!session.conversation_id) return no("old_join");
+    // While a joined one is in contact, its own text says what is missing.
+    if (!away) return activeJoin ? base : no("connected");
     return {
       ...base,
       offer:

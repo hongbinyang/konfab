@@ -35,16 +35,34 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
   await expect(page.getByRole("button", { name: "Rejoin agents" })).toHaveCount(
     0,
   );
-  // As if the agent had joined and its conversation had stopped.
-  const db = new Database(join(home, "konfab.db"), { timeout: 5000 });
-  try {
-    db.prepare(
-      `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, end_reason, conversation_id)
-       SELECT ?, id, 'codex', 'ended', 1, 1, 1, 'run_window_ended', ? FROM rooms WHERE name = ?`,
-    ).run(`e2e-${name}`, conversation, name);
-  } finally {
-    db.close();
-  }
+  const write = (sql: string, ...values: unknown[]) => {
+    const db = new Database(join(home, "konfab.db"), { timeout: 5000 });
+    try {
+      db.prepare(sql).run(...values);
+    } finally {
+      db.close();
+    }
+  };
+  // As if the agent had joined, come back and were waiting.
+  const now = Date.now();
+  write(
+    `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, conversation_id)
+     SELECT ?, id, 'codex', 'active', ?, ?, ?, ? FROM rooms WHERE name = ?`,
+    `e2e-${name}`,
+    now,
+    now,
+    now + 3_600_000,
+    conversation,
+    name,
+  );
+  for (const type of ["rejoin", "wait_call"])
+    write(
+      `INSERT INTO events (type, room_id, agent_id, payload, created_at)
+       SELECT ?, id, 'codex', '{}', ? FROM rooms WHERE name = ?`,
+      type,
+      now,
+      name,
+    );
   // Below 900 px the right panel is closed unless the lead opened it.
   await page.evaluate(`localStorage.setItem("konfab.ui.v1.panel", "true")`);
   await page.reload();
@@ -56,6 +74,39 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
     .click();
   await expect(page.getByRole("heading", { name: `# ${name}` })).toBeVisible();
   const before = sent();
+  // The button is there, greyed out, and says why.
+  const hint = page
+    .locator(".compact-agent", { hasText: "@codex" })
+    .getByRole("group", { name: "Rejoin Codex" });
+  await expect(hint).toContainText("Available when the agent is away.");
+  await expect(
+    hint.getByRole("button", { name: "Rejoin", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Rejoin agents" }),
+  ).toBeDisabled();
+  await expect(page.getByText("Codex is back")).toBeVisible();
+  for (const button of [
+    hint.getByRole("button", { name: "Rejoin", exact: true }),
+    page.getByRole("button", { name: "Rejoin agents" }),
+  ])
+    await expect(button).toHaveCSS("opacity", "0.55");
+  if (process.env.KONFAB_SHOTS) await hint.scrollIntoViewIfNeeded();
+  if (process.env.KONFAB_SHOTS)
+    await page.screenshot({
+      path: join(process.env.KONFAB_SHOTS, `grey-${testInfo.project.name}.png`),
+    });
+  // Then its conversation stopped.
+  write(
+    "UPDATE sessions SET state = 'ended', end_reason = 'run_window_ended' WHERE id = ?",
+    `e2e-${name}`,
+  );
+  await page.reload();
+  await page
+    .locator("nav, aside")
+    .getByRole("button", { name: `# ${name}`, exact: true })
+    .first()
+    .click();
 
   const header = page.getByRole("button", { name: "Rejoin agents" });
   await header.focus();

@@ -467,6 +467,7 @@ function Room({
         state.read_info?.older_unread_count ??
         0);
   const passes = state.passes ?? [];
+  const returns = state.returns ?? [];
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic);
@@ -480,7 +481,7 @@ function Room({
   );
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
-  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
+  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${returns.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
   // On a time tie, a message comes first, because a pass follows what it answers.
   const timeline = useMemo(
     () =>
@@ -490,12 +491,13 @@ function Room({
           ...message,
         })),
         ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
+        ...returns.map((item) => ({ kind: "return" as const, ...item })),
         ...state.permissions.map((permission) => ({
           kind: "permission" as const,
           ...permission,
         })),
       ].sort((a, b) => a.created_at - b.created_at),
-    [messages, passes, state.permissions],
+    [messages, passes, returns, state.permissions],
   );
   const [olderActivity, setOlderActivity] = useState<ActivityEvent[]>([]);
   const [hasOlderActivity, setHasOlderActivity] = useState(true);
@@ -1018,6 +1020,11 @@ function Room({
             <li key={`pass-${item.id}`} className="pass">
               {displayName(item.agent_id)} passed
               {item.reason ? `: ${item.reason}` : ""}
+              <span className="time">{formatTime(item.created_at)}</span>
+            </li>
+          ) : item.kind === "return" ? (
+            <li key={`return-${item.id}`} className="pass">
+              {displayName(item.agent_id)} is back
               <span className="time">{formatTime(item.created_at)}</span>
             </li>
           ) : item.kind === "permission" ? (

@@ -187,6 +187,12 @@ export interface DecisionView {
   body: string;
 }
 
+export interface ReturnView {
+  id: number;
+  agent_id: string;
+  created_at: number;
+}
+
 export interface PassView {
   id: number;
   agent_id: string;
@@ -2359,6 +2365,7 @@ export class KonfabService {
       permissions: this.roomPermissions(room.id, messages[0]?.created_at ?? 0),
       decisions: this.decisions(room.id),
       passes: this.listPasses(room.id, messages[0]?.created_at ?? 0),
+      returns: this.listReturns(room.id, messages[0]?.created_at ?? 0),
     };
   }
 
@@ -4623,6 +4630,26 @@ export class KonfabService {
       reason: (JSON.parse(row.payload) as { reason: string | null }).reason,
       created_at: row.created_at,
     }));
+  }
+
+  /** When agents that had joined before were waiting again after a new join. */
+  private listReturns(roomId: number, since: number): ReturnView[] {
+    return this.db
+      .prepare(
+        `SELECT events.id, events.agent_id, events.created_at FROM (
+           SELECT (
+             SELECT w.id FROM events w
+             WHERE w.type = 'wait_call' AND w.agent_id = j.agent_id
+               AND w.room_id = j.room_id AND w.id > j.id
+               AND w.id < COALESCE((SELECT MIN(n.id) FROM events n
+                 WHERE n.type = 'rejoin' AND n.agent_id = j.agent_id
+                   AND n.room_id = j.room_id AND n.id > j.id), w.id + 1)
+             ORDER BY w.id LIMIT 1) AS wait_id
+           FROM events j
+           WHERE j.type = 'rejoin' AND j.room_id = ? AND j.created_at >= ?
+         ) JOIN events ON events.id = wait_id ORDER BY events.id`,
+      )
+      .all(roomId, since) as ReturnView[];
   }
 
   private replaceMembers(roomId: number, agentIds: readonly string[]): void {

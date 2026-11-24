@@ -31,6 +31,16 @@ So a queued message waits when the conversation's last turn was **interrupted** 
 
 The rejoin itself is proven once for each of the two last rows, with the server program the app uses. With the app's own window, only message delivery was seen, not a rejoin.
 
+## In the apps' own windows (2026-11-23, with the lead)
+
+| App                                                                                   | Result                                                                                                               |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Codex: **Rejoin** selected, conversation open, the agent had ended its turn           | **Rejoined**, once: joined after 19 seconds, back 5 seconds later                                                    |
+| Claude: a 2-minute background command started by the agent, which then ended its turn | **Started again by itself**, once, 4 seconds after the command ended; the agent joined again without a pasted prompt |
+| Claude: the same after **Stop**                                                       | Not run                                                                                                              |
+
+So Claude has a way that needs the agent's own help in advance: see [a background watcher](rejoin-claude.md). No documented way to send a prompt into an open Claude conversation was found.
+
 ## Next tests (need the lead)
 
 1. In the app itself, with a real room (by the lead): from end to end, after Stop, after a usage limit, with a busy or archived conversation, and two requests at once.

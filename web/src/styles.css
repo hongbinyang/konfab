@@ -1461,3 +1461,10 @@ button.danger {
 .kept-copies .error {
   color: var(--error);
 }
+
+/* Shown before it can be used, so it must look that way. */
+.rejoin button:disabled,
+button.rejoin-agents:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

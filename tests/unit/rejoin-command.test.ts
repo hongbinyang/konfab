@@ -395,6 +395,20 @@ echo "--thread --message"
     );
     expect(await reason({ platform: "linux", run })).toMatch(/macOS/);
     expect(await reason({ run })).toMatch(/version can't be read/);
+    // Only these aren't something the lead can look into.
+    for (const overrides of [
+      { enabled: false },
+      { env: { KONFAB_ISOLATED: "1" } },
+      { platform: "linux" as const },
+    ])
+      expect(await checkCommand(options(overrides))).toMatchObject({
+        ok: false,
+        off: true,
+      });
+    expect(await checkCommand(options({ run }))).toMatchObject({
+      ok: false,
+      off: false,
+    });
   });
 
   it("needs the expected signature for the app's own copy only", async () => {
