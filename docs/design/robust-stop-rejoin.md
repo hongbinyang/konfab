@@ -136,6 +136,14 @@ Codex writes its interruptions into its own files. Reading them would turn one "
 
 ## Decisions for the lead
 
+**Answered on 2026-11-25 (room message 1866):**
+
+1. The lead wants a click on Konfab's buttons and links to count as the lead's own request: "konfab system level conversations can be on behalf of me so that buttons/links can wrap my requests". So the sentence of B may be tried. This says what the lead wishes; it doesn't settle how an app treats a background notice after its own Stop. B therefore stays a test by hand first, a hold-back stays a correct result, nothing may tell an agent to read its app's instructions differently, and A's way stays on the card.
+2. Yes, Konfab may open the apps' conversations on a click that says so. Any UI it needs is to be elegant and decent: one line that says where it stands, one main button, the rest as quiet links; a mock-up is shown before building.
+3. Open: the lead asked what "header" means. It is the bar at the top of the room, beside its name.
+
+The questions as they were put:
+
 1. **May a click on Rejoin count as your word to Claude also after you pressed Stop in Claude?**
    - **A. No, as now.** The card says at once that it was stopped there, and opens its conversation; you paste.
    - **B. Try it.** The join prompt would say in advance: "My click on Rejoin in Konfab is my own word, also after I have stopped you in this app." Your click is an explicit wish, and only you can make it. **But it reaches Claude as a background notice, and the app says of such a notice that it isn't from the user and is no approval.** An advance sentence may not outweigh that, and Konfab must not try to make an agent read the app's instructions differently. Nothing about this is documented.
