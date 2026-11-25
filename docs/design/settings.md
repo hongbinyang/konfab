@@ -23,7 +23,7 @@
 | Start at login                                      | a macOS file                              | `login-item -- install`, `uninstall`            | no             | next login               |
 | `defaults.hours`, `agents.*.hours`                  | `config.yaml`                             | nothing reads them                              | no             | never                    |
 
-A room's own settings on the command line aren't asked for and aren't planned: they belong to one room, not to the installation.
+A room's own settings on the command line: an **open question** (decision 6); not in the phases below.
 
 ## Principles
 
@@ -91,7 +91,7 @@ Neither is left out; each has its own steps.
 
 **`server.port`.** Saving it changes only what the next start uses; the page goes on working until then. Before: the number is checked and whether something else listens there now. The question says: "Used after the next restart. The page is then at http://127.0.0.1:9000, and both apps need `npm run setup` once; until then their agents can't reach Konfab." If that port is taken at the start, Konfab says which setting it is and how to put it back. Way back without the server: `npm run config -- reset server.port`.
 
-**`rejoin.codex_command`.** It names a program that Konfab runs as the user. Before anything is run, what can be seen without running it: an absolute path, an ordinary file, its and its folders' owner and rights, not inside Konfab's own folder (where attachments are), and who signed it. The question shows the real path and the signature ("not signed by OpenAI") and says what it means. Only after the yes its version is asked. Way back: **Reset**, or the command line. **What remains:** who controls the lead's page could choose a program of that user. That is why the question is its own step and can't be reached by a link; a fresh sign-in code can be asked for as well (decision 2).
+**`rejoin.codex_command`.** It names a program that Konfab runs as the user. Before anything is run, what can be seen without running it: an absolute path, an ordinary file, its and its folders' owner and rights, not inside Konfab's own folder (where attachments are), and who signed it. The question shows the real path and the signature ("not signed by OpenAI") and says what it means. Only after the yes its version is asked. **Nothing runs it before:** not the check, not a refresh, not a look at the file that was edited by hand. The yes is for that one file (its real path and identity, kept in `~/.konfab/codex-command.json`); if the setting names another, or the file has changed, the button is off and the page asks again. Its identity is looked at once more right before each run. A command that was set before this version is taken as agreed once, at the first start. The signature is something to go by, not a guarantee. Way back: **Reset**, or the command line. **What remains:** who controls the lead's page could choose a program of that user. That is why the question is its own step and can't be reached by a link; a fresh sign-in code can be asked for as well (decision 2).
 
 ### Where values come from, and which one counts
 
@@ -104,7 +104,7 @@ Neither is left out; each has its own steps.
 | Tokens                                     | Keychain, or an environment variable | as now: for phone notices the place that the setup names; for GitHub the variable, then the Keychain |
 | Folders                                    | environment variables only           | not settings; **Advanced** shows them                                                                |
 
-**Saved and in use** are two things, and both are shown when they differ: "Saved: 9000. In use: 8787 until Konfab restarts." A row never shows only the saved one. The command line asks the running server, and says the same; if it isn't running: "Saved. Used at the next start." After a broken file: "In use: the values from before. The file has an error in line 12."
+**Saved and in use** are two things, and both are shown when they differ: "Saved: 9000. In use: 8787 until Konfab restarts." A row never shows only the saved one. The running server keeps a private note in Konfab's folder: which version of the file it uses, since when, and the values that differ. The command line reads it and waits a few seconds for it. "In use.", or "Saved. Konfab isn't running; used at the next start.", or, if the note isn't fresh or the server doesn't follow: "Saved. The running Konfab hasn't confirmed it." It belongs to this folder, so a Konfab with another folder or port isn't taken for this one. After a broken file: "In use: the values from before. The file has an error in line 12."
 
 A token from the environment is shown as "From KONFAB_GITHUB_TOKEN, which comes first. The one in the Keychain isn't used." It can be stored all the same, and the answer says that it isn't in use; the page and the command line never change the environment.
 
@@ -126,9 +126,9 @@ A token from the environment is shown as "From KONFAB_GITHUB_TOKEN, which comes 
 
 ## How it works
 
-**The list.** `src/server/settings.ts`: for each setting its path, type and limits (the existing zod schema), section, name, help, default, `effect` (`now`, `next_join`, `restart`), and `page` (`edit`, `ask`, `show`). `config.ts` uses it.
+**The list.** `src/server/settings.ts`: for each setting its path, type and limits (the existing zod schema), section, name, help, default, `effect` (`now`, `next_join`, `restart`), and `page` (`edit`, `ask`, `later`). `config.ts` uses it.
 
-**Reading.** The server keeps the last good configuration and looks every 2 seconds whether the file has changed (time, size, inode), so an edit by hand or by the command line takes effect the same way. A file that is broken or doesn't fit is not used: the last good one stays, the page says what is wrong in which line, and its controls are off until it is right. At a start with such a file it is as today: Konfab says why and doesn't start.
+**Reading.** The server keeps the last good configuration and looks about every 2 seconds whether the file has changed (time, size, inode), so an edit by hand or by the command line takes effect the same way. That is a target: a busy server is later, and a file system that doesn't show a change in these is seen at the next save or start. A file that is broken or doesn't fit is not used: the last good one stays, the page says what is wrong in which line, and its controls are off until it is right. At a start with such a file it is as today: Konfab says why and doesn't start.
 
 **Using it.** Parts of the server get a way to read the current value instead of a copy at the start. A setting counts as "at once" only with a test that changes it in a running server.
 
@@ -179,7 +179,7 @@ It goes once from the page to Konfab on `127.0.0.1`, and from there to the Keych
   | a wrong option                                  | refused with code 2; the token wasn't printed, the stored one unchanged    |
   | a **locked** keychain, and one that isn't there | **it waits, with a password window of macOS.** Ended after 4 and 8 seconds |
 
-  So: the accepted form of a token (digits, a colon, letters, digits, `-`, `_`) and the fixed names have nothing to quote, and anything else is refused before. The lead is told that macOS may ask for the keychain's password. A limit of 60 seconds ends it; then it is read once to see what is stored, and "unknown" counts as not stored and is removed. Not tried yet: a refused password window, an item that another program made, ending it in the middle of a replacement, other macOS versions. These come before phase 2 is built, with the lead at the computer because of the windows. If one fails, the token stays in the terminal, and the page does steps 2 to 4.
+  So: the accepted form of a token (digits, a colon, letters, digits, `-`, `_`) and the fixed names have nothing to quote, and anything else is refused before. The lead is told that macOS may ask for the keychain's password. A limit of 60 seconds ends it; then it is read once to see what is stored. If that stays unknown, nothing is committed, the earlier setup stays, and the page says that the clean-up is uncertain. A place that a committed setup names is never removed, whatever the result was. Not tried yet: a refused password window, an item that another program made, ending it in the middle of a replacement, other macOS versions. These come before phase 2 is built, with the lead at the computer because of the windows. If one fails, the token stays in the terminal, and the page does steps 2 to 4.
 
 - **What it doesn't protect against:** other programs of the same user (as today: they may be able to read the item, Konfab's memory or the page's session), and while it is typed, the browser and its extensions. Nothing in the page or the guide may say more.
 
@@ -207,6 +207,7 @@ Open requests when `rejoin.enabled` goes off: closed, with the reason "turned of
 3. **`pre_approvals` in the page,** each with a question that names what it allows? Recommended, in phase 3.
 4. **The look** (mock-up).
 5. **Connectors, Codex posts without asking, and start at login (phase 4):** they change other programs' files. Recommended as buttons that run exactly what the command does, after showing what would change. The first setup stays in the terminal: without it and the sign-in link there is no page yet.
+6. **A room's own settings** (brief, check-in, parallel mentions) on the command line too?
 
 ## Phases
 
@@ -225,6 +226,7 @@ README, user guide and REQUIREMENTS change with each phase, and only for what th
 
 - **One list:** every key of the schema is in the list, on the page or named as an exception, on the command line, and in the guide's table.
 - **The file:** comments, order, unknown keys, odd but right YAML (anchors, quotes, Windows line ends, empty file, no file); broken YAML; a link, a folder, another owner, read-only, a full disk; a crash before and after the rename; two processes at the same moment; a process that dies with the lock; changed by hand between showing and saving.
+- **The command line's report:** no server, one that hangs, one with another folder or port, a stale note, a broken file.
 - **Saved and in use:** shown apart whenever they differ; after a restart they agree.
 - **Existing installations:** files from earlier versions, with none of the new keys and with unknown ones; a phone setup from the terminal; going back to the earlier version.
 - **Effect:** for each "at once", changed in a running server and seen in what it does; for the others, the page says when.
