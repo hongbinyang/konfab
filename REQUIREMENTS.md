@@ -519,7 +519,7 @@ Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Wi
 | ID | Priority | Requirement |
 | -- | -- | -- |
 | RJ1 | MUST | The lead can ask a Codex agent, or all that can be asked in a room, to come back in the conversation it last joined from. Konfab never does this by itself, and agents have no route to it. |
-| RJ2 | MUST | The manual prompts are there in every state. Agents of other apps keep only those. |
+| RJ2 | MUST | The manual prompts are there in every state. Agents of other apps keep only those, except as in section 24. |
 | RJ3 | MUST | The prompt is a fixed text with a one-time request. Nothing anyone wrote is in it. |
 | RJ4 | MUST | A request is accepted once, for 10 minutes, from its own agent and conversation, and only while the room, the agent and its session are as they were. All of it is checked and changed in one transaction, or nothing is. |
 | RJ5 | MUST | Cancelling, expiry, a pause, a break, archiving, removal, an ordinary join or any other call from that session or conversation makes a request unwanted, also if contact is lost again afterwards. A late prompt changes nothing in the room and never ends a break. |
@@ -533,3 +533,22 @@ Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Wi
 | RJ13 | MUST | The room shows that an agent is back at its first wait that counts (not one that only learns of a break or an ended run window) after joining again, however it came back. |
 
 Verified once in the app's own window: conversation open, turn ended normally (2026-11-23). Not yet verified: a conversation stopped with Stop in it, one that is closed or not in front, usage limits, archived conversations, and any system but macOS. The experimental mark stays until the window checks pass.
+
+## 24. Asking Claude agents to rejoin
+
+**Status:** Implemented on `feature/rejoin-watcher`, off by default, marked experimental; in review. Design: [a background watcher](docs/design/rejoin-claude.md).
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| RC1 | MUST | Off until the lead turns it on (`rejoin.claude_watcher`), and macOS only. While it is off, the answer of a join and the prompts are as before. |
+| RC2 | MUST | The agent is asked, by the lead's prompt in advance, to start one fixed command. Konfab starts nothing in the app and changes no setting of it. |
+| RC3 | MUST | The watcher prints nothing until it ends, reads only its ticket's file, and calls only Konfab on this computer. It ends with the app. |
+| RC4 | MUST | Its ticket is good for two routes and nothing else. It is in a private file until the first accepted call, and then only in the watcher's memory; Konfab keeps its hash. It is in no conversation, process list, page, log, export or backup. |
+| RC5 | MUST | A ticket is bound at the first call to a process that Konfab itself finds to be this user's watcher with that ticket. Whatever can't be established is refused. |
+| RC6 | MUST | A request is told to a watcher at most once, in one transaction with all checks of section 23, and only on an open call. "Sent" means that the watcher wrote the whole line and Konfab received its confirmation; anything else is unsure and isn't sent again. Only a wait by the agent counts as back. |
+| RC7 | MUST | At most 3 registered watchers for a conversation and 6 for an app. A place is freed only by proof that the process is gone; what isn't clear keeps it, however long. Konfab sends no signal to any process. |
+| RC8 | MUST | A watcher that has done its work wakes nobody. One is told to end only while its own agent is waiting, at most twice a day for a conversation, and not after a clean-up that seems to have woken it. |
+| RC9 | MUST | Stop isn't overruled: the prompt says not to use a request after it, and the page says to paste the rejoin prompt. |
+| RC10 | MUST | The model's part is an instruction, not a boundary; the documentation says so. The manual prompts work in every state. |
+
+Verified by hand with a plain waiting command, not yet with the watcher (2026-11-23): the app started a conversation again whose turn the agent had ended, after 2 and after 32 minutes; after Stop it started it as well, and the agent stayed out. Not yet verified: the watcher in the app's own window, an app that was closed, compaction in between, usage limits, sleep, what a resting watcher costs, and whether the app asks for each command.

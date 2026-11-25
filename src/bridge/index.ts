@@ -21,5 +21,8 @@ const server = createBridgeServer({
   baseUrl: process.env.KONFAB_URL ?? "http://127.0.0.1:8787",
   token,
   retryTimeoutMs,
+  ...(process.env.CLAUDE_CODE_SESSION_ID
+    ? { conversation: process.env.CLAUDE_CODE_SESSION_ID }
+    : {}),
 });
 await server.connect(new StdioServerTransport());

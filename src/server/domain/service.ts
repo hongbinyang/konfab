@@ -41,7 +41,7 @@ import {
 } from "./agent-names.js";
 
 import { KonfabError } from "./errors.js";
-import { conversationId, RejoinRequests } from "./rejoin.js";
+import { conversationId, RejoinRequests, type Route } from "./rejoin.js";
 export { KonfabError };
 
 export interface PreApproval {
@@ -803,8 +803,8 @@ export class KonfabService {
           this.agentState(roomId, agentId),
         ),
       newSessionId: randomUUID,
-      startSession: (roomId, agentId, sessionId, conversation) => {
-        this.startSession(roomId, agentId, sessionId, conversation);
+      startSession: (roomId, agentId, sessionId, conversation, route) => {
+        this.startSession(roomId, agentId, sessionId, conversation, route);
         this.syncRunPauses();
       },
       reply: (roomId, agentId, sessionId) =>
@@ -2385,9 +2385,16 @@ export class KonfabService {
   }
 
   /** Full instructions for a new conversation: the loop, when to stop and the permission rule. */
+  /** The lead's advance word, for apps that are woken by a watcher. */
+  private watcherPrompt(agentId?: string): string {
+    return agentId && this.rejoin.usesWatcher(agentId)
+      ? " If the answer of join_room or rejoin_room has a watcher with a command, start exactly that command once, in the background, and when it ends follow the watcher's instructions."
+      : "";
+  }
+
   joinPrompt(roomName: string, agentId?: string): string {
     const target = this.joinTarget(agentId);
-    return [
+    const prompt = [
       `Join Konfab room "${roomName}"${target} using the Konfab tools. Repeat this loop:`,
       "call wait_for_turn, and when you get a turn, do the work and either",
       "post_message or pass_turn. Set next on each post: self, agent, lead, or done.",
@@ -2407,6 +2414,7 @@ export class KonfabService {
       '(kind blocked, detail "<tool name>: <the app\'s message>", leaving out credentials',
       "and protected content), tell me here, and wait for my answer.",
     ].join(" ");
+    return prompt + this.watcherPrompt(agentId);
   }
 
   /**
@@ -2414,12 +2422,17 @@ export class KonfabService {
    * be told to come back. A new conversation needs the full join prompt.
    */
   rejoinPrompt(roomName: string, agentId?: string): string {
-    return `Rejoin Konfab room "${roomName}"${this.joinTarget(agentId)} and continue the loop. Ordinary replies and work in this room need no permission request; secrets, credentials and personal data still do.`;
+    return `Rejoin Konfab room "${roomName}"${this.joinTarget(agentId)} and continue the loop. Ordinary replies and work in this room need no permission request; secrets, credentials and personal data still do.${this.watcherPrompt(agentId)}`;
   }
 
   // Agent sessions and turns
 
-  join(agentId: string, roomName: string, conversation: unknown = null) {
+  join(
+    agentId: string,
+    roomName: string,
+    conversation: unknown = null,
+    route: Route = "queue",
+  ) {
     const room = this.room(roomName);
     if (room.archived_at !== null) {
       throw new KonfabError(
@@ -2436,6 +2449,7 @@ export class KonfabService {
         agentId,
         sessionId,
         conversationId(conversation),
+        route,
       );
       if (room.on_break === 1) {
         this.db
@@ -2455,6 +2469,7 @@ export class KonfabService {
     agentId: string,
     sessionId: string,
     conversation: string | null,
+    route: Route,
   ): void {
     const room = this.roomById(roomId);
     const now = this.now();
@@ -2489,10 +2504,19 @@ export class KonfabService {
         .run(room.id, agentId);
       this.db
         .prepare(
-          `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, conversation_id)
-           VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`,
+          `INSERT INTO sessions (id, room_id, agent_id, state, started_at, last_call_at, run_ends_at, conversation_id, route)
+           VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
         )
-        .run(sessionId, room.id, agentId, now, now, now + budget, conversation);
+        .run(
+          sessionId,
+          room.id,
+          agentId,
+          now,
+          now,
+          now + budget,
+          conversation,
+          conversation ? route : null,
+        );
       this.logEvent("run_window_started", room.id, agentId, {
         ends_at: now + budget,
       });
@@ -2622,6 +2646,19 @@ export class KonfabService {
         "INSERT OR IGNORE INTO observed_waits (session_id, call_id, started_at) VALUES (?, ?, ?)",
       )
       .run(sessionId, callId, this.now());
+  }
+
+  /** Its wait_for_turn call is open now in that conversation. */
+  isWaitingIn(agentId: string, conversation: string): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 FROM sessions s JOIN observed_waits w ON w.session_id = s.id
+           WHERE s.agent_id = ? AND s.conversation_id = ? AND s.state = 'active'
+             AND w.ended_at IS NULL AND s.last_call_at > ? LIMIT 1`,
+        )
+        .get(agentId, conversation, this.now() - 30_000),
+    );
   }
 
   finishObservedWait(agentId: string, sessionId: string, callId: string): void {
@@ -5799,6 +5836,11 @@ export class KonfabService {
 
   private notify(): void {
     this.changes.emit("change");
+  }
+
+  /** Something the page shows has changed outside the database. */
+  changed(): void {
+    this.notify();
   }
 
   private waitForChange(timeoutMs: number): Promise<void> {

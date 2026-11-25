@@ -606,6 +606,41 @@ const MIGRATIONS: readonly Migration[] = [
   `
   ALTER TABLE sessions ADD COLUMN first_wait_at INTEGER;
   UPDATE sessions SET first_wait_at = 0;
+  `, // How an agent's conversation can be reached, and the commands that some
+  // agents start so that their app wakes them.
+  `
+  ALTER TABLE sessions ADD COLUMN route TEXT;
+  UPDATE sessions SET route = 'queue' WHERE conversation_id IS NOT NULL;
+  ALTER TABLE rejoin_requests ADD COLUMN route TEXT NOT NULL DEFAULT 'queue';
+  CREATE TABLE watchers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    conversation_id TEXT NOT NULL,
+    ticket_hash TEXT UNIQUE,
+    state TEXT NOT NULL CHECK (state IN ('issued','live','used','ended','gone')),
+    created_at INTEGER NOT NULL,
+    pid INTEGER,
+    process_start TEXT,
+    boot TEXT,
+    request_id INTEGER,
+    handover_hash TEXT,
+    printed_at INTEGER,
+    left_at INTEGER,
+    cleanup_off INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE UNIQUE INDEX one_watcher ON watchers(agent_id, conversation_id) WHERE state IN ('issued','live');
+  CREATE INDEX watchers_by_state ON watchers(state);
+  CREATE TRIGGER watcher_token_changed AFTER UPDATE OF token_hash ON apps
+  WHEN OLD.token_hash IS NOT NEW.token_hash
+  BEGIN
+    UPDATE watchers SET state = 'ended' WHERE app_id = NEW.id AND state IN ('issued','live');
+  END;
+  CREATE TRIGGER watcher_agent_archived AFTER UPDATE OF archived_at ON agents
+  WHEN NEW.archived_at IS NOT NULL
+  BEGIN
+    UPDATE watchers SET state = 'ended' WHERE agent_id = NEW.id AND state IN ('issued','live');
+  END;
   `,
 ];
 

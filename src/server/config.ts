@@ -106,12 +106,14 @@ const configSchema = z.object({
       wanted_minutes: z.number().int().min(1).max(60).default(10),
       codex_command: z.string().min(1).nullable().default(null),
       allow_untested_version: z.boolean().default(false),
+      claude_watcher: z.boolean().default(false),
     })
     .default({
       enabled: true,
       wanted_minutes: 10,
       codex_command: null,
       allow_untested_version: false,
+      claude_watcher: false,
     }),
   pre_approvals: z
     .array(z.object({ recipient: z.string().min(1), data: z.string().min(1) }))

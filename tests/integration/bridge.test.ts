@@ -640,9 +640,10 @@ describe("server and bridge", () => {
       bridgeSource.indexOf("const repeatSafe = new Set(["),
       bridgeSource.indexOf("]).has(path)"),
     );
-    const routes = [
-      ...apiSource.matchAll(/app\.post\("(\/agent\/[^"]+)"/g),
-    ].map((match) => match[1]);
+    const routes = [...apiSource.matchAll(/app\.post\("(\/agent\/[^"]+)"/g)]
+      .map((match) => match[1])
+      // Called by a watcher, never by the connector.
+      .filter((route) => !route!.startsWith("/agent/watch"));
     expect(routes.length).toBeGreaterThan(0);
     for (const route of routes) expect(allowlist).toContain(`"${route}"`);
   });

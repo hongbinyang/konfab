@@ -118,7 +118,61 @@ describe("asking an agent to rejoin", () => {
     expect(screen.queryByRole("button", { name: "Cancel" }) !== null).toBe(
       waiting,
     );
-    expect(screen.queryByText(CANCEL_HELP) !== null).toBe(waiting);
+    expect(screen.queryByText(CANCEL_HELP.codex) !== null).toBe(waiting);
+  });
+
+  it.each([
+    [
+      asked({ unsure: true }),
+      `Rejoin asked ${time} · Konfab couldn't tell whether its watcher took it.`,
+    ],
+    [
+      asked({ slow: true }),
+      `Rejoin asked ${time} · waiting. Not back yet. If you pressed Stop, paste the rejoin prompt. Otherwise look at its conversation in Claude: it may ask you something or have reached a limit.`,
+    ],
+    [
+      asked({ state: "closed" }),
+      "Rejoin closed. A wake-up may still come; it can start a short turn, but can't rejoin.",
+    ],
+    [
+      asked({ state: "closed", refused: true }),
+      "Its watcher didn't take it; nothing was sent. Use the rejoin prompt.",
+    ],
+    [
+      asked({ state: "joined", slow: true }),
+      "Joined, but not waiting yet. Look at its conversation in Claude, or paste the rejoin prompt.",
+    ],
+  ])("speaks of the other app in its own words (%#)", (request, text) => {
+    const state = rejoin({ app: "claude", request });
+    expect(rejoinText(state)).toBe(text);
+    card(state, { state: "waiting" });
+    expect(document.body.textContent).not.toContain("Codex'");
+    expect(screen.queryByText(CANCEL_HELP.claude) !== null).toBe(
+      request.state === "waiting",
+    );
+    expect(
+      screen.getByRole("button", { name: "Copy rejoin prompt" }),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    ["ready", "Not after Stop"],
+    ["no_watcher", "Its watcher isn't running. Use the rejoin prompt."],
+    ["watchers_full", "Closing Claude normally ends them"],
+    ["old_join", "restart the Konfab connector in Claude"],
+    ["connected", "Available when the agent is away."],
+  ] as const)("says what the other app's button needs: %s", (offer, text) => {
+    card(rejoin({ app: "claude", offer, resting: 2 }));
+    expect(screen.getByText(new RegExp(text))).toBeTruthy();
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Rejoin" })
+        .disabled,
+    ).toBe(offer !== "ready");
+    expect(
+      screen.queryByText(
+        "2 old watchers are resting; they end when Claude is closed.",
+      ) !== null,
+    ).toBe(offer !== "watchers_full");
   });
 
   it("shows nothing where it isn't offered, also with an older server", () => {
@@ -191,7 +245,7 @@ describe("asking an agent to rejoin", () => {
 
   it("cancels, saying that the prompt in Codex stays", async () => {
     card(rejoin({ request: asked() }));
-    expect(CANCEL_HELP).toContain("can't take back the prompt in Codex");
+    expect(CANCEL_HELP.codex).toContain("can't take back the prompt in Codex");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(calls).toEqual([
       {

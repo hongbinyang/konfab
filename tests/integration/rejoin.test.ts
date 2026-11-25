@@ -42,12 +42,13 @@ describe("rejoin over the page and the connector", () => {
       headers: { host: HOST, cookie, origin: `http://${HOST}` },
       ...(payload ? { payload } : {}),
     });
-  const connect = async (name = "codex-mcp-client") => {
+  const connect = async (name = "codex-mcp-client", conversation?: string) => {
     const [near, far] = InMemoryTransport.createLinkedPair();
     await createBridgeServer({
       baseUrl: `http://${HOST}`,
       token,
       retryTimeoutMs: 5_000,
+      ...(conversation === undefined ? {} : { conversation }),
     }).connect(far);
     const client = new Client({ name, version: "1.0.0" });
     await client.connect(near);
@@ -149,6 +150,69 @@ describe("rejoin over the page and the connector", () => {
     const another = await connect("another-client");
     await another("join_room", { room: ROOM }, { threadId: HERE });
     expect(conversation()).toBeNull();
+  });
+
+  it("sends the environment's conversation only for the app that has it there, on its own route", async () => {
+    const seen: Record<string, string>[] = [];
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      if (String(args[0]).endsWith("/agent/join"))
+        seen.push(args[1]!.headers as Record<string, string>);
+      return real(...args);
+    });
+    const cases: [string, string | undefined, object | undefined, string[]][] =
+      [
+        ["claude-code", HERE, undefined, ["X-Konfab-Watched-Conversation"]],
+        ["claude-code", HERE.toUpperCase(), undefined, []],
+        ["claude-code", "x\r\nX-Other: 1", undefined, []],
+        ["claude-code", undefined, { threadId: HERE }, []],
+        ["another", HERE, { threadId: HERE }, []],
+        [
+          "codex-mcp-client",
+          OTHER,
+          { threadId: HERE },
+          ["X-Konfab-Conversation"],
+        ],
+      ];
+    for (const [name, environment, meta, expected] of cases) {
+      const call = await connect(name, environment);
+      const reply = await call(
+        "join_room",
+        { room: ROOM },
+        meta as Record<string, unknown> | undefined,
+      );
+      // Off here: nothing to start, nothing kept.
+      expect(reply).not.toHaveProperty("watcher");
+      const headers = seen.at(-1)!;
+      expect(
+        Object.keys(headers).filter((key) => /conversation/i.test(key)),
+        name,
+      ).toEqual(expected);
+      for (const key of expected) expect(headers[key]).toBe(HERE);
+      if (name === "claude-code") expect(conversation()).toBeNull();
+    }
+  });
+
+  it("answers a join byte for byte as before while the watcher is off", async () => {
+    const join = async (headers: Record<string, string>) => {
+      const answer = await app.inject({
+        method: "POST",
+        url: "/agent/join",
+        headers: { host: HOST, authorization: `Bearer ${token}`, ...headers },
+        payload: { room: ROOM },
+      });
+      return answer.body.replace(/"session_id":"[^"]+"/, "");
+    };
+    expect(await join({ "x-konfab-watched-conversation": HERE })).toBe(
+      await join({}),
+    );
+    const watch = await app.inject({
+      method: "POST",
+      url: "/agent/watch",
+      headers: { host: HOST, authorization: "Bearer kfw_x" },
+      payload: { pid: 1 },
+    });
+    expect(watch.statusCode).toBe(401);
   });
 
   it("brings the agent back once, and says nothing secret anywhere", async () => {

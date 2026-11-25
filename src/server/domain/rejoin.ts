@@ -38,6 +38,9 @@ const hash = (number: string): string =>
 export const rejoinMessage = (number: string): string =>
   `Konfab: the lead asked you to rejoin a room. Call the Konfab tool rejoin_room with request "${number}" and follow its answer. If it says the request is closed, end your turn and do nothing else.`;
 
+/** How a conversation is reached: the app's queue, or a watcher it started. */
+export type Route = "queue" | "watch";
+
 export type SendResult = "taken" | "refused" | "unsure";
 
 type Row = {
@@ -47,6 +50,7 @@ type Row = {
   app_id: string;
   session_id: string;
   conversation_id: string;
+  route: Route;
   state: "sending" | "waiting" | "joined" | "back" | "closed";
   unsure: number;
   reason: string | null;
@@ -57,12 +61,18 @@ type Row = {
 };
 
 export type RejoinView = {
+  /** Which app the texts are about. */
+  app: "codex" | "claude";
+  /** Watchers of that conversation that have done their work. */
+  resting: number;
   /** Whether the lead can ask now, or why not; null where it isn't shown. */
   offer:
     | "ready"
     | "connected"
     | "old_join"
     | "unavailable"
+    | "no_watcher"
+    | "watchers_full"
     | "elsewhere"
     | "archived"
     | "paused"
@@ -97,6 +107,14 @@ export class RejoinRequests {
   /** Whether it is missing because of something the lead can look into. */
   problem: () => boolean = () => false;
   wantedMs = 10 * 60_000;
+  /** For apps that are woken by a watcher; null while that is off. */
+  watchers:
+    | ((
+        appId: string,
+        agentId: string,
+        conversation: string,
+      ) => { ready: boolean; resting: number; full: boolean })
+    | null = null;
 
   constructor(
     private readonly deps: {
@@ -112,6 +130,7 @@ export class RejoinRequests {
         agentId: string,
         sessionId: string,
         conversation: string,
+        route: Route,
       ) => void;
       newSessionId: () => string;
       reply: (roomId: number, agentId: string, sessionId: string) => object;
@@ -195,19 +214,44 @@ export class RejoinRequests {
         .prepare(
           `SELECT 1 FROM agents a WHERE a.id = ? AND (a.app_id = 'codex' OR EXISTS (
              SELECT 1 FROM sessions s JOIN agents b ON b.id = s.agent_id
-             WHERE b.app_id = a.app_id AND s.conversation_id IS NOT NULL))`,
+             WHERE b.app_id = a.app_id AND s.route = 'queue'))`,
         )
         .get(agentId),
     );
   }
 
+  /** The same for the app that is woken by a watcher. */
+  private isWatched(agentId: string): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 FROM agents a WHERE a.id = ? AND (a.app_id = 'claude' OR EXISTS (
+             SELECT 1 FROM sessions s JOIN agents b ON b.id = s.agent_id
+             WHERE b.app_id = a.app_id AND s.route = 'watch'))`,
+        )
+        .get(agentId),
+    );
+  }
+
+  usesWatcher(agentId: string): boolean {
+    return this.watchers !== null && this.isWatched(agentId);
+  }
+
+  private appOf(agentId: string): string | null {
+    const row = this.db
+      .prepare("SELECT app_id FROM agents WHERE id = ?")
+      .get(agentId) as { app_id: string | null } | undefined;
+    return row?.app_id ?? null;
+  }
+
   private newest(roomId: number, agentId: string) {
     return this.db
       .prepare(
-        "SELECT id, conversation_id FROM sessions WHERE room_id = ? AND agent_id = ? ORDER BY rowid DESC LIMIT 1",
+        "SELECT id, conversation_id, route FROM sessions WHERE room_id = ? AND agent_id = ? ORDER BY rowid DESC LIMIT 1",
       )
       .get(roomId, agentId) as
-      { id: string; conversation_id: string | null } | undefined;
+      | { id: string; conversation_id: string | null; route: Route | null }
+      | undefined;
   }
 
   private last(roomId: number, agentId: string): Row | undefined {
@@ -280,7 +324,20 @@ export class RejoinRequests {
       session?.id === row.session_id &&
       away;
     const activeJoin = joined && this.isActive(row.joined_session_id!);
+    const codex = session?.route
+      ? session.route === "queue"
+      : this.isCodex(agentId);
+    const watched = session?.conversation_id && session.route === "watch";
+    const watcher = watched
+      ? this.watchers?.(
+          this.appOf(agentId) ?? "",
+          agentId,
+          session.conversation_id!,
+        )
+      : undefined;
     const base: RejoinView = {
+      app: codex ? "codex" : "claude",
+      resting: watcher?.resting ?? 0,
       offer: null,
       request:
         row && (asked || activeJoin || closed)
@@ -300,9 +357,11 @@ export class RejoinRequests {
           : null,
       earlier: false,
     };
-    if (asked || !session || !this.isCodex(agentId)) return base;
+    if (asked || !session) return base;
     const no = (offer: RejoinView["offer"]) => ({ ...base, offer });
-    if (!this.available()) return this.problem() ? no("unavailable") : base;
+    if (codex) {
+      if (!this.available()) return this.problem() ? no("unavailable") : base;
+    } else if (!this.watchers || !this.isWatched(agentId)) return base;
     if (!session.conversation_id) return no("old_join");
     // While a joined one is in contact, its own text says what is missing.
     if (!away) return activeJoin ? base : no("connected");
@@ -313,7 +372,11 @@ export class RejoinRequests {
         (this.isElsewhere(roomId, agentId, session.conversation_id) ||
         this.openFor(session.conversation_id)
           ? "elsewhere"
-          : "ready"),
+          : !watcher || watcher.ready
+            ? "ready"
+            : watcher.full
+              ? "watchers_full"
+              : "no_watcher"),
       earlier: this.mayBeInCodex(session.conversation_id),
     };
   }
@@ -360,7 +423,13 @@ export class RejoinRequests {
     roomId: number,
     agentId: string,
     again: boolean,
-  ): { id: number; number: string; conversation: string } {
+  ): {
+    id: number;
+    number: string;
+    conversation: string;
+    agent: string;
+    route: Route;
+  } {
     const refuse = (code: string, message: string): never => {
       throw new KonfabError(code, 409, message);
     };
@@ -380,13 +449,11 @@ export class RejoinRequests {
         if (view.earlier && !again)
           return refuse(
             "rejoin_earlier",
-            "Another prompt may already be waiting in Codex",
+            "Another prompt may already be waiting for this agent",
           );
         const session = this.newest(roomId, agentId)!;
-        const owner = this.db
-          .prepare("SELECT app_id FROM agents WHERE id = ?")
-          .get(agentId) as { app_id: string | null } | undefined;
-        if (!owner?.app_id)
+        const appId = this.appOf(agentId);
+        if (!appId)
           return refuse(
             "rejoin_unavailable",
             "This agent can't be asked to rejoin now; use its rejoin prompt",
@@ -401,15 +468,16 @@ export class RejoinRequests {
         const now = this.deps.now();
         const created = this.db
           .prepare(
-            `INSERT INTO rejoin_requests (room_id, agent_id, app_id, session_id, conversation_id, number_hash, state, created_at, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'sending', ?, ?)`,
+            `INSERT INTO rejoin_requests (room_id, agent_id, app_id, session_id, conversation_id, route, number_hash, state, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'sending', ?, ?)`,
           )
           .run(
             roomId,
             agentId,
-            owner.app_id,
+            appId,
             session.id,
             session.conversation_id,
+            session.route ?? "queue",
             hash(number),
             now,
             now + this.wantedMs,
@@ -419,6 +487,8 @@ export class RejoinRequests {
           id: Number(created.lastInsertRowid),
           number,
           conversation: session.conversation_id!,
+          agent: agentId,
+          route: session.route ?? ("queue" as const),
         };
       })
       .immediate();
@@ -441,6 +511,55 @@ export class RejoinRequests {
       })
       .immediate();
     this.deps.notify();
+  }
+
+  /** A confirmation that came late, while the request is still wanted. */
+  sure(id: number): void {
+    this.db
+      .prepare(
+        "UPDATE rejoin_requests SET unsure = 0 WHERE id = ? AND state = 'waiting'",
+      )
+      .run(id);
+    this.deps.notify();
+  }
+
+  /**
+   * Whether a request may be told to the watcher of an app, agent and
+   * conversation. Inside the transaction that tells it. Closes one that
+   * isn't wanted any more.
+   */
+  mayHandOver(
+    id: number,
+    to: { app_id: string; agent_id: string; conversation_id: string },
+  ): boolean {
+    this.closeStale();
+    const row = this.db
+      .prepare("SELECT * FROM rejoin_requests WHERE id = ?")
+      .get(id) as Row | undefined;
+    if (
+      !row ||
+      row.state !== "sending" ||
+      row.route !== "watch" ||
+      row.app_id !== to.app_id ||
+      row.agent_id !== to.agent_id ||
+      row.conversation_id !== to.conversation_id ||
+      this.appOf(row.agent_id) !== row.app_id
+    )
+      return false;
+    if (this.unwanted(row)) {
+      this.close("id = ?", [row.id], "changed");
+      return false;
+    }
+    return true;
+  }
+
+  private unwanted(row: Row): boolean {
+    return (
+      this.roomReason(row.room_id) !== null ||
+      !this.deps.isMember(row.room_id, row.agent_id) ||
+      this.newest(row.room_id, row.agent_id)?.id !== row.session_id ||
+      this.calledSince(row)
+    );
   }
 
   /** Can't take back the prompt; only makes it unwanted. */
@@ -472,7 +591,12 @@ export class RejoinRequests {
    * The agent's call. Everything is checked and changed in one transaction
    * that takes the write lock first, or nothing is.
    */
-  rejoin(appId: string, number: unknown, conversation: unknown): object {
+  rejoin(
+    appId: string,
+    number: unknown,
+    conversation: unknown,
+    route: Route = "queue",
+  ): object {
     const from = conversationId(conversation);
     if (typeof number !== "string" || !NUMBER.test(number) || !from)
       return CLOSED;
@@ -485,7 +609,12 @@ export class RejoinRequests {
         const row = this.db
           .prepare("SELECT * FROM rejoin_requests WHERE number_hash = ?")
           .get(hash(number)) as Row | undefined;
-        if (!row || row.app_id !== appId || row.conversation_id !== from)
+        if (
+          !row ||
+          row.app_id !== appId ||
+          row.conversation_id !== from ||
+          row.route !== route
+        )
           return null;
         if (row.state === "joined" || row.state === "back") {
           // A repeated call: the same session, never a second one.
@@ -494,12 +623,7 @@ export class RejoinRequests {
             : null;
         }
         if (row.state !== "sending" && row.state !== "waiting") return null;
-        if (
-          this.roomReason(row.room_id) ||
-          !this.deps.isMember(row.room_id, row.agent_id) ||
-          this.newest(row.room_id, row.agent_id)?.id !== row.session_id ||
-          this.calledSince(row)
-        ) {
+        if (this.unwanted(row)) {
           this.close("id = ?", [row.id], "changed");
           return null;
         }
@@ -510,7 +634,13 @@ export class RejoinRequests {
             "UPDATE rejoin_requests SET state = 'joined', joined_session_id = ?, joined_at = ? WHERE id = ?",
           )
           .run(sessionId, this.deps.now(), row.id);
-        this.deps.startSession(row.room_id, row.agent_id, sessionId, from);
+        this.deps.startSession(
+          row.room_id,
+          row.agent_id,
+          sessionId,
+          from,
+          row.route,
+        );
         this.deps.logEvent("rejoin_joined", row.room_id, row.agent_id, {});
         return reply(row, sessionId);
       })

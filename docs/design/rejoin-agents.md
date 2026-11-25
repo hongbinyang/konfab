@@ -4,7 +4,7 @@
 
 ## Goal
 
-The lead selects **Rejoin** on a Codex agent's card, or **Rejoin agents** for a room, and Konfab brings the agent back in the conversation it last joined from. The manual prompts always stay. Claude agents keep the manual prompts, because no supported way is known.
+The lead selects **Rejoin** on a Codex agent's card, or **Rejoin agents** for a room, and Konfab brings the agent back in the conversation it last joined from. The manual prompts always stay. Claude agents keep the manual prompts, unless the lead turns on [a watcher](rejoin-claude.md).
 
 Konfab never does this by itself, and no agent can ask for it.
 

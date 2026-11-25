@@ -37,6 +37,8 @@ export interface BridgeOptions {
   token: string;
   /** How long to wait if the server cannot be reached to provide its setting. */
   defaultWaitSeconds?: number;
+  /** From the app, in the connector's environment. */
+  conversation?: string;
   /** Recovery budget for repeat-safe requests during a server outage. */
   retryTimeoutMs?: number;
 }
@@ -127,7 +129,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     path: string,
     body: object,
     signal?: AbortSignal,
-    conversation?: string,
+    conversation?: Record<string, string>,
   ): Promise<T> => {
     const requestKey = randomUUID();
     const receiptProtected = [
@@ -185,7 +187,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           "X-Konfab-Protocol": String(BRIDGE_PROTOCOL_VERSION),
           Authorization: `Bearer ${options.token}`,
           "Content-Type": "application/json",
-          ...(conversation ? { "X-Konfab-Conversation": conversation } : {}),
+          ...conversation,
         },
         body: JSON.stringify(body),
         signal: signal
@@ -264,17 +266,27 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   const server = new McpServer({ name: "konfab", version: "0.1.0" });
 
   /**
-   * The conversation a call came from, as Codex names it in the call's
-   * metadata. The model can't set it. Missing or odd means none.
+   * The conversation a call came from, as its app names it. The model can't
+   * set it. Missing or odd means none.
    */
-  const conversationOf = (meta: unknown): string | undefined => {
-    if (server.server.getClientVersion()?.name !== "codex-mcp-client")
-      return undefined;
-    const thread = (meta as { threadId?: unknown } | undefined)?.threadId;
-    return typeof thread === "string" &&
-      /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(thread)
-      ? thread
-      : undefined;
+  const conversationOf = (
+    meta: unknown,
+  ): Record<string, string> | undefined => {
+    const client = server.server.getClientVersion()?.name;
+    const full = (value: unknown, header: string) =>
+      typeof value === "string" &&
+      /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value)
+        ? { [header]: value }
+        : undefined;
+    if (client === "codex-mcp-client")
+      return full(
+        (meta as { threadId?: unknown } | undefined)?.threadId,
+        "X-Konfab-Conversation",
+      );
+    // This app names it in the connector's own environment.
+    if (client === "claude-code")
+      return full(options.conversation, "X-Konfab-Watched-Conversation");
+    return undefined;
   };
 
   server.registerTool(

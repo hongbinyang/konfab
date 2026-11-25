@@ -14,7 +14,8 @@ import { z, ZodError } from "zod";
 import { SkillError } from "../domain/skill-error.js";
 import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
-import type { SendResult } from "../domain/rejoin.js";
+import type { Route, SendResult } from "../domain/rejoin.js";
+import { RefusedWatch, type Watchers } from "../rejoin/watchers.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 import type { NoticesView, TelegramNotices } from "../telegram/notices.js";
 
@@ -121,6 +122,7 @@ export interface AppOptions {
   service: KonfabService;
   notices?: TelegramNotices;
   sendRejoin?: (conversation: string, number: string) => Promise<SendResult>;
+  watchers?: Watchers;
   skills?: SkillLibrary;
   sources?: SkillSources;
   skillsHome?: string;
@@ -163,7 +165,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const path = request.url.split("?")[0] ?? "";
     const routine =
       request.method === "GET" ||
-      /^\/(agent\/(wait|permission\/wait)|api\/activity)/.test(path);
+      /^\/(agent\/(wait|watch|permission\/wait)|api\/activity)/.test(path);
     const { statusCode } = reply;
     if (statusCode < 400 && routine && path !== "/login") return;
     const entry = {
@@ -325,8 +327,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return service.sessionAgent(appId, body.session_id);
   };
 
+  const isWatch = (request: FastifyRequest): boolean =>
+    /^\/agent\/watch(\/printed)?$/.test(request.url.split("?")[0] ?? "");
   app.addHook("preHandler", async (request) => {
     if (!request.url.startsWith("/agent/")) return;
+    // A watcher's own ticket, which is good for nothing else.
+    if (isWatch(request)) return;
     const agentId = requireAgent(request);
     const protocol =
       request.headers["x-konfab-protocol"] === String(BRIDGE_PROTOCOL_VERSION)
@@ -341,8 +347,37 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   /** From the connector, as the app named it. Not proof of anything. */
-  const conversationOf = (request: FastifyRequest): unknown =>
-    request.headers["x-konfab-conversation"];
+  const conversationOf = (
+    request: FastifyRequest,
+  ): { conversation: unknown; route: Route } => {
+    const watched = request.headers["x-konfab-watched-conversation"];
+    if (watched === undefined)
+      return {
+        conversation: request.headers["x-konfab-conversation"],
+        route: "queue",
+      };
+    return {
+      conversation: options.watchers?.enabled ? watched : undefined,
+      route: "watch",
+    };
+  };
+  /** What an agent may start so that its app can wake it. Never in the way. */
+  const withWatcher = <T extends object>(
+    request: FastifyRequest,
+    appId: string,
+    agentId: string,
+    reply: T,
+  ): T => {
+    const { conversation, route } = conversationOf(request);
+    if (route !== "watch") return reply;
+    try {
+      const watcher = options.watchers?.offer(appId, agentId, conversation);
+      return watcher ? { ...reply, watcher } : reply;
+    } catch (error) {
+      request.log.warn({ err: error }, "no watcher was offered");
+      return reply;
+    }
+  };
   const repeatMutation = <T>(
     request: FastifyRequest,
     agentId: string,
@@ -443,8 +478,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const appId = requireApp(request);
     const body = joinBody.parse(request.body);
     const agentId = service.appAgent(appId, body.as);
+    const { conversation, route } = conversationOf(request);
     return repeatMutation(request, agentId, () =>
-      service.join(agentId, body.room, conversationOf(request)),
+      withWatcher(
+        request,
+        appId,
+        agentId,
+        service.join(agentId, body.room, conversation, route),
+      ),
     );
   });
 
@@ -454,7 +495,51 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const { request: number } = z
       .object({ request: z.string().max(200) })
       .parse(request.body);
-    return service.rejoin.rejoin(appId, number, conversationOf(request));
+    const { conversation, route } = conversationOf(request);
+    const reply = service.rejoin.rejoin(appId, number, conversation, route);
+    const session = (reply as { session_id?: string }).session_id;
+    return session
+      ? withWatcher(request, appId, service.sessionAgent(appId, session), reply)
+      : reply;
+  });
+
+  const ticketOf = (request: FastifyRequest): string | undefined =>
+    /^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1];
+  const refuseWatch = (error: unknown): never => {
+    if (error instanceof RefusedWatch)
+      throw new KonfabError("unauthorized", 401, "Not accepted");
+    throw error;
+  };
+  app.post(
+    "/agent/watch",
+    { bodyLimit: 1024 },
+    async (request, reply): Promise<object> => {
+      if (!options.watchers) return refuseWatch(new RefusedWatch());
+      const gone = new AbortController();
+      reply.raw.once("close", () => gone.abort());
+      try {
+        const { pid } = z.object({ pid: z.number() }).parse(request.body);
+        return await options.watchers.watch(
+          ticketOf(request),
+          pid,
+          gone.signal,
+        );
+      } catch (error) {
+        return refuseWatch(error);
+      }
+    },
+  );
+  app.post("/agent/watch/printed", { bodyLimit: 1024 }, async (request) => {
+    try {
+      if (!options.watchers) throw new RefusedWatch();
+      const { handover } = z
+        .object({ handover: z.string().max(100) })
+        .parse(request.body);
+      options.watchers.printed(ticketOf(request), handover);
+      return { ok: true };
+    } catch (error) {
+      return refuseWatch(error);
+    }
   });
 
   app.post("/agent/wait", async (request) => {
@@ -1783,8 +1868,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     agentId: string,
     again: boolean,
   ): Promise<void> => {
-    const send = options.sendRejoin;
-    if (!send)
+    if (!options.sendRejoin && !options.watchers)
       throw new KonfabError(
         "rejoin_unavailable",
         409,
@@ -1793,7 +1877,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const asked = service.rejoin.ask(roomId, agentId, again);
     let result: SendResult = "unsure";
     try {
-      result = await send(asked.conversation, asked.number);
+      // The other route's means are never used instead.
+      result =
+        asked.route === "watch"
+          ? ((await options.watchers?.send(asked)) ?? "refused")
+          : ((await options.sendRejoin?.(asked.conversation, asked.number)) ??
+            "refused");
     } finally {
       service.rejoin.sent(asked.id, result);
     }

@@ -1,10 +1,12 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { buildApp } from "./api/app.js";
 import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
 import { LogFile, logDirectory } from "./log-file.js";
 import { TelegramNotices } from "./telegram/notices.js";
 import { resolveTelegramToken } from "./telegram/token.js";
 import { checkCommand, sendRejoin } from "./rejoin/codex.js";
+import { macProcesses } from "./rejoin/processes.js";
+import { Watchers } from "./rejoin/watchers.js";
 import { createRuntime } from "./runtime.js";
 import { resolveGithubToken } from "./github-token.js";
 
@@ -49,6 +51,30 @@ const checkRejoin = async (): Promise<void> => {
 };
 void checkRejoin();
 
+// For agents whose app wakes them when a command they started ends.
+const watchers = new Watchers({
+  db,
+  rejoin: service.rejoin,
+  folder: join(resolve(home), "watch"),
+  script: resolve(import.meta.dirname, "../cli/watch.js"),
+  node: process.execPath,
+  port: config.server.port,
+  uid: process.getuid?.() ?? -1,
+  processes: macProcesses(),
+  isWaiting: (agentId, conversation) =>
+    service.isWaitingIn(agentId, conversation),
+  changed: () => service.changed(),
+});
+watchers.enabled =
+  config.rejoin.enabled &&
+  config.rejoin.claude_watcher &&
+  process.platform === "darwin" &&
+  process.env.KONFAB_ISOLATED !== "1";
+if (watchers.enabled)
+  service.rejoin.watchers = (appId, agentId, conversation) =>
+    watchers.state(appId, agentId, conversation);
+watchers.tidy();
+
 const notices = new TelegramNotices({
   db,
   home,
@@ -64,6 +90,7 @@ const app = await buildApp({
     if (result === "refused") void checkRejoin();
     return result;
   },
+  watchers,
   service,
   skills,
   sources,
@@ -74,10 +101,10 @@ const app = await buildApp({
   logStream: logFile,
 });
 
-const tick = setInterval(
-  () => service.tick(),
-  config.server.tick_seconds * 1000,
-);
+const tick = setInterval(() => {
+  service.tick();
+  watchers.tidy();
+}, config.server.tick_seconds * 1000);
 
 // Apart from the rooms' own clock, which must not wait for it.
 const noticesTick = setInterval(() => void notices.tick(), 15_000);

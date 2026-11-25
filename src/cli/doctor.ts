@@ -386,6 +386,15 @@ export async function diagnose(
           detail: `Not available: ${command.reason}. The manual rejoin prompts work.`,
         },
   );
+  const watcher =
+    rejoin.enabled && rejoin.claude_watcher && process.platform === "darwin";
+  add({
+    check: "Rejoin button for Claude (experimental)",
+    level: "ok",
+    detail: watcher
+      ? "On: agents are asked to start one background command when they join."
+      : "Off (rejoin.claude_watcher, macOS only). The manual rejoin prompts work.",
+  });
   if (process.platform === "darwin") {
     const plist = join(
       env.HOME ?? homedir(),

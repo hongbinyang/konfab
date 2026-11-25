@@ -119,7 +119,13 @@ describe("asking agents to rejoin", () => {
   });
 
   it("goes from asked to joined to back, and only a wait makes it back", () => {
-    expect(view()).toEqual({ offer: "ready", request: null, earlier: false });
+    expect(view()).toEqual({
+      app: "codex",
+      resting: 0,
+      offer: "ready",
+      request: null,
+      earlier: false,
+    });
     const asked = ask();
     expect(asked.conversation).toBe(HERE);
     service.rejoin.sent(asked.id, "taken");
@@ -415,7 +421,11 @@ describe("asking agents to rejoin", () => {
     service.poll("codex", joined, true);
     loseContact();
     // The later one arrived, so the earlier one did too.
-    expect(view()).toEqual({ offer: "ready", request: null, earlier: false });
+    expect(view()).toMatchObject({
+      offer: "ready",
+      request: null,
+      earlier: false,
+    });
   });
 
   it("recovers from a stop of Konfab without sending or extending anything", () => {
@@ -656,7 +666,9 @@ describe("asking agents to rejoin", () => {
     try {
       const old = openDatabase(path);
       old.exec(
-        "ALTER TABLE sessions DROP COLUMN first_wait_at; PRAGMA user_version = 35",
+        `DROP TABLE watchers; DROP TRIGGER watcher_token_changed; DROP TRIGGER watcher_agent_archived;
+         ALTER TABLE sessions DROP COLUMN route; ALTER TABLE rejoin_requests DROP COLUMN route;
+         ALTER TABLE sessions DROP COLUMN first_wait_at; PRAGMA user_version = 35`,
       );
       old.exec(`INSERT INTO apps (id, display_name, default_agent_id) VALUES ('codex', 'Codex', 'codex');
         INSERT INTO agents (id, display_name, created_at, app_id) VALUES ('codex', 'Codex', 1, 'codex');

@@ -13,13 +13,18 @@ const clock = (at: number) =>
 
 export const EARLIER =
   "Another prompt may already be waiting there. Send a new one? Only the newest can rejoin.";
-export const CANCEL_HELP =
-  "Cancel closes Konfab's request. It can't take back the prompt in Codex: that may still start a short turn, which will be told to end.";
+export const CANCEL_HELP = {
+  codex:
+    "Cancel closes Konfab's request. It can't take back the prompt in Codex: that may still start a short turn, which will be told to end.",
+  claude:
+    "Cancel closes Konfab's request. It can't take back the wake-up: that may still start a short turn, which will be told to end.",
+};
+const NAME = { codex: "Codex", claude: "Claude" };
+const appOf = (rejoin: RejoinState) => rejoin.app ?? "codex";
 
 const OFFER: Record<string, string> = {
   connected: "Available when the agent is away.",
-  old_join:
-    "Not yet: restart the Konfab connector in Codex, then paste the rejoin prompt once.",
+  no_watcher: "Its watcher isn't running. Use the rejoin prompt.",
   unavailable: "The Codex command can't be used; npm run doctor says why.",
   elsewhere: "Its conversation is in another room now.",
   archived: "The room is archived.",
@@ -31,18 +36,25 @@ const OFFER: Record<string, string> = {
 export function rejoinText(rejoin: RejoinState): string | null {
   const asked = rejoin.request;
   if (!asked) return null;
+  const app = appOf(rejoin);
   if (asked.state === "closed")
-    return asked.refused
-      ? "Codex didn't take it; nothing is waiting there. Use the rejoin prompt."
-      : "Rejoin closed. An earlier prompt may still be in Codex; it can start a short turn, but can't rejoin.";
+    return app === "claude"
+      ? asked.refused
+        ? "Its watcher didn't take it; nothing was sent. Use the rejoin prompt."
+        : "Rejoin closed. A wake-up may still come; it can start a short turn, but can't rejoin."
+      : asked.refused
+        ? "Codex didn't take it; nothing is waiting there. Use the rejoin prompt."
+        : "Rejoin closed. An earlier prompt may still be in Codex; it can start a short turn, but can't rejoin.";
   if (asked.state === "joined")
     return asked.slow
-      ? "Joined, but not waiting yet. Look at its conversation in Codex, or paste the rejoin prompt."
+      ? `Joined, but not waiting yet. Look at its conversation in ${NAME[app]}, or paste the rejoin prompt.`
       : "Joined · waiting for its first check.";
   const time = clock(asked.asked_at);
   const sent = asked.unsure
-    ? `Rejoin asked ${time} · Konfab couldn't tell whether Codex took it.`
+    ? `Rejoin asked ${time} · Konfab couldn't tell whether ${app === "codex" ? "Codex" : "its watcher"} took it.`
     : `Rejoin asked ${time} · waiting.`;
+  if (asked.slow && app === "claude")
+    return `${sent} Not back yet. If you pressed Stop, paste the rejoin prompt. Otherwise look at its conversation in Claude: it may ask you something or have reached a limit.`;
   return asked.slow
     ? `${sent} Not back yet. Open its conversation in Codex. If it was stopped with Stop, the prompt waits there until its next turn ends. You can paste the rejoin prompt instead; the earlier prompt then stays in Codex and may start one short turn later.`
     : sent;
@@ -67,6 +79,14 @@ export function RejoinControls({
     void act(action).finally(() => setBusy(false));
   };
   const text = rejoinText(rejoin);
+  const app = appOf(rejoin);
+  const resting = rejoin.resting ?? 0;
+  const why =
+    rejoin.offer === "old_join"
+      ? `Not yet: restart the Konfab connector in ${NAME[app]}, then paste the rejoin prompt once.`
+      : rejoin.offer === "watchers_full"
+        ? "Too many old watchers may still be running, so no new one is started. Closing Claude normally ends them; restarting the computer always does."
+        : OFFER[rejoin.offer ?? ""];
   const waiting = rejoin.request?.state === "waiting";
   return (
     <div
@@ -85,7 +105,7 @@ export function RejoinControls({
           >
             Cancel
           </button>
-          <p className="muted">{CANCEL_HELP}</p>
+          <p className="muted">{CANCEL_HELP[app]}</p>
         </>
       )}
       {rejoin.offer && (
@@ -109,10 +129,17 @@ export function RejoinControls({
           <span className="muted">
             Experimental ·{" "}
             {rejoin.offer === "ready"
-              ? "asks Codex to bring its conversation back; uses its allowance"
-              : OFFER[rejoin.offer]}
+              ? app === "codex"
+                ? "asks Codex to bring its conversation back; uses its allowance"
+                : "wakes its conversation in Claude; uses its allowance. Not after Stop"
+              : why}
           </span>
         </>
+      )}
+      {resting > 1 && rejoin.offer !== "watchers_full" && (
+        <p className="muted">
+          {resting} old watchers are resting; they end when Claude is closed.
+        </p>
       )}
       {/* Beside the contact notice, which has them, they'd be there twice. */}
       {agent.state !== "not_responding" && rejoin.offer !== "connected" && (
@@ -177,8 +204,8 @@ export function RejoinAgents({
         >
           <h2 id="rejoin-agents-title">Rejoin agents (experimental)</h2>
           <p>
-            Konfab asks Codex to bring these back in the conversations they last
-            joined from. It uses their allowance.
+            Konfab asks their apps to bring these back in the conversations they
+            last joined from. It uses their allowance.
           </p>
           <ul>
             {ready.map((agent) => (

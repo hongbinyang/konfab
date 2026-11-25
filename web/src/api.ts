@@ -102,11 +102,16 @@ export interface Pass {
 }
 
 export interface RejoinState {
+  /** Absent from older servers, which only know this one. */
+  app?: "codex" | "claude";
+  resting?: number;
   offer:
     | "ready"
     | "connected"
     | "old_join"
     | "unavailable"
+    | "no_watcher"
+    | "watchers_full"
     | "elsewhere"
     | "archived"
     | "paused"
