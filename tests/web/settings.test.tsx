@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fromField, QUESTIONS, Settings } from "../../web/src/Settings";
@@ -240,6 +240,224 @@ describe("the Settings page", () => {
     answer = () => [200, view];
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(writes().at(-1)).toMatchObject({ hash: "h2" });
+  });
+
+  /** Another writer's change, and the next look of the page. */
+  const elsewhere = async (key: string, value: unknown) => {
+    view = {
+      ...view,
+      hash: `${view.hash}+`,
+      settings: view.settings.map((setting) =>
+        setting.key === key
+          ? { ...setting, saved: value, in_use: value }
+          : setting,
+      ),
+    };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+  };
+  const typing = async (value: string) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await open();
+    const minutes = screen.getByLabelText<HTMLInputElement>(
+      "rejoin.wanted_minutes",
+    );
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, value);
+    return minutes;
+  };
+  const saveButton = () =>
+    screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
+
+  it("doesn't overwrite a newer value that came while the lead typed", async () => {
+    try {
+      const minutes = await typing("20");
+      expect(saveButton().disabled).toBe(false);
+      await elsewhere("rejoin.wanted_minutes", 45);
+      expect(minutes.value).toBe("20");
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Changed elsewhere to 45 while you typed.",
+      );
+      expect(saveButton().disabled).toBe(true);
+      await userEvent.click(saveButton());
+      // Typing on doesn't settle it.
+      await userEvent.type(minutes, "1");
+      expect(saveButton().disabled).toBe(true);
+      expect(writes()).toEqual([]);
+      await userEvent.click(
+        screen.getByRole("button", { name: "Keep mine (201)" }),
+      );
+      await userEvent.clear(minutes);
+      await userEvent.type(minutes, "21");
+      expect(screen.queryByRole("alert")).toBeNull();
+      await userEvent.click(saveButton());
+      expect(writes()).toEqual([
+        { hash: "h1+", set: { "rejoin.wanted_minutes": 21 } },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("takes the newer value when the lead says so, and asks again after another change", async () => {
+    try {
+      const minutes = await typing("20");
+      await elsewhere("rejoin.wanted_minutes", 45);
+      await userEvent.click(
+        screen.getByRole("button", { name: "Keep mine (20)" }),
+      );
+      expect(saveButton().disabled).toBe(false);
+      await elsewhere("rejoin.wanted_minutes", 46);
+      expect(saveButton().disabled).toBe(true);
+      await userEvent.click(screen.getByRole("button", { name: "Use 46" }));
+      expect(minutes.value).toBe("46");
+      expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+      expect(writes()).toEqual([]);
+      // What is typed from there starts from that value.
+      await userEvent.clear(minutes);
+      await userEvent.type(minutes, "5");
+      expect(saveButton().disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("isn't held up by a change of another setting, or of the same to the same value", async () => {
+    try {
+      await typing("20");
+      await elsewhere("rejoin.enabled", false);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(saveButton().disabled).toBe(false);
+      await userEvent.click(saveButton());
+      expect(writes()).toEqual([
+        { hash: "h1+", set: { "rejoin.wanted_minutes": 20 } },
+      ]);
+      cleanup();
+      vi.useRealTimers();
+      view.settings = view.settings.map((setting) =>
+        setting.key === "rejoin.wanted_minutes"
+          ? number("rejoin.wanted_minutes", 10)
+          : setting,
+      );
+      await typing("30");
+      await elsewhere("rejoin.wanted_minutes", 30);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sees a change that comes in the middle of saving", async () => {
+    try {
+      const minutes = await typing("20");
+      // The server refuses, because the file isn't the one that was shown.
+      answer = () => {
+        view = {
+          ...view,
+          hash: "h2",
+          settings: view.settings.map((setting) =>
+            setting.key === "rejoin.wanted_minutes"
+              ? { ...setting, saved: 45, in_use: 45 }
+              : setting,
+          ),
+        };
+        return [409, { code: "settings_changed", message: "changed" }];
+      };
+      await userEvent.click(saveButton());
+      expect(minutes.value).toBe("20");
+      expect(
+        screen
+          .getAllByRole("alert")
+          .map((item) => item.textContent)
+          .join(),
+      ).toMatch(/Nothing was saved.*Changed elsewhere to 45/);
+      expect(saveButton().disabled).toBe(true);
+      expect(writes()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't show an answer from before a save after it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await open();
+      const old = view;
+      let late!: () => void;
+      const real = globalThis.fetch;
+      vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+        if (url !== "/api/settings" || init?.method !== "GET")
+          return real(url, init);
+        await new Promise<void>((done) => (late = done));
+        return new Response(JSON.stringify(old), {
+          headers: { "content-type": "application/json" },
+        });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      view = {
+        ...view,
+        hash: "h2",
+        settings: view.settings.map((setting) =>
+          setting.key === "rejoin.enabled"
+            ? { ...setting, saved: false, in_use: false }
+            : setting,
+        ),
+      };
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const enabled = screen.getByRole<HTMLInputElement>("switch", {
+        name: "rejoin.enabled",
+      });
+      await userEvent.click(enabled);
+      expect(enabled.checked).toBe(false);
+      await act(async () => {
+        late();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(enabled.checked).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks before it replaces a command that was changed elsewhere", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await open();
+      await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+      const dialog = screen.getByRole("dialog");
+      await userEvent.type(
+        within(dialog).getByLabelText("Absolute path"),
+        "/opt/mine",
+      );
+      answer = () => [
+        200,
+        { ok: true, path: "/opt/mine", stamp: "s", signed_by: null },
+      ];
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Look at it" }),
+      );
+      await elsewhere("rejoin.codex_command", "/opt/theirs");
+      expect(dialog.textContent).toContain("Changed elsewhere to /opt/theirs");
+      const use = within(dialog).getByRole<HTMLButtonElement>("button", {
+        name: "Use this file",
+      });
+      expect(use.disabled).toBe(true);
+      expect(
+        within(dialog).getByRole<HTMLButtonElement>("button", {
+          name: "Use the app's own",
+        }).disabled,
+      ).toBe(true);
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Go on" }),
+      );
+      expect(use.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows saved and in use when they differ, and is off with a broken file", async () => {

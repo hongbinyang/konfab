@@ -44,6 +44,23 @@ test("the lead changes settings in the page, which are in use at once", async ({
   await away.fill("5");
   await settings.getByRole("textbox", { name: "Quiet from" }).fill("22:00");
   await shot("phone");
+  // The command line changes the same setting meanwhile.
+  execFileSync(
+    "node",
+    ["dist/cli/config.js", "set", "phone_notices.away_minutes", "33"],
+    { env: env() },
+  );
+  await expect(settings.getByRole("alert")).toContainText(
+    "Changed elsewhere to 33 while you typed.",
+    { timeout: 10_000 },
+  );
+  await expect(away).toHaveValue("5");
+  const save = settings.getByRole("button", { name: "Save" });
+  await expect(save).toBeDisabled();
+  await expect(save).toHaveCSS("opacity", "0.55");
+  await shot("conflict");
+  await settings.getByRole("button", { name: "Keep mine (5)" }).click();
+  await expect(settings.getByRole("button", { name: "Save" })).toBeEnabled();
   // Leaving asks.
   page.once("dialog", (question) => void question.dismiss());
   await page.getByRole("button", { name: "⚙ Manage library" }).click();

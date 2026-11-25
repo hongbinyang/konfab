@@ -39,7 +39,7 @@ A room's own settings on the command line: an **open question** (decision 6); no
 **⚙ Settings** in the left sidebar, beside **Manage library**. Sections: **Phone notices**, **Rejoin**, **Agents and turns**, **Skills**, **Advanced**.
 
 - A row: name, one line of help, its control, and only if it isn't at once, when it takes effect. A changed one has **Reset** (with its default).
-- A switch is saved by its click. Numbers and times are saved by **Save**, which appears when something has changed, beside **Discard**. A wrong value is said beside its field, and nothing is saved.
+- A switch is saved by its click. Numbers and times are saved by **Save**, which appears when something has changed, beside **Discard**. A wrong value is said beside its field, and nothing is saved. What is typed remembers the value that it was typed over: if that setting is changed elsewhere meanwhile, the row says so, and nothing is saved before the lead chose "Keep mine" or the other. A change of another setting holds nothing up.
 - Where something isn't set up, its place says so with a button that leads there: **Set up…** under **Lead** for phone notices; **Turn on Rejoin for Claude…** on an agent's card.
 - A room's own value stays in the room's **Edit**; it says "Default (2 min)", as now, with a link to the default.
 

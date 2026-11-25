@@ -1823,3 +1823,8 @@ input.switch[type="checkbox"]:disabled {
     transition: none;
   }
 }
+
+.settings button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

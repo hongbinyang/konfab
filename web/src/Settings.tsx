@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Modal } from "./Modal";
 import { PhoneNotices } from "./PhoneNotices";
 import { request, RequestError } from "./api";
@@ -90,6 +97,9 @@ export function fromField(
   return { value: typed };
 }
 
+/** What was typed, and the saved value that it was typed over. */
+type Draft = { field: string; base: Value };
+
 const toField = (value: Value) => (value === null ? "" : String(value));
 
 export function Settings({
@@ -101,32 +111,33 @@ export function Settings({
 }) {
   const [view, setView] = useState<View | null>(null);
   const [section, setSection] = useState<"phone" | "rejoin">(first);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = useCallback(
-    () =>
-      request<View>("/api/settings").then(
-        (next) => {
-          setView(next);
-        },
-        (caught: unknown) =>
-          setError(
-            caught instanceof Error
-              ? caught.message
-              : "The settings can't be read",
-          ),
-      ),
-    [],
-  );
+  // Counts saves, so that an answer from before one isn't shown after it.
+  const saves = useRef(0);
+  const load = useCallback(() => {
+    const at = saves.current;
+    return request<View>("/api/settings").then(
+      (next) => {
+        if (at === saves.current) setView(next);
+      },
+      (caught: unknown) =>
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "The settings can't be read",
+        ),
+    );
+  }, []);
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), 5_000);
     return () => clearInterval(timer);
   }, [load]);
   useEffect(() => setSection(first), [first]);
-  const changed = Object.entries(drafts).filter(([key, field]) => {
+  const changed = Object.entries(drafts).filter(([key, { field }]) => {
     const setting = view?.settings.find((item) => item.key === key);
     return setting && toField(setting.saved) !== field.trim();
   });
@@ -150,14 +161,15 @@ export function Settings({
     setBusy(true);
     setError("");
     setSaved("");
+    saves.current += 1;
     const keys = [...Object.keys(change.set ?? {}), ...(change.reset ?? [])];
     try {
-      setView(
-        await request<View>("/api/settings", {
-          method: "PATCH",
-          body: { hash: view.hash, ...change },
-        }),
-      );
+      const next = await request<View>("/api/settings", {
+        method: "PATCH",
+        body: { hash: view.hash, ...change },
+      });
+      saves.current += 1;
+      setView(next);
       setDrafts((all) =>
         Object.fromEntries(
           Object.entries(all).filter(([key]) => !keys.includes(key)),
@@ -172,6 +184,7 @@ export function Settings({
             ? `Not saved: ${caught.message}`
             : "Not saved.",
       );
+      saves.current += 1;
       await load();
     } finally {
       setBusy(false);
@@ -182,7 +195,12 @@ export function Settings({
     (setting) => setting.section === section && setting.page !== "later",
   );
   const here = SECTIONS.find((item) => item.id === section)!;
-  const wrong = changed.filter(([key, field]) => {
+  /** Changed elsewhere since the lead began to type; they decide. */
+  const conflicts = changed.filter(([key, { base }]) => {
+    const setting = view.settings.find((item) => item.key === key)!;
+    return setting.saved !== base;
+  });
+  const wrong = changed.filter(([key, { field }]) => {
     const setting = view.settings.find((item) => item.key === key)!;
     return "wrong" in fromField(setting, field);
   });
@@ -231,9 +249,34 @@ export function Settings({
             setting={setting}
             off={off}
             busy={busy}
-            draft={drafts[setting.key]}
+            draft={drafts[setting.key]?.field}
+            conflict={conflicts.some(([key]) => key === setting.key)}
             onDraft={(field) =>
-              setDrafts((all) => ({ ...all, [setting.key]: field }))
+              setDrafts((all) => ({
+                ...all,
+                [setting.key]: {
+                  field,
+                  // A field that shows the saved value starts from it anew.
+                  base:
+                    all[setting.key] &&
+                    all[setting.key]!.field.trim() !== toField(setting.saved)
+                      ? all[setting.key]!.base
+                      : setting.saved,
+                },
+              }))
+            }
+            onMine={() =>
+              setDrafts((all) => ({
+                ...all,
+                [setting.key]: { ...all[setting.key]!, base: setting.saved },
+              }))
+            }
+            onTheirs={() =>
+              setDrafts((all) =>
+                Object.fromEntries(
+                  Object.entries(all).filter(([key]) => key !== setting.key),
+                ),
+              )
             }
             onSwitch={(on) => {
               const asks = QUESTIONS[setting.key]?.[on ? "on" : "off"];
@@ -274,7 +317,7 @@ export function Settings({
             <span>
               {mine.length === 1 ? "1 change" : `${mine.length} changes`}:{" "}
               {mine
-                .map(([key, field]) => {
+                .map(([key, { field }]) => {
                   const setting = rows.find((row) => row.key === key)!;
                   return `${setting.name}, ${text(setting.saved)} → ${field.trim() || "none"}`;
                 })
@@ -298,12 +341,15 @@ export function Settings({
             <button
               type="button"
               disabled={
-                off || wrong.some(([key]) => mine.some(([own]) => own === key))
+                off ||
+                [...wrong, ...conflicts].some(([key]) =>
+                  mine.some(([own]) => own === key),
+                )
               }
               aria-disabled={busy}
               onClick={() => {
                 const set: Record<string, Value> = {};
-                for (const [key, field] of mine) {
+                for (const [key, { field }] of mine) {
                   const setting = rows.find((row) => row.key === key)!;
                   const read = fromField(setting, field);
                   if ("value" in read) set[key] = read.value;
@@ -330,7 +376,10 @@ function Row({
   off,
   busy,
   draft,
+  conflict,
   onDraft,
+  onMine,
+  onTheirs,
   onSwitch,
   onReset,
   command,
@@ -339,6 +388,9 @@ function Row({
   off: boolean;
   busy: boolean;
   draft: string | undefined;
+  conflict: boolean;
+  onMine: () => void;
+  onTheirs: () => void;
   onDraft: (field: string) => void;
   onSwitch: (on: boolean) => void;
   onReset: () => void;
@@ -373,6 +425,17 @@ function Row({
         {wrong && (
           <p className="attachment-error" role="alert">
             {wrong}
+          </p>
+        )}
+        {conflict && (
+          <p className="warning-text" role="alert">
+            Changed elsewhere to {text(setting.saved)} while you typed.{" "}
+            <button type="button" className="link" onClick={onMine}>
+              Keep mine ({draft?.trim() || "none"})
+            </button>{" "}
+            <button type="button" className="link" onClick={onTheirs}>
+              Use {text(setting.saved)}
+            </button>
           </p>
         )}
       </div>
@@ -445,6 +508,8 @@ function CommandSteps({
 }) {
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState("");
+  /** The saved value that the lead saw when they began. */
+  const [base, setBase] = useState<string | null>(null);
   const [look, setLook] = useState<Look | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -458,6 +523,7 @@ function CommandSteps({
       )
       .finally(() => setBusy(false));
   };
+  const moved = open && base !== value;
   const send = (body: object) =>
     run(async () => {
       onSaved(
@@ -482,6 +548,7 @@ function CommandSteps({
         disabled={off}
         onClick={() => {
           setPath(value ?? "");
+          setBase(value);
           setLook(null);
           setError("");
           setOpen(true);
@@ -506,6 +573,7 @@ function CommandSteps({
                 <button
                   type="button"
                   className="secondary"
+                  disabled={moved}
                   aria-disabled={busy}
                   onClick={() => send({ path: null })}
                 >
@@ -515,6 +583,7 @@ function CommandSteps({
               {look?.ok ? (
                 <button
                   type="button"
+                  disabled={moved}
                   aria-disabled={busy}
                   onClick={() => send({ path: look.path, stamp: look.stamp })}
                 >
@@ -552,6 +621,18 @@ function CommandSteps({
               }}
             />
           </label>
+          {moved && (
+            <p className="warning-text" role="alert">
+              Changed elsewhere to {value ?? "the app's own copy"} meanwhile.{" "}
+              <button
+                type="button"
+                className="link"
+                onClick={() => setBase(value)}
+              >
+                Go on
+              </button>
+            </p>
+          )}
           <div role="status">
             {look &&
               (look.ok ? (
