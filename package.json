@@ -14,6 +14,7 @@
     "quickstart": "node scripts/quickstart.mjs",
     "doctor": "node scripts/doctor.mjs",
     "setup": "npm run build && node dist/cli/setup.js",
+    "config": "npm run build --silent && node dist/cli/config.js",
     "login-link": "npm run build --silent && node dist/cli/login-link.js",
     "login-item": "npm run build --silent && node dist/cli/login-item.js",
     "upgrade-check": "npm run build --silent && node dist/cli/upgrade-check.js",

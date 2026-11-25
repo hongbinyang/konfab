@@ -30,6 +30,7 @@ import {
   rejoinShown,
   type RoomNow,
 } from "./Rejoin";
+import { Settings } from "./Settings";
 import { StopAgents, StopControls, StopSummary } from "./Stop";
 import { RichText } from "./RichText";
 import {
@@ -103,6 +104,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryDirty, setLibraryDirty] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [pageConnected, setPageConnected] = useState(false);
   useActivity();
@@ -193,6 +196,12 @@ export function App() {
     );
   }
   if (!overview) return <main className="signin">Loading…</main>;
+  const mayLeave = () =>
+    showLibrary && libraryDirty
+      ? window.confirm("Discard unsaved editor changes?")
+      : showSettings && settingsDirty
+        ? window.confirm("Discard unsaved settings?")
+        : true;
 
   return (
     <div className="layout">
@@ -200,16 +209,21 @@ export function App() {
         overview={overview}
         selectedId={selectedId}
         onSelect={(id) => {
-          if (
-            showLibrary &&
-            libraryDirty &&
-            !window.confirm("Discard unsaved editor changes?")
-          )
-            return;
+          if (!mayLeave()) return;
           setSelectedId(id);
           setShowLibrary(false);
+          setShowSettings(false);
         }}
-        onLibrary={() => setShowLibrary(true)}
+        onLibrary={() => {
+          if (!showLibrary && !mayLeave()) return;
+          setShowLibrary(true);
+          setShowSettings(false);
+        }}
+        onSettings={() => {
+          if (!showSettings && !mayLeave()) return;
+          setShowSettings(true);
+          setShowLibrary(false);
+        }}
         act={act}
       />
       <main className="chat">
@@ -266,6 +280,8 @@ export function App() {
         ))}
         {showLibrary ? (
           <Library roomId={selectedId} onDirtyChange={setLibraryDirty} />
+        ) : showSettings ? (
+          <Settings onDirtyChange={setSettingsDirty} />
         ) : room ? (
           <Room
             key={room.room.id}
@@ -298,12 +314,14 @@ function Sidebar({
   selectedId,
   onSelect,
   onLibrary,
+  onSettings,
   act,
 }: {
   overview: Overview;
   selectedId: number | null;
   onSelect: (id: number) => void;
   onLibrary: () => void;
+  onSettings: () => void;
   act: Act;
 }) {
   const [name, setName] = useState("");
@@ -412,6 +430,9 @@ function Sidebar({
       </button>
       <button type="button" className="secondary" onClick={onLibrary}>
         ⚙ Manage library
+      </button>
+      <button type="button" className="secondary" onClick={onSettings}>
+        ⚙ Settings
       </button>
       {archived.length > 0 && (
         <details>

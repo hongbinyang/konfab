@@ -605,6 +605,21 @@ export class RejoinRequests {
     );
   }
 
+  /** The lead turned it off: what is open isn't wanted any more. */
+  turnedOff(route?: Route): void {
+    this.db
+      .transaction(() => {
+        this.closeStale();
+        this.close(
+          `state IN ('sending','waiting')${route ? " AND route = ?" : ""}`,
+          route ? [route] : [],
+          "turned_off",
+        );
+      })
+      .immediate();
+    this.deps.notify();
+  }
+
   /** Can't take back the prompt; only makes it unwanted. */
   cancel(roomId: number, agentId: string): void {
     this.db

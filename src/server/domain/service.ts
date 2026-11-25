@@ -6011,6 +6011,12 @@ export class KonfabService {
   }
 
   /** Something the page shows has changed outside the database. */
+  /** By the lead in the page. The names only, never the values. */
+  settingsChanged(keys: string[]): void {
+    this.logEvent("settings_changed", null, null, { keys });
+    this.notify();
+  }
+
   changed(): void {
     this.notify();
   }

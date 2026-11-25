@@ -1,6 +1,6 @@
 # Settings in the page and on the command line
 
-**Status:** proposal for discussion. Nothing is built. The lead asked for it on 2026-11-25: "configs should be supported by both commandline and UI", for example turning on Rejoin for Claude agents and phone notices; `npm run setup` stays.
+**Status:** accepted by the lead (2026-11-25); phase 1 is being built. The lead asked for it on 2026-11-25: "configs should be supported by both commandline and UI", for example turning on Rejoin for Claude agents and phone notices; `npm run setup` stays.
 
 ## Today: every setting and every action of setup
 
@@ -144,7 +144,7 @@ If the hash differs: "The file has changed. Here are the values now." Nothing is
 
 **What this doesn't protect:** an editor takes no lock. If it saves between the last look and the rename (well under a second), **its save is lost, and it may be in no earlier file**: what was kept is what Konfab had read before. The other way round, an editor that has the old text open overwrites a change of the page with its next save, if it doesn't notice that the file changed. Both are in the guide ("don't edit the file while you save in the page"). Both orders are tested with a stand-in editor, and the tests state which of the two versions is left, not that none is lost.
 
-**Routes.** `GET /api/settings`, `PATCH /api/settings` (the hash, and at most the known keys that the page may change; anything else is refused), `POST /api/settings/reset`. They need the page's session cookie, as all of `/api/` does (an agent's token is refused there: tested for each route). Today a request without an Origin header is let through, since the cookie isn't sent from other sites; these routes ask for this page's own Origin in addition. **An agent that can run commands as the user can make itself a sign-in link or edit the file;** no route can prevent that, and the guide says so. A change is in the activity as "settings changed: rejoin.claude_watcher", with the name, not the value.
+**Routes.** `GET /api/settings`, `PATCH /api/settings` (the hash, and at most the known keys that the page may change; anything else is refused), `POST /api/settings/reset`. They need the page's session cookie, as all of `/api/` does (an agent's token is refused there: tested for each route). Today a request without an Origin header is let through, since the cookie isn't sent from other sites; these routes ask for this page's own Origin in addition. **An agent that can run commands as the user can make itself a sign-in link or edit the file;** no route can prevent that, and the guide says so. A change is kept as an event with the names of the settings, not the values.
 
 **Environment.** A value that an environment variable overrides is shown as that, and is off.
 
@@ -201,6 +201,8 @@ Turned on again: a watcher that was ended stays so. **Each Claude agent needs on
 Open requests when `rejoin.enabled` goes off: closed, with the reason "turned off"; a prompt in Codex's queue may still come and is told "closed". Sending that has begun is finished and then shown as closed.
 
 ## Decisions for the lead
+
+**Answered on 2026-11-25 (room message 1893):** 1 yes. 2 with its own question, without a sign-in code. 3 yes. 4 yes. 5 yes. Question 6 is open. The questions as they were put:
 
 1. **The token in the page (phase 2)?** Recommended, after the remaining Keychain trials; the terminal way stays.
 2. **`rejoin.codex_command` in the page:** with its own question (recommended), and in addition a fresh sign-in code from the terminal (safer, less convenient)?

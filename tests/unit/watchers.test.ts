@@ -167,6 +167,67 @@ describe("watchers", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("rests at once when it is turned off in a running server, and needs a join after", async () => {
+    const armed = start();
+    const held = call(armed);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(view().offer).toBe("ready");
+    const waits = start(OTHER, "codex");
+    watchers.turn(false);
+    service.rejoin.watchers = null;
+    expect(await held).toEqual({ status: "wait" });
+    expect(row(armed.id).state).toBe("ended");
+    expect(await call(armed)).toEqual({ status: "rest" });
+    // One that was offered and not started can't be bound any more.
+    await expect(call(waits)).rejects.toBeInstanceOf(RefusedWatch);
+    expect(files()).toEqual([]);
+    expect(watchers.offer("claude", "claude", HERE)).toBeUndefined();
+    // Its end could wake a conversation: it isn't told to end while off.
+    service.beginObservedWait("claude", session, "call");
+    service.poll("claude", session, true);
+    expect(await call(armed)).toEqual({ status: "rest" });
+    watchers.turn(true);
+    service.rejoin.watchers = (app, agent, conversation) =>
+      watchers.state(app, agent, conversation);
+    expect(row(armed.id).state).toBe("ended");
+    expect(["leave", "rest"]).toContain(
+      ((await call(armed)) as { status: string }).status,
+    );
+    expect(watchers.offer("claude", "claude", HERE)).toHaveProperty("command");
+  });
+
+  it("tells no request after it is turned off, also one that was about to be sent", async () => {
+    const armed = start();
+    const held = call(armed);
+    await vi.advanceTimersByTimeAsync(0);
+    const asked = ask();
+    watchers.turn(false);
+    service.rejoin.turnedOff("watch");
+    expect(await watchers.send(asked)).toBe("refused");
+    service.rejoin.sent(asked.id, "refused");
+    expect(await held).toEqual({ status: "wait" });
+    expect(requests()).toEqual(["closed:turned_off"]);
+    expect(
+      service.rejoin.rejoin("claude", asked.number, HERE, "watch"),
+    ).toMatchObject({ status: "closed" });
+  });
+
+  it("can't take back what was told before, but doesn't let it join", async () => {
+    const armed = start();
+    const held = call(armed);
+    await vi.advanceTimersByTimeAsync(0);
+    const { asked, result } = await click();
+    expect(await held).toMatchObject({ status: "print" });
+    watchers.turn(false);
+    service.rejoin.turnedOff("watch");
+    expect(
+      service.rejoin.rejoin("claude", asked.number, HERE, "watch"),
+    ).toMatchObject({ status: "closed" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await result;
+    expect(requests()).toEqual(["closed:turned_off"]);
+  });
+
   it("gives a fixed command whose ticket is only in a private file", () => {
     const offer = watchers.offer("claude", "claude", HERE) as {
       command: string;

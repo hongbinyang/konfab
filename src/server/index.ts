@@ -1,6 +1,15 @@
 import { join, resolve } from "node:path";
 import { buildApp } from "./api/app.js";
-import { databasePath, ensureHome, konfabHome, loadConfig } from "./config.js";
+import {
+  databasePath,
+  ensureHome,
+  konfabHome,
+  loadConfig,
+  type Config,
+} from "./config.js";
+import { LiveSettings } from "./live-settings.js";
+import { isAgreed, noteFirst } from "./rejoin/own-command.js";
+import { readSettingsFile, tidySettingsFiles } from "./settings-file.js";
 import { LogFile, logDirectory } from "./log-file.js";
 import { TelegramNotices } from "./telegram/notices.js";
 import { resolveTelegramToken } from "./telegram/token.js";
@@ -29,34 +38,66 @@ const { db, service, skills, sources } = createRuntime(
 service.recoverAfterRestart();
 service.recoverDeletedRooms();
 
-// The lead's button that asks Codex agents to rejoin.
-const rejoinCommand = {
-  enabled: config.rejoin.enabled,
-  command: config.rejoin.codex_command,
-  allowUntested: config.rejoin.allow_untested_version,
+tidySettingsFiles(home);
+/** A link, for example: it can be used, but isn't changed or followed. */
+const firstHash = (): string => {
+  try {
+    return readSettingsFile(home).hash;
+  } catch {
+    return "";
+  }
 };
+const live = new LiveSettings(
+  {
+    home,
+    port: config.server.port,
+    apply: applySettings,
+    changed: () => service.changed(),
+    warn: (message) => app.log.warn(message),
+  },
+  { config, hash: firstHash() },
+);
+
+// The lead's button that asks Codex agents to rejoin. What it uses can change
+// while the server runs, so each use takes the values of that moment.
+noteFirst(home, config.rejoin.codex_command);
+const rejoinCommand = (from: Config["rejoin"] = live.inUse.rejoin) => ({
+  enabled: from.enabled,
+  command: from.codex_command,
+  allowUntested: from.allow_untested_version,
+  agreed: (path: string, stamp: string) => isAgreed(home, path, stamp),
+});
 service.rejoin.wantedMs = config.rejoin.wanted_minutes * 60_000;
 let rejoinReady = false;
 let rejoinProblem = false;
 service.rejoin.available = () => rejoinReady;
 service.rejoin.problem = () => rejoinProblem;
 // Only by the lead's click, and not from an isolated test server.
-const opensApps =
-  config.rejoin.enabled &&
-  config.rejoin.open_apps &&
+const opensApps = () =>
+  live.inUse.rejoin.enabled &&
+  live.inUse.rejoin.open_apps &&
   process.env.KONFAB_ISOLATED !== "1";
-service.rejoin.opens = (app) => opensApps && canOpen(app);
-/** At the start, after a refusal, and now and then while it can't be used. */
+service.rejoin.opens = (app) => opensApps() && canOpen(app);
+/** At the start, after a refusal or a change, and now and then while it can't be used. */
 let recheck: NodeJS.Timeout | undefined;
+let check = 0;
 const checkRejoin = async (): Promise<void> => {
   clearTimeout(recheck);
-  const checked = await checkCommand(rejoinCommand);
+  const mine = (check += 1);
+  const { enabled } = live.inUse.rejoin;
+  const checked = await checkCommand(rejoinCommand());
+  // Another check has begun since, with newer values.
+  if (mine !== check) return;
   rejoinReady = checked.ok;
   rejoinProblem = !checked.ok && !checked.off;
-  if (!rejoinReady && config.rejoin.enabled)
-    recheck = setTimeout(() => void checkRejoin(), 10 * 60_000).unref();
+  if (!rejoinReady && enabled)
+    // A yes on the command line comes a moment after the change.
+    recheck = setTimeout(
+      () => void checkRejoin(),
+      !checked.ok && checked.asks ? 5_000 : 10 * 60_000,
+    ).unref();
+  service.changed();
 };
-void checkRejoin();
 
 // For agents whose app wakes them when a command they started ends.
 const watchers = new Watchers({
@@ -72,32 +113,59 @@ const watchers = new Watchers({
     service.isWaitingIn(agentId, conversation),
   changed: () => service.changed(),
 });
-watchers.enabled =
-  config.rejoin.enabled &&
-  config.rejoin.claude_watcher &&
+const watches = (from: Config["rejoin"]) =>
+  from.enabled &&
+  from.claude_watcher &&
   process.platform === "darwin" &&
   process.env.KONFAB_ISOLATED !== "1";
-if (watchers.enabled)
-  service.rejoin.watchers = (appId, agentId, conversation) =>
-    watchers.state(appId, agentId, conversation);
+const wakes = (appId: string, agentId: string, conversation: string) =>
+  watchers.state(appId, agentId, conversation);
+watchers.enabled = watches(config.rejoin);
+service.rejoin.watchers = watchers.enabled ? wakes : null;
 watchers.tidy();
 
+// The same object all the time: it is read at every pass.
+const noticeOptions = { ...config.phone_notices };
 const notices = new TelegramNotices({
   db,
   home,
-  options: config.phone_notices,
+  options: noticeOptions,
   token: (slot) => resolveTelegramToken(slot),
   warn: (message) => app.log.warn(message),
 });
 
+/** Settings that a running server takes on. Open requests and calls are told. */
+function applySettings(next: Config, before: Config): void {
+  Object.assign(noticeOptions, next.phone_notices);
+  service.rejoin.wantedMs = next.rejoin.wanted_minutes * 60_000;
+  const on = watches(next.rejoin);
+  service.rejoin.watchers = on ? wakes : null;
+  watchers.turn(on);
+  if (before.rejoin.enabled && !next.rejoin.enabled) {
+    rejoinReady = false;
+    rejoinProblem = false;
+    service.rejoin.turnedOff();
+  } else if (watches(before.rejoin) && !on) service.rejoin.turnedOff("watch");
+  if (
+    before.rejoin.enabled !== next.rejoin.enabled ||
+    before.rejoin.codex_command !== next.rejoin.codex_command ||
+    before.rejoin.allow_untested_version !== next.rejoin.allow_untested_version
+  ) {
+    // Until the check of the new one is done, nothing is sent.
+    rejoinReady = false;
+    void checkRejoin();
+  }
+}
+
 const app = await buildApp({
   notices,
   sendRejoin: async (conversation, number) => {
-    const result = await sendRejoin(rejoinCommand, conversation, number);
+    const result = await sendRejoin(rejoinCommand(), conversation, number);
     if (result === "refused") void checkRejoin();
     return result;
   },
-  openApp: async (app) => opensApps && (await openApp(app)),
+  openApp: async (app) => opensApps() && (await openApp(app)),
+  settings: { home, live, recheck: () => void checkRejoin() },
   watchers,
   service,
   skills,
@@ -120,6 +188,7 @@ const noticesTick = setInterval(() => void notices.tick(), 15_000);
 const shutdown = async (): Promise<void> => {
   clearInterval(tick);
   clearInterval(noticesTick);
+  live.stop();
   await notices.settled();
   await sources.close();
   await app.close();
@@ -129,7 +198,9 @@ const shutdown = async (): Promise<void> => {
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
+void checkRejoin();
 await app.listen({ host: "127.0.0.1", port: config.server.port });
+live.start();
 // A parent that started this server (quickstart) learns it is listening from
 // the process itself, without probing the port.
 process.send?.({ type: "konfab-ready", port: config.server.port });

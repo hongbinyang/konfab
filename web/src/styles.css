@@ -1590,3 +1590,236 @@ button.stop-agents:disabled {
     display: none;
   }
 }
+
+.settings {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.settings > nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 12px;
+  border-right: 1px solid var(--border);
+}
+
+.settings > nav h2 {
+  padding: 0 8px 8px;
+}
+
+.settings > nav button {
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+}
+
+.settings > nav button.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.settings > nav p {
+  margin: 14px 8px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.settings-main {
+  max-width: 760px;
+  padding: 16px 24px 24px;
+}
+
+.settings-main > p {
+  margin: 2px 0 10px;
+  font-size: 13px;
+}
+
+.settings-main .phone-notices {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.setting-text {
+  min-width: 0;
+}
+
+.setting-text label,
+.setting-text .name {
+  font-size: 14px;
+}
+
+.setting-text p {
+  margin: 1px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.setting .effect {
+  color: var(--accent);
+}
+
+.setting-control {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  max-width: 55%;
+  font-size: 13px;
+}
+
+.setting-control input:not(.switch) {
+  width: 76px;
+  padding: 5px 6px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.setting-control input[type="time"] {
+  width: 112px;
+}
+
+.setting-control button.secondary {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.setting-control button.link {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setting-control .command {
+  overflow-wrap: anywhere;
+}
+
+input.switch[type="checkbox"] {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 99px;
+  background: var(--muted);
+  appearance: none;
+  cursor: pointer;
+}
+
+input.switch[type="checkbox"]::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--background);
+  content: "";
+  transition: left 0.15s;
+}
+
+input.switch[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+input.switch[type="checkbox"]:checked::after {
+  left: 19px;
+}
+
+input.switch[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.setting-control .question input {
+  width: 100%;
+  margin-top: 4px;
+  text-align: left;
+}
+
+.setting-control .question code {
+  overflow-wrap: anywhere;
+}
+
+.settings-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+
+.settings-bar span {
+  flex: 1;
+  min-width: 160px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.settings-main > .settings-problem {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--warning-surface);
+  color: var(--warning);
+}
+
+.settings-main > .sr-only {
+  margin: -1px;
+}
+
+@media (max-width: 900px) {
+  .settings {
+    display: block;
+  }
+
+  .settings > nav {
+    flex-flow: row wrap;
+    align-items: center;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings > nav h2 {
+    width: 100%;
+    padding-bottom: 2px;
+  }
+
+  .settings-main {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .setting {
+    flex-wrap: wrap;
+  }
+
+  .setting-control {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input.switch[type="checkbox"]::after {
+    transition: none;
+  }
+}

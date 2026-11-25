@@ -132,6 +132,19 @@ export class Watchers {
     rmSync(this.file(id), { force: true });
   }
 
+  /**
+   * In a running server. Off: nothing is told a request any more, and armed
+   * ones rest at once. On again doesn't bring them back.
+   */
+  turn(on: boolean): void {
+    if (this.enabled === on) return;
+    this.enabled = on;
+    this.tidy();
+    if (on) return;
+    for (const call of [...this.open.values()]) call.answer({ status: "wait" });
+    for (const listener of this.changed) listener();
+  }
+
   /** After a start, and now and then. */
   tidy(): void {
     const now = this.now();
@@ -396,6 +409,8 @@ export class Watchers {
   private restOrLeave(row: Row): WatchAnswer {
     const now = this.now();
     if (row.left_at !== null) return { status: "leave" };
+    // Its end could wake its conversation, so not while this is off.
+    if (!this.enabled) return { status: "rest" };
     if (!this.deps.isWaiting(row.agent_id, row.conversation_id))
       return { status: "rest" };
     const recent = this.db
@@ -485,6 +500,7 @@ export class Watchers {
     if (!call) return "refused";
     const handed = this.db
       .transaction(() => {
+        if (!this.enabled) return false;
         const fresh = this.current(asked.agent, asked.conversation);
         if (fresh?.id !== row.id || fresh.state !== "live") return false;
         if (!this.deps.rejoin.mayHandOver(asked.id, fresh)) return false;

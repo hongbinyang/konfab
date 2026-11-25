@@ -941,4 +941,22 @@ describe("asking agents to rejoin", () => {
     service.archiveRoom(roomId);
     expect(can("codex")).toBe(false);
   });
+
+  it("closes what is open when it is turned off, only of that route", () => {
+    const first = ask();
+    service.rejoin.sent(first.id, "taken");
+    service.rejoin.turnedOff("watch");
+    expect(states()).toEqual(["waiting"]);
+    service.rejoin.turnedOff();
+    expect(states()).toEqual(["closed:turned_off"]);
+    expect(rejoin(first.number)).toEqual(CLOSED);
+    // It may be in the app: asking again needs a yes.
+    expect(view().earlier).toBe(true);
+    // One that joined is left as it is.
+    const second = ask(true);
+    service.rejoin.sent(second.id, "taken");
+    rejoin(second.number);
+    service.rejoin.turnedOff();
+    expect(states()).toEqual(["closed:turned_off", "joined"]);
+  });
 });

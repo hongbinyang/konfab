@@ -588,3 +588,19 @@ Verified once in each app's own window (2026-11-24): a waiting agent was stopped
 | SR8 | MUST | Counts and lists of stopped agents say only what is known of each. No text says "done", "safe to close", or that an app has stopped. |
 
 Not yet verified by hand: opening each app from the page, the agent's own answer after its app's Stop, and the evening and the morning as a whole. Opening one exact conversation is a later phase.
+
+## 27. Settings in the page and on the command line
+
+**Status:** First phase implemented (Rejoin, the options of phone notices, and the command line for all settings in `config.yaml`). Design: [Settings](docs/design/settings.md). Everything the setup commands do, and all settings in the page, come with later phases.
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| SE1 | MUST | The page and the command line change the same stores by the same code and rules. Each setting is described once; a test holds the schema, the list and the user guide together. |
+| SE2 | MUST | Both say whether a change is in use: at once, from the next join, after a restart, not confirmed, or not running. A saved value that isn't in use is shown beside the one that is. |
+| SE3 | MUST | A change writes only the named keys. The rest of the file, comments and unknown keys stay. What can't be changed safely is refused, and nothing is written. |
+| SE4 | MUST | Konfab's own writers never overwrite each other or a file other than the one shown. What an editor can lose is documented. Links, other owners and folders that others can change are refused. The five versions before are kept, private. |
+| SE5 | MUST | A running server takes on Rejoin and phone-notice settings without a restart. With a file it can't use, it keeps the earlier values and says why. |
+| SE6 | MUST | Turning Rejoin or the watchers off closes open requests and tells nothing more to a watcher; what was told before is documented. |
+| SE7 | MUST | Nothing runs another Codex command before the lead's yes to exactly that file, also after it was changed by hand or has changed. One that was set before counts as agreed once. Its identity is looked at again before each run. |
+| SE8 | MUST | The routes need the lead's session and this page's own origin, and refuse an agent's token and unknown or not-yet-editable settings. |
+| SE9 | MUST | Existing files work unchanged, `npm run setup` does what it did, and going back to an earlier version works. |

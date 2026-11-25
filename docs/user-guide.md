@@ -120,8 +120,8 @@ Off unless you set it up. While you are away from the Konfab page, Konfab can se
 2. Run `npm run setup -- --telegram` and paste the token when asked. It isn't shown, and macOS keeps it in your Keychain (elsewhere, set `KONFAB_TELEGRAM_TOKEN` for setup and the server from a file only you can read). Never post it in a room.
 3. Setup shows a code to send to the bot from your phone, so it knows the chat is yours. It asks before contacting Telegram, before sending a test and before turning notices on.
 
-- **When:** after 10 minutes without a click, key or scroll on the page; at most one notice per room in 10 minutes and 20 a day. Change this under `phone_notices` in `config.yaml` (see [Configuration](#configuration)).
-- **Turn off:** the switch under **Lead** in the right panel. `npm run setup -- --telegram --remove` removes the chat and the stored token; tell @BotFather to end the bot.
+- **When:** after 10 minutes without a click, key or scroll on the page; at most one notice per room in 10 minutes and 20 a day. Change this in **⚙ Settings → Phone notices**, or with `npm run config` (see [Configuration](#configuration)); it is in use at once.
+- **Turn off:** the switch under **Lead** in the right panel, or in **⚙ Settings → Phone notices**. `npm run setup -- --telegram --remove` removes the chat and the stored token; tell @BotFather to end the bot.
 - **One way:** after setup Konfab reads nothing from Telegram; writing to the bot does nothing.
 - **Who can reach the token:** programs running as you that macOS lets read that Keychain item, which can include an agent that runs commands. With it, someone could send as this bot, but not use your Telegram account.
 
@@ -244,7 +244,7 @@ It can be used when the agent isn't waiting or working and its last join came th
 - **Sending a second one** while an earlier prompt may still be in Codex asks you first. Only the newest can rejoin.
 - **What is sent:** a fixed text with that request, and nothing anyone wrote, not even the room's name.
 - **What it protects against:** mistakes and late prompts, not a hostile program running as you, which could already use Codex and the connector.
-- **What it runs:** only the Codex app's own command, after checking its place, owner, signature and version. Untried versions are off. Set `rejoin.codex_command` or `rejoin.allow_untested_version` to change that (see [Configuration](#configuration)).
+- **What it runs:** only the Codex app's own command, after checking its place, owner, signature and version. Untried versions are off. **⚙ Settings → Rejoin** can change that, or `npm run config`. Another command isn't run before you have said yes to exactly that file; if the file changes, you are asked again. That it is signed is something to go by, not a guarantee.
 
 When an agent that had joined before is really waiting again (not only told that the room is on a break or its run window is over), the room shows **… is back**, also after a pasted prompt.
 
@@ -254,14 +254,8 @@ Tested once in the Codex app's own window (conversation open, the agent had ende
 
 The Claude app has no way to put a prompt into an open conversation from outside. But it starts a conversation again when a background command **that the conversation itself started** ends. So, if you turn this on, a Claude agent starts one small command when it joins, a **watcher**. It waits silently, uses no allowance, and ends when you select **Rejoin**.
 
-1. Put this into `~/.konfab/config.yaml` and restart Konfab:
-
-   ```yaml
-   rejoin:
-     claude_watcher: true
-   ```
-
-2. Restart the Konfab connector in Claude once.
+1. Turn on **⚙ Settings → Rejoin → Wake Claude agents**, or run `npm run config -- set rejoin.claude_watcher true`. Konfab needs no restart.
+2. Restart the Konfab connector in Claude once, if you haven't since the update that brought this.
 3. Paste the rejoin prompt from the card once (**Copy rejoin prompt**; it now has one more sentence, which asks for the watcher). Claude may ask you to allow the command.
 
 | How Claude stopped                                                                 | **Rejoin**                                                          |
@@ -275,7 +269,7 @@ The Claude app has no way to put a prompt into an open conversation from outside
 - **Limits:** at most 3 for a conversation and 6 for the app. Old ones rest until Claude is closed, about 56 MB each; Konfab tells one to end, at most twice a day for a conversation, while its agent is waiting. Konfab never ends a process itself. If it can't tell that an old one is gone, it starts no new one, and the manual prompt works.
 - **What is protected:** the same one-time request and checks as for Codex. The watcher's own ticket can only be told such a request; it can't join, read or post.
 - **It relies on the model** doing what its prompt says. If it doesn't start the watcher, the card opens Claude and copies the prompt instead.
-- **Turn it off:** `claude_watcher: false` and a restart of Konfab. Watchers that are still there rest.
+- **Turn it off:** the same switch. Open requests are closed, and watchers that are still there rest and wake nobody; one that was told a request a moment before can still start a short turn. Turned on again, each agent needs one join (paste its rejoin prompt).
 
 ## 9. Several agents per app
 
@@ -376,7 +370,26 @@ To uninstall: run `npm run login-item -- uninstall` if you turned it on, delete 
 
 ## Configuration
 
-Nothing needs configuring: every setting has a default, and the first start writes `~/.konfab/config.yaml` with them. To change one, edit that file and restart Konfab. The server always listens on `127.0.0.1` only.
+Nothing needs configuring: every setting has a default. The server always listens on `127.0.0.1` only. There are three ways to change a setting; all use `~/.konfab/config.yaml`.
+
+- **In the page:** **⚙ Settings** in the left sidebar. It has **Rejoin** and the options of **Phone notices**; the others are on the command line for now.
+- **On the command line,** with Konfab running or not:
+
+  ```
+  npm run config                                  # all settings
+  npm run config -- get rejoin.claude_watcher
+  npm run config -- set rejoin.claude_watcher true
+  npm run config -- reset phone_notices.away_minutes
+  ```
+
+- **In the file,** by hand.
+
+Both the page and the command line say whether a change **is in use**: at once, from the next join, or after a restart. A running Konfab sees a change of the file within a few seconds, whoever made it. If the file can't be used, the earlier values stay and the page says why; a start with such a file stops and says why.
+
+- **What is saved:** only what you change; the rest of the file, your comments and unknown keys stay. Adding a setting to a section can move blank lines there. The five versions before are in `~/.konfab/backups/config/`.
+- **Don't edit the file while you save in the page or on the command line.** Konfab looks whether it has changed, but an editor that saves in the very last moment loses its save, and an editor that has the old text open overwrites Konfab's change.
+- **A link** instead of the file is used at a start, but isn't changed or followed while Konfab runs.
+- **Who can change settings:** you, in the page and on the command line. Agents have no way through Konfab. An agent that can run commands on your computer could edit the file, as before.
 
 Environment variables (all optional):
 
@@ -390,32 +403,38 @@ Environment variables (all optional):
 
 Settings in `config.yaml`:
 
-| Setting                                           | Default   | What it does                                                                                              |
-| ------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------- |
-| `server.port`                                     | 8787      | Port for the page and the connectors                                                                      |
-| `defaults.run_hours`                              | 5         | Usable hours per agent session (also per agent under `agents`)                                            |
-| `defaults.run_warnings_minutes`                   | 30, 10, 5 | When run-window warnings appear                                                                           |
-| `defaults.max_consecutive_agent_messages`         | 50        | Agent messages in a row before the room waits for you                                                     |
-| `defaults.wait_timeout_seconds`                   | 50        | How long a waiting agent's call lasts; longer uses less allowance                                         |
-| `defaults.turn_timeout_minutes`                   | 30        | When a silent turn is flagged and recovered                                                               |
-| `defaults.auto_continue_delay_seconds`            | 180       | Delay before automatic continuation                                                                       |
-| `defaults.parallel_lead_mentions`                 | false     | Parallel answers to your mentions in new rooms                                                            |
-| `defaults.max_parallel_lead_turns`                | 3         | Parallel turns per room                                                                                   |
-| `defaults.checkin_minutes`                        | 2         | Busy-agent check-in interval (1, 2, 5 or 10)                                                              |
-| `defaults.max_attachment_mb`                      | 10        | Largest attachment                                                                                        |
-| `multi_agent.max_per_app`                         | 4         | Agents per desktop app                                                                                    |
-| `connectors.install`                              | user      | `manual` makes setup write instructions instead of editing apps                                           |
-| `phone_notices.away_minutes`                      | 10        | Minutes without activity before phone notices are sent                                                    |
-| `phone_notices.quiet_from`, `quiet_to`            | none      | Quiet hours, such as "22:00" and "07:30"                                                                  |
-| `phone_notices.room_names`                        | false     | Whether phone notices name the room                                                                       |
-| `phone_notices.room_every_minutes`, `max_per_day` | 10, 20    | Limits for phone notices                                                                                  |
-| `rejoin.enabled`                                  | true      | Whether the [Rejoin button](#the-rejoin-button-codex-agents-macos-experimental) is offered                |
-| `rejoin.wanted_minutes`                           | 10        | How long a request to rejoin stays wanted (1 to 60)                                                       |
-| `rejoin.codex_command`                            | none      | Absolute path of the Codex command, instead of the app's own copy; its signature isn't checked            |
-| `rejoin.allow_untested_version`                   | false     | Use a Codex version this hasn't been tried with                                                           |
-| `rejoin.claude_watcher`                           | false     | Offers the [Rejoin button for Claude agents](#the-rejoin-button-for-claude-agents-macos-experimental-off) |
-| `rejoin.open_apps`                                | true      | Lets a button bring Codex or Claude to the front (macOS)                                                  |
-| `pre_approvals`                                   | none      | Actions agents may take without asking (still logged)                                                     |
+| Setting                                   | Default       | In the page | In use                    | What it does                                                                                    |
+| ----------------------------------------- | ------------- | ----------- | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `phone_notices.away_minutes`              | 10            | yes         | At once                   | Minutes without activity before phone notices are sent                                          |
+| `phone_notices.quiet_from`                | none          | yes         | At once                   | Start of quiet hours, such as 22:00; nothing is sent in them (needs both times)                 |
+| `phone_notices.quiet_to`                  | none          | yes         | At once                   | End of quiet hours, such as 07:30                                                               |
+| `phone_notices.room_names`                | false         | yes         | At once                   | Whether phone notices name the room, which Telegram then sees                                   |
+| `phone_notices.room_every_minutes`        | 10            | yes         | At once                   | Minutes between two notices about the same room                                                 |
+| `phone_notices.max_per_day`               | 20            | yes         | At once                   | Phone notices per day                                                                           |
+| `rejoin.enabled`                          | true          | yes         | At once                   | Whether agents can be asked to rejoin; off closes requests that are open                        |
+| `rejoin.claude_watcher`                   | false         | yes         | From the next join        | Asks Claude agents, when they join, to start one small background command that wakes them       |
+| `rejoin.open_apps`                        | true          | yes         | At once                   | Lets a button bring Codex or Claude to the front (macOS)                                        |
+| `rejoin.wanted_minutes`                   | 10            | yes         | At once                   | How long a request to rejoin stays wanted                                                       |
+| `rejoin.allow_untested_version`           | false         | yes         | At once                   | Use a Codex version this hasn't been tried with                                                 |
+| `rejoin.codex_command`                    | none          | yes         | At once                   | Absolute path of the Codex command, instead of the app's own copy; its signature isn't required |
+| `defaults.run_hours`                      | 5             | no          | After a restart of Konfab | Usable hours per agent session (also per agent under agents)                                    |
+| `defaults.run_warnings_minutes`           | 30, 10, 5     | no          | After a restart of Konfab | When run-window warnings appear                                                                 |
+| `defaults.max_consecutive_agent_messages` | 50            | no          | After a restart of Konfab | Agent messages in a row before the room waits for you                                           |
+| `defaults.parallel_lead_mentions`         | false         | no          | After a restart of Konfab | Parallel answers to your mentions in new rooms                                                  |
+| `defaults.max_parallel_lead_turns`        | 3             | no          | After a restart of Konfab | Parallel turns per room                                                                         |
+| `defaults.checkin_minutes`                | 2             | no          | After a restart of Konfab | Busy-agent check-in interval (1, 2, 5 or 10)                                                    |
+| `defaults.wait_timeout_seconds`           | 50            | no          | After a restart of Konfab | How long a waiting agent's call lasts; longer uses less allowance                               |
+| `defaults.turn_timeout_minutes`           | 30            | no          | After a restart of Konfab | When a silent turn is flagged and recovered                                                     |
+| `defaults.auto_continue_delay_seconds`    | 180           | no          | After a restart of Konfab | Delay before automatic continuation                                                             |
+| `defaults.max_message_chars`              | 20000         | no          | After a restart of Konfab | Characters in a message                                                                         |
+| `defaults.max_decision_chars`             | 4000          | no          | After a restart of Konfab | Characters in a decision                                                                        |
+| `defaults.max_attachment_mb`              | 10            | no          | After a restart of Konfab | Largest attachment                                                                              |
+| `multi_agent.max_per_app`                 | 4             | no          | After a restart of Konfab | Agents per desktop app                                                                          |
+| `server.port`                             | 8787          | no          | After a restart of Konfab | Port for the page and the connectors; run setup again after a change                            |
+| `server.tick_seconds`                     | 30            | no          | After a restart of Konfab | How often the server looks for timeouts                                                         |
+| `connectors.install`                      | user          | no          | At the next setup         | manual makes setup write instructions instead of editing apps                                   |
+| `agents`                                  | claude, codex | no          | After a restart of Konfab | Agents that are made at the start, with their names and run hours                               |
+| `pre_approvals`                           | none          | no          | After a restart of Konfab | Actions agents may take without asking (still logged)                                           |
 
 Room settings (brief, project folder, parallel mentions, check-in interval) are in each room's **Edit** form.
 

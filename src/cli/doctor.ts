@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { configPath, parseConfig } from "../server/config.js";
 import { checkCommand } from "../server/rejoin/codex.js";
+import { isAgreed } from "../server/rejoin/own-command.js";
 import { hashToken } from "../server/domain/service.js";
 import { LOGIN_ITEM_LABEL } from "./login-item-plist.js";
 import { readClaude, readCodex, tokenFrom } from "./connector-config.js";
@@ -371,6 +372,7 @@ export async function diagnose(
     enabled: rejoin.enabled,
     command: rejoin.codex_command,
     allowUntested: rejoin.allow_untested_version,
+    agreed: (path, stamp) => isAgreed(home, path, stamp),
     env,
   });
   add(

@@ -35,6 +35,8 @@ export type CommandOptions = {
   /** Absolute, from config.yaml; null for the app's own copy. */
   command: string | null;
   allowUntested: boolean;
+  /** Whether the lead agreed to this very file; only for a `command`. */
+  agreed?: (path: string, stamp: string) => boolean;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   uid?: number;
@@ -45,7 +47,7 @@ export type CommandOptions = {
 export type Checked =
   | { ok: true; path: string; version: string; tested: boolean; stamp: string }
   /** `off`: by choice or on this system; there is nothing to look into. */
-  | { ok: false; reason: string; off: boolean };
+  | { ok: false; reason: string; off: boolean; asks?: boolean };
 
 export type RunResult = {
   started: boolean;
@@ -172,6 +174,36 @@ function ownershipProblem(
   }
 }
 
+/** What can be seen of a command without running anything. */
+export function lookAtCommand(
+  command: string | null,
+  uid: number = process.getuid?.() ?? -1,
+  platform: NodeJS.Platform = process.platform,
+): { ok: true; path: string; stamp: string } | { ok: false; reason: string } {
+  if (command !== null && !isAbsolute(command))
+    return {
+      ok: false,
+      reason: "rejoin.codex_command isn't an absolute path",
+    };
+  try {
+    const path = realpathSync(command ?? APP_COMMAND);
+    const info = statSync(path);
+    if (!info.isFile())
+      return { ok: false, reason: "the command isn't a file" };
+    accessSync(path, constants.X_OK);
+    const reason = ownershipProblem(path, uid, platform);
+    if (reason) return { ok: false, reason };
+    return { ok: true, path, stamp: stampOf(info) };
+  } catch {
+    return {
+      ok: false,
+      reason: command
+        ? "rejoin.codex_command can't be found or run"
+        : "the Codex app's command isn't there",
+    };
+  }
+}
+
 /** Whether a command that may be used is there. Uses no allowance. */
 export async function checkCommand(options: CommandOptions): Promise<Checked> {
   const env = options.env ?? process.env;
@@ -199,25 +231,21 @@ export async function checkCommand(options: CommandOptions): Promise<Checked> {
   // An isolated run uses nothing of the user's.
   if (env.KONFAB_ISOLATED === "1") return no("this is an isolated run", true);
   if (platform !== "darwin") return no("it has only been tried on macOS", true);
-  if (options.command !== null && !isAbsolute(options.command))
-    return no("rejoin.codex_command isn't an absolute path");
-  let path: string;
-  let stamp: string;
-  try {
-    path = realpathSync(options.command ?? APP_COMMAND);
-    const info = statSync(path);
-    if (!info.isFile()) return no("the command isn't a file");
-    accessSync(path, constants.X_OK);
-    const problem = ownershipProblem(path, uid, platform);
-    if (problem) return no(problem);
-    stamp = stampOf(info);
-  } catch {
-    return no(
-      options.command
-        ? "rejoin.codex_command can't be found or run"
-        : "the Codex app's command isn't there",
-    );
-  }
+  const look = lookAtCommand(options.command, uid, platform);
+  if (!look.ok) return no(look.reason);
+  const { path, stamp } = look;
+  if (
+    options.command !== null &&
+    options.agreed &&
+    !options.agreed(path, stamp)
+  )
+    return {
+      ok: false,
+      off: false,
+      asks: true,
+      reason:
+        "you haven't agreed to the file that rejoin.codex_command names now; Settings, Rejoin asks you",
+    };
   if (options.command === null) {
     const signed = await run(
       "/usr/bin/codesign",

@@ -16,6 +16,7 @@ import type { SkillLibrary } from "../domain/skills.js";
 import type { SkillSources } from "../domain/skill-sources.js";
 import type { Route, SendResult } from "../domain/rejoin.js";
 import { RefusedWatch, type Watchers } from "../rejoin/watchers.js";
+import { settingsRoutes, type SettingsAccess } from "./settings.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
 import type { NoticesView, TelegramNotices } from "../telegram/notices.js";
 
@@ -125,6 +126,7 @@ export interface AppOptions {
   /** Brings an app to the front; whether the command worked. */
   openApp?: (app: "codex" | "claude") => Promise<boolean>;
   watchers?: Watchers;
+  settings?: SettingsAccess;
   skills?: SkillLibrary;
   sources?: SkillSources;
   skillsHome?: string;
@@ -2007,6 +2009,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     service.stops.keep(id, agent);
     return { ok: true };
   });
+
+  if (options.settings)
+    settingsRoutes(app, options.settings, {
+      origins: allowedOrigins,
+      changed: (keys) => service.settingsChanged(keys),
+    });
 
   // The lead's phone notices. Agents have no route to these.
   app.post("/api/activity", async () => {
