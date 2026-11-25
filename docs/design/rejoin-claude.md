@@ -1,6 +1,6 @@
 # Rejoin for Claude agents: a background watcher
 
-**Status:** proposal for review. Nothing is built. It extends the [Rejoin agents button](rejoin-agents.md), whose requests, checks and wording stay as they are. Evidence: [automatic rejoin](automatic-rejoin.md).
+**Status:** for review before building; nothing is built. The lead decided on 2026-11-24, after the tests by hand, that it is built, and that the join prompt may ask for the one command. It extends the [Rejoin agents button](rejoin-agents.md), whose requests, checks and wording stay as they are. Evidence: [automatic rejoin](automatic-rejoin.md).
 
 ## Goal
 
@@ -8,14 +8,15 @@ The lead selects **Rejoin** on a Claude agent's card, and the agent comes back i
 
 ## What is known
 
-| Fact                                                                                                                | How                                                |
-| ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| The Claude app starts a conversation again when a background command it started ends, 4 seconds later               | Seen once: own window, turn ended normally, 2 min. |
-| Waiting that way uses no turn                                                                                       | Seen in that test                                  |
-| The app marks the wake-up as an automatic event, not as the lead's words                                            | Seen in that test                                  |
-| After **Stop** the app starts the conversation all the same; the agent then stayed out, because it had been stopped | Seen once, own window                              |
-| After a usage limit, hours, sleep, compaction, or with the app closed                                               | **Not known**                                      |
-| A documented way to send a prompt into an open conversation from outside                                            | None found                                         |
+| Fact                                                                                                                                                    | How                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| The Claude app starts a conversation again when a background command it started ends, 4 to 6 seconds later                                              | Seen twice in its own window, turn ended by the agent: a 2-minute timer, and 32 minutes ended by the lead's own act |
+| Waiting that way uses no turn                                                                                                                           | Seen in both                                                                                                        |
+| The connector's environment has the conversation's id (`CLAUDE_CODE_SESSION_ID`), and it is the same after the conversation was compacted several times | Seen in the running connector, and equal to the conversation's own record                                           |
+| The app marks the wake-up as an automatic event, not as the lead's words                                                                                | Seen in all three                                                                                                   |
+| After **Stop** the app starts the conversation all the same; the agent then stayed out, because it had been stopped                                     | Seen once, own window                                                                                               |
+| After a usage limit, hours, sleep, compaction, or with the app closed                                                                                   | **Not known**                                                                                                       |
+| A documented way to send a prompt into an open conversation from outside                                                                                | None found                                                                                                          |
 
 Not used: the app's private message socket (undocumented), `claude --resume` (outside the window the lead sees), Channels (need a start option; the desktop app isn't mentioned), timed wake-ups (each one uses allowance).
 
@@ -35,13 +36,13 @@ The sentence in step 1 is **an instruction to a model, not an authorization boun
 
 Stop is the lead's word, and the app tells the agent to wait for the lead. The wake-up and what the watcher prints are not the lead's word. So in the test the agent was woken and rightly stayed out; it can't tell a Stop for a moment from one that is meant. Konfab can't see Stop either.
 
-**Proposed:** Konfab doesn't try to overrule it.
+Konfab doesn't try to overrule it.
 
 - The join prompt says that after a Stop the agent doesn't use a request; it ends its turn and says that it was stopped.
 - The card says after 60 seconds: "Not back yet. If you pressed Stop, paste the rejoin prompt."
 - The button is so for an agent that ended its own turn, or whose turn ended in an error; a stopped one needs the prompt.
 
-The other way, a sentence in the join prompt that a click on **Rejoin** also counts after Stop, would be the lead's own advance word. But a model may still hold to the later Stop, and a late or false request would then undo a Stop. It isn't proposed.
+The other way, a sentence in the join prompt that a click on **Rejoin** also counts after Stop, would be the lead's own advance word. But a model may still hold to the later Stop, and a late or false request would then undo a Stop. It isn't done.
 
 ## The endpoint
 
@@ -54,28 +55,28 @@ The other way, a sentence in the join prompt that a click on **Rejoin** also cou
 
 ## The life of a ticket
 
-| State    | From                                                                                                                                                                                     | To                                                            |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `issued` | a join or rejoin by the Claude connector, with a conversation, the setting on, and no `live` ticket for both                                                                             | `live` at the first call; `ended` after 2 minutes without one |
-| `live`   | its watcher has called                                                                                                                                                                   | `used`, `ended`                                               |
-| `used`   | a request was handed to it (stored **before** the answer is sent)                                                                                                                        | stays; its file is deleted                                    |
-| `ended`  | the agent left the room's members or was archived, its app's token changed, the setting was turned off, 7 days, or no call for 24 hours (a sleep or a stopped Konfab is usually shorter) | stays; its file is deleted                                    |
+| State    | From                                                                                                                                            | To                                                            |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `issued` | a join or rejoin by the Claude connector, with a conversation, the setting on, and no `issued` or `live` ticket for that agent and conversation | `live` at the first call; `ended` after 2 minutes without one |
+| `live`   | its watcher has called                                                                                                                          | `used`, `ended`                                               |
+| `used`   | a request was handed to it (stored **before** the answer is sent)                                                                               | stays; its file is deleted                                    |
+| `ended`  | the agent was archived, its app's token changed, the setting was turned off, 7 days, or no call for 24 hours while Konfab was running           | stays; its file is deleted                                    |
 
 - `gone` follows `used` or `ended` when its watcher has said goodbye, or hasn't called for 24 hours while Konfab was running.
-- A ticket belongs to one app, agent, room and conversation, not to one session, so an ordinary rejoin keeps it. The conversation's id comes from the connector's own environment; missing or not a UUID means no watcher.
-- At most one `issued` or `live` ticket per agent, room and conversation (unique in the database), and 20 new ones a day for each agent. Past that: manual prompts.
+- A ticket belongs to one app, agent and conversation, not to a room or a session: a rejoin keeps it, and it is told of a request for any room that agent joined from that conversation. A room it may not join is stopped by the checks of the request, as always. The conversation's id comes from the connector's own environment; missing or not a lower-case UUID means no watcher. As for Codex it is a routing signal, not proof.
+- At most one `issued` or `live` ticket per agent and conversation (unique in the database), and 20 new ones a day for each agent. Past that: manual prompts.
 
 ## Old and duplicate watchers
 
 **Every end of a watcher wakes the agent and costs a turn.** Only one that ends while the agent's turn is running is taken into that turn (seen once, in the Stop test that wasn't stopped). So it ends only (a) after printing a request, (b) at once at its start, saying why, if it can't work at all (no file, wrong owner, no server in 10 seconds, network blocked), (c) when it is cleaned up, or (d) with the app.
 
-| Case                                            | What happens                                                                                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The ticket ended                                | `rest`: the watcher does nothing but call once a minute, so that it can be counted and cleaned up; it wakes nobody                                |
-| Started a second time with the same number      | the first call in has the place (a lock file beside the ticket); the second prints one line and ends at once, in the turn in which it was started |
-| The agent joins again while its watcher is live | the answer says that one is running and gives no command                                                                                          |
-| Konfab is stopped                               | it tries again after 1, 2, 4 … 30 seconds, silently, for as long as the app runs                                                                  |
-| The app is gone                                 | it looks at its parent every 5 seconds and ends when that has changed; nobody is there to wake                                                    |
+| Case                                            | What happens                                                                                                                                                                                                          |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The ticket ended                                | `rest`: the watcher does nothing but call once a minute, so that it can be counted and cleaned up; it wakes nobody                                                                                                    |
+| Started a second time with the same number      | each watcher sends a random number of its own; the first keeps the place while its last call is under 2 minutes old, and the second is told so, prints one line and ends at once, in the turn in which it was started |
+| The agent joins again while its watcher is live | the answer says that one is running and gives no command                                                                                                                                                              |
+| Konfab is stopped                               | it tries again after 1, 2, 4 … 30 seconds, silently, for as long as the app runs                                                                                                                                      |
+| The app is gone                                 | at its start it notes the processes above it, up to the app, and every 30 seconds it looks whether they are still there (macOS `ps`, its full path); if one is gone it ends; nobody is there to wake                  |
 
 ### A fixed limit, and cleaning up
 
@@ -129,11 +130,11 @@ The app may ask the lead to allow the command. Konfab changes no Claude setting.
 
 ## Off by default
 
-`rejoin.claude_watcher: false`. Marked experimental. It is off until the lead turns it on, because it has the agent run a command.
+`rejoin.claude_watcher: false`, and macOS only. Marked experimental. It is off until the lead turns it on, because it has the agent run a command. While it is off, `join_room` answers and the prompts are as now.
 
-## Tests before building (by hand, with the lead)
+## Tests by hand, with the lead
 
-Each is recorded as passed, failed or not run. **If 1 or 2 fails, the rest isn't built** without a new decision.
+Each is recorded as passed, failed or not run.
 
 | #   | Test                                                                                                                                                               | Why                                              |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
@@ -145,13 +146,13 @@ Each is recorded as passed, failed or not run. **If 1 or 2 fails, the rest isn't
 | 6   | A usage limit (only if one happens)                                                                                                                                | does the wake-up wait, fail or repeat?           |
 | 7   | A command stopped by the agent; one that ends during its turn; one left resting                                                                                    | does either wake it; the memory of a resting one |
 
-Tests 1 and 2 are the condition for building anything. They need no new code: the agent starts `until [ -e <file> ]; do sleep 5; done`, and the lead makes the file.
+Tests 1 and 2 were the condition for building. After test 1 the lead took the new decision to build it, with the manual prompt after Stop. Tests 3 to 7 are for the built feature; the experimental mark stays until they are done. They need the lead.
 
 ## Automated tests
 
 - Ticket: wrong, ended, used, another app's, agent's, room's or conversation's; every state change in its table; only its hash is stored; it is refused on every other route, and the connector's token on these; its file's owner, mode, link and deletion.
 - Watcher against a stand-in server: silent while waiting and resting; one line and an end for a request; server down, restarted, slow, endless, not Konfab; redirect; parent gone; started twice.
-- Limits and cleaning up: 3 per conversation and 6 per app over simulated weeks, with restarts; `leave` only with an open wait and one at a time; a wake-up in between stops it, two switch it off; never a process killed.
+- Limits and cleaning up: 3 per conversation and 6 per app over simulated weeks, with restarts; `leave` only with an open wait and one at a time; at most 2 a day; a call without an open wait soon after one switches it off; never a process killed.
 - Output: full, short and failed writes, a closed pipe, a full pipe, and a kill before and after the write and the confirmation.
 - Delivery: each row and field of both tables, with each side killed before and after each step; a handover racing with a second click, a cancel, an expiry and a new ticket; never handed out twice.
 - The Codex tests for requests, races, secrets and wording, run for this path too.
@@ -161,9 +162,5 @@ Tests 1 and 2 are the condition for building anything. They need no new code: th
 
 - Claude may change how background commands work; then the button is greyed out and the prompts stay.
 - A wake-up reads the whole conversation again, so it costs a turn of its size.
+- After Stop the manual prompt is needed.
 - A model that ignores "closed" and calls `join_room` joins as with a pasted prompt.
-
-## Questions for the lead
-
-1. Is it right to be **off** until you turn it on?
-2. May the join prompt tell Claude to run this one command?
