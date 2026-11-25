@@ -155,8 +155,22 @@ function expected(before: unknown, change: Change): unknown {
   return root;
 }
 
-/** The text with the change, the rest as it was. */
+/** The text with the change, the rest as it was, or nothing at all. */
 export function edited(text: string, change: Change): string {
+  try {
+    return edit(text, change);
+  } catch (error) {
+    // The library refuses what it can't change, such as a shared value.
+    throw error instanceof SettingsError ? error : byHand();
+  }
+}
+
+const byHand = () =>
+  unsafe(
+    "config.yaml is written in a way that Konfab can't change safely; edit it by hand",
+  );
+
+function edit(text: string, change: Change): string {
   const before = parsed(text).toJS() as unknown;
   const wanted = expected(before, change);
   if (isDeepStrictEqual(before ?? {}, wanted)) return text;
@@ -219,10 +233,7 @@ export function edited(text: string, change: Change): string {
   } catch {
     result = undefined;
   }
-  if (!isDeepStrictEqual(result, wanted))
-    throw unsafe(
-      "config.yaml is written in a way that Konfab can't change safely; edit it by hand",
-    );
+  if (!isDeepStrictEqual(result, wanted)) throw byHand();
   return next;
 }
 

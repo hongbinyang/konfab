@@ -500,7 +500,6 @@ export class Watchers {
     if (!call) return "refused";
     const handed = this.db
       .transaction(() => {
-        if (!this.enabled) return false;
         const fresh = this.current(asked.agent, asked.conversation);
         if (fresh?.id !== row.id || fresh.state !== "live") return false;
         if (!this.deps.rejoin.mayHandOver(asked.id, fresh)) return false;

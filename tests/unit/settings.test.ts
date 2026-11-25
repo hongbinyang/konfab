@@ -29,6 +29,7 @@ import {
   checked,
   edited,
   readSettingsFile,
+  SettingsError,
   tidySettingsFiles,
 } from "../../src/server/settings-file.js";
 import {
@@ -227,7 +228,8 @@ pre_approvals: []
     let after: string | undefined;
     try {
       after = edited(before, { set: { "rejoin.enabled": false } });
-    } catch {
+    } catch (error) {
+      expect(error).toBeInstanceOf(SettingsError);
       return;
     }
     // Or it did exactly what was asked.
@@ -238,6 +240,13 @@ pre_approvals: []
         enabled: false,
       },
     });
+  });
+
+  it("never changes another value along with it", () => {
+    const shared = "rejoin: &r\n  enabled: true\nui: *r\n";
+    expect(() => edited(shared, { set: { "rejoin.enabled": false } })).toThrow(
+      /by hand/,
+    );
   });
 
   it("writes it whole and private, and keeps the last five", async () => {
