@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { lookAtCommand } from "../../src/server/rejoin/codex.js";
+import { agree } from "../../src/server/rejoin/own-command.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(import.meta.dirname, "../..");
@@ -211,6 +213,9 @@ echo "Queued message 11111111-2222-7333-8444-555555555555 for thread ${conversat
 `,
         { mode: 0o755 },
       );
+      // It wasn't there at the first start, so the lead has to agree to it.
+      const seen = lookAtCommand(join(realpathSync(home), "codex"));
+      if (seen.ok) agree(home, { path: seen.path, stamp: seen.stamp });
       // It is looked for at the start.
       const restart = async (signal: NodeJS.Signals) => {
         const gone = new Promise((done) => server!.once("exit", done));
