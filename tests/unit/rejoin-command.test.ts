@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newNumber, rejoinMessage } from "../../src/server/domain/rejoin.js";
 import {
   checkCommand,
@@ -227,15 +227,18 @@ echo "--thread --message"
     standIn(
       `(sleep 30; echo late > "${root}/late") & echo $! > "${root}/child"; sleep 30`,
     );
-    const folders = () =>
-      readdirSync(tmpdir()).filter((name) => name.startsWith("konfab-rejoin-"));
-    const before = folders();
+    // Not the one of the whole computer, where others run commands as well.
+    const own = join(root, "tmp");
+    mkdirSync(own);
+    vi.stubEnv("TMPDIR", own);
     const started = Date.now();
     const run = await runCommand(command, ["queue", "x"], 500, { HOME: root });
     expect(Date.now() - started).toBeLessThan(5000);
     expect(run).toMatchObject({ started: true, code: null, complete: false });
     expect(classify(run, HERE)).toBe("unsure");
-    expect(folders().filter((name) => !before.includes(name))).toEqual([]);
+    expect(existsSync(own)).toBe(true);
+    expect(readdirSync(own)).toEqual([]);
+    vi.unstubAllEnvs();
     const child = Number(readFileSync(join(root, "child"), "utf8"));
     await expect
       .poll(() => {
