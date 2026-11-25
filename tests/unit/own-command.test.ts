@@ -7,7 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -57,8 +57,7 @@ ${line}
     };
 
     beforeEach(() => {
-      // Not in the temporary folder of the system, which others can change.
-      root = realpathSync(mkdtempSync(join(homedir(), ".konfab-test-")));
+      root = realpathSync(mkdtempSync(join(tmpdir(), "konfab-own-")));
       home = mkdtempSync(join(tmpdir(), "konfab-home-"));
       command = join(root, "codex");
       ran = join(root, "ran");
@@ -150,7 +149,7 @@ ${line}
         reason: "it is in Konfab's own folder",
       });
       // Also by a link from elsewhere.
-      const link = join(homedir(), `.konfab-link-${process.pid}`);
+      const link = join(home, "link");
       symlinkSync(inside, link);
       try {
         expect((await lookAtOwn(link, root)).ok).toBe(false);
