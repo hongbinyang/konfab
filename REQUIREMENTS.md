@@ -555,7 +555,7 @@ Verified by hand with the watcher in the app's own window, once (2026-11-24): th
 
 ## 25. Stopping one agent
 
-**Status:** Implemented on `feature/stop-agent`; in review. Design: [Stop button for one agent](docs/design/stop-agent.md).
+**Status:** Implemented. Design: [Stop button for one agent](docs/design/stop-agent.md).
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
@@ -570,4 +570,4 @@ Verified by hand with the watcher in the app's own window, once (2026-11-24): th
 | ST9 | MUST | A join while a stop is asked ends that stop, and the card, the room and the activity say so without saying who wanted it. |
 | ST10 | MUST | While a stop is asked, locks stay until their own end, also when nothing is heard. |
 
-Not yet verified: both apps' own windows.
+Verified once in each app's own window (2026-11-24): a waiting agent was stopped, its connector confirmed it, it made no further call, and Rejoin brought it back without a prompt. Not yet verified there: stopping after a turn, Keep in room, reported work.

@@ -38,7 +38,7 @@ Stop is the lead's word, and the app tells the agent to wait for the lead. The w
 
 Konfab doesn't try to overrule it.
 
-- The join prompt says that after a Stop the agent doesn't use a request; it ends its turn and says that it was stopped.
+- The watcher's instructions say that after a stop by the app's own button, without a word from the user since, the agent doesn't use a request; it ends its turn and says so. A stop by Konfab ([Stop agent](stop-agent.md)) is different: the lead's request comes after it, and is used.
 - The card says after 60 seconds: "Not back yet. If you pressed Stop, paste the rejoin prompt."
 - The button is so for an agent that ended its own turn, or whose turn ended in an error; a stopped one needs the prompt.
 

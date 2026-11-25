@@ -124,6 +124,8 @@ describe("stopping one agent", () => {
       reason: "stopped",
       instructions: STOP_INSTRUCTIONS,
     });
+    // It leaves room for the lead's own way back.
+    expect(STOP_INSTRUCTIONS).toContain("a request for rejoin_room");
     expect(view().state).toBe("answered");
     expect(offer()).toBe("connected");
     service.finishObservedWait("codex", codex, call);

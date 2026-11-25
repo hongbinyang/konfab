@@ -183,6 +183,9 @@ describe("watchers", () => {
     expect(statSync(join(folder, "1")).mode & 0o777).toBe(0o600);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(JSON.stringify(offer)).not.toContain(ticket);
+    // The app's own Stop, and the lead's Stop agent, are told apart.
+    expect(offer.instructions).toContain("with its own Stop button");
+    expect(offer.instructions).toContain("A stop that came from Konfab");
     for (const { name } of db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all() as { name: string }[])

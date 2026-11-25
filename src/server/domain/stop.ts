@@ -9,7 +9,7 @@ import { KonfabError } from "./errors.js";
  */
 
 export const STOP_INSTRUCTIONS =
-  "The lead asked you to stop. End your reply now. Do not call wait_for_turn or any other Konfab tool unless the user asks you to rejoin.";
+  "The lead asked you to stop. End your reply now. Do not call wait_for_turn or any other Konfab tool unless the user asks you to rejoin, or a message or watcher from Konfab gives you a request for rejoin_room.";
 export const STOP_LATER =
   "The lead asked you to stop after this. Finish it, then post or pass, or call wait_for_turn, and don't take on more.";
 const QUIET_MS = 90_000;

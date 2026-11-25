@@ -82,7 +82,7 @@ export type WatcherState = {
 };
 
 const INSTRUCTIONS =
-  "Start this command once, in the background, exactly as given. Don't look at its output while it runs. When it ends and printed a request, call rejoin_room with that request; when it printed anything else, end your turn and start nothing. If you were stopped, don't use it: end your turn and say so.";
+  "Start this command once, in the background, exactly as given. Don't look at its output while it runs. When it ends and printed a request, call rejoin_room with that request; when it printed anything else, end your turn and start nothing. If the user interrupted you in this app, with its own Stop button, and hasn't written since, don't use it: end your turn and say so. A stop that came from Konfab, as the answer of a call, is different: the lead's request comes after it, so use it.";
 
 export class RefusedWatch extends Error {}
 

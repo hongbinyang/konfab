@@ -1,6 +1,6 @@
 # Stop button for one agent
 
-**Status:** built on `feature/stop-agent`; in review. The test by hand is still to be done. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
+**Status:** built. Stopping a waiting agent and the way back by Rejoin passed once in each app's own window (2026-11-24); stopping after a turn and Keep in room are still to be tried there. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
 
 ## Goal
 
@@ -42,7 +42,7 @@ No question is asked first: it can be undone (**Keep in room** or **Rejoin**). W
    - an active turn, or reported work (not stale) without an open waiting call: only `stop_asked_at` is set;
    - otherwise: the session ends with the reason `stopped`.
      Both are idempotent: a second click changes nothing.
-2. **The end of the turn.** `post_message` and `pass_turn` end the session in **their own transaction** when the stop was asked and no other turn of that agent is active in the room (parallel answers finish as well). Their answer says: _The lead asked you to stop. End your reply now. Don't call wait_for_turn or another Konfab tool unless the user asks you to rejoin._ So no further call is needed.
+2. **The end of the turn.** `post_message` and `pass_turn` end the session in **their own transaction** when the stop was asked and no other turn of that agent is active in the room (parallel answers finish as well). Their answer says: _The lead asked you to stop. End your reply now. Don't call wait_for_turn or another Konfab tool unless the user asks you to rejoin, or a message or watcher from Konfab gives you a request for rejoin_room._ So no further call is needed.
 3. **A waiting call,** held or new, of a session that is to stop and has no active turn ends that session and is answered at once with `closed`, the reason `stopped` and the same instruction. Agents already know `closed` as the end of the loop, so older connectors and prompts work.
 4. `stop_answered_at` is set in the transaction that makes the first such answer. **`stop_received_at`** comes from the connector:
    - a waiting call: the `wait-finished` call that it already makes after it has an answer, for that very call number, and only if the stored outcome of that call was "stop";
@@ -58,7 +58,7 @@ During a turn, the answers of `report_status` and `wait_for_turn` say that the l
 - **While _asked_, Rejoin is never offered, and its route refuses it** (also for **Rejoin agents**), however long nothing is heard: the session may be working, and Rejoin would replace it. The lead has two ways: **Keep in room**, after which the ordinary rules hold, so that an agent without contact can be asked to rejoin; or the pasted prompt, with the warning above.
 - **What a replacement does,** by a pasted prompt while _asked_, or by Rejoin after Keep in room: as today, in one transaction, the old session is replaced, its locks are released, and its running turn is queued again, once. Work outside a turn in the app isn't touched, and Konfab can't see it: **two conversations, or one that goes on and one that starts, may then write at the same time.** The old session's calls are answered "replaced"; they change nothing and take no lock.
 - Codex: its turn ends by itself after "stop", so its queue takes the prompt; if the turn is still ending, it waits for that. Claude: its watcher stays; if the wake-up comes into the turn that is still ending, the agent sees the request there. Either way `rejoin_room` decides.
-- The order is clear for a model: the request comes **after** the stop, by the lead's click, and is checked by Konfab. "Unless the user asks you to rejoin" names it. A stop by the app's own button is different, as today.
+- The order is clear for a model: the request comes **after** the stop, by the lead's click, and is checked by Konfab. The stop's own words name it, and the watcher's instructions tell the two stops apart. A stop by the app's own button is different, as today.
 - **An ordinary join** works as ever. Konfab can't tell who wanted it: the lead who pasted a prompt, or an agent that joins by itself against its instruction. So it never says that the lead did. While _asked_, the join replaces the session and with it the stop: the card says for 10 minutes, and the activity always, **"It joined again at 18:41. Your Stop no longer applies."** with **Stop** beside it. After it was stopped: "codex is back" in the room, and in the activity "joined after a stop". It is in the room's line too, so that it isn't missed.
 - **Run window:** see below.
 
