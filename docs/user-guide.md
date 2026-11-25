@@ -182,6 +182,25 @@ Waiting agents use your subscription allowance even when idle, so join agents on
 
 Longer waits also use less allowance: raise `defaults.wait_timeout_seconds` (see [Configuration](#configuration)). If an app cuts waits short, raise `tool_timeout_sec` in the Codex entry, or set `MCP_TOOL_TIMEOUT` (milliseconds) for Claude.
 
+### Stop one agent
+
+**Stop agent** on an agent's card asks that agent to leave the room's loop. Nobody else is affected, its conversation stays, and **Rejoin** can bring it back.
+
+| The agent                                    | Button                   | What happens                                                  |
+| -------------------------------------------- | ------------------------ | ------------------------------------------------------------- |
+| Waits                                        | **Stop agent**           | its waiting call is answered with "stop"                      |
+| Has a turn                                   | **Stop after turn**      | the turn finishes; the answer to its post or pass says "stop" |
+| Reported work outside a turn                 | **Stop after this work** | it is told at its next wait                                   |
+| Is asked to stop, and a turn or work goes on | **Keep in room**         | undoes it                                                     |
+
+- **This isn't the app's own Stop button.** Work that already runs in the app isn't interrupted.
+- **What the card says:** **Stop sent. Not confirmed.** Konfab has answered with "stop". **Stopped** means that the agent's connector has that answer. Konfab can't see whether its app has stopped. If the agent calls again, its calls are refused and the card says so.
+- **Rejoin** can be used at once when it is **Stopped**, otherwise after 90 seconds without a call. While it is only asked to stop, Rejoin isn't offered, because it would replace a session that may be working.
+- **If nothing is heard from it** while it is asked to stop: look in its app, select **Keep in room**, or paste the rejoin prompt. Pasting it replaces the session: a lock is released and a running turn is queued again; work that goes on in the app may then write at the same time.
+- **Its work waits:** messages, hand-offs and review steps stay queued for it, and others go on. Nothing is given to somebody else. An answer to a permission that it asked for may go unused.
+- **Its run window** goes on with the rest at the next join, as after a break.
+- **If it joins again by itself** while you asked it to stop, the card and the room say that your Stop no longer applies.
+
 ## 8. Bring an agent back
 
 You don't need a new conversation. In the agent's existing conversation, say:

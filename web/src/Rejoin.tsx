@@ -142,11 +142,12 @@ export function RejoinControls({
         </p>
       )}
       {/* Beside the contact notice, which has them, they'd be there twice. */}
-      {agent.state !== "not_responding" && rejoin.offer !== "connected" && (
-        <p>
-          <RejoinPrompts agent={agent} />
-        </p>
-      )}
+      {!["not_responding", "stopped"].includes(agent.state) &&
+        rejoin.offer !== "connected" && (
+          <p>
+            <RejoinPrompts agent={agent} />
+          </p>
+        )}
     </div>
   );
 }

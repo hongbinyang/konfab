@@ -200,6 +200,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     };
     // Mutations use stable turn/proposal IDs or durable server receipts.
     const repeatSafe = new Set([
+      "/agent/stop-received",
       "/agent/rejoin",
       "/agent/lock/acquire",
       "/agent/lock/release",
@@ -261,6 +262,21 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MS);
       }
     }
+  };
+
+  /** Tells Konfab that an answer with "stop" has arrived here, at most once. */
+  const stopReceived = async <T>(sessionId: string, result: T): Promise<T> => {
+    if ((result as { stopped?: unknown }).stopped === true)
+      try {
+        await call(
+          "/agent/stop-received",
+          { session_id: sessionId },
+          AbortSignal.timeout(2000),
+        );
+      } catch {
+        /* It stays unconfirmed. */
+      }
+    return result;
   };
 
   const server = new McpServer({ name: "konfab", version: "0.1.0" });
@@ -583,10 +599,13 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     async ({ session_id, turn_id, body, next }, extra) => {
       try {
         return asToolResult(
-          await call(
-            "/agent/post",
-            { session_id, turn_id, body, ...(next ? { next } : {}) },
-            extra.signal,
+          await stopReceived(
+            session_id,
+            await call(
+              "/agent/post",
+              { session_id, turn_id, body, ...(next ? { next } : {}) },
+              extra.signal,
+            ),
           ),
         );
       } catch (error) {
@@ -642,14 +661,17 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     async ({ session_id, turn_id, reason }, extra) => {
       try {
         return asToolResult(
-          await call(
-            "/agent/pass",
-            {
-              session_id,
-              turn_id,
-              ...(reason ? { reason } : {}),
-            },
-            extra.signal,
+          await stopReceived(
+            session_id,
+            await call(
+              "/agent/pass",
+              {
+                session_id,
+                turn_id,
+                ...(reason ? { reason } : {}),
+              },
+              extra.signal,
+            ),
           ),
         );
       } catch (error) {

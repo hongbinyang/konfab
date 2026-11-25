@@ -1248,20 +1248,24 @@ dd {
 }
 
 .contact-notice p,
+.stop-agent p,
 .rejoin p {
   margin: 2px 0;
 }
 
+.stop-agent,
 .rejoin {
   margin: 4px 0;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
+.stop-agent button,
 .rejoin button {
   font-size: 13px;
 }
 
+.stop-agent button.secondary,
 .rejoin button.secondary {
   padding: 4px 8px;
 }

@@ -641,6 +641,14 @@ const MIGRATIONS: readonly Migration[] = [
   BEGIN
     UPDATE watchers SET state = 'ended' WHERE agent_id = NEW.id AND state IN ('issued','live');
   END;
+  `, // The lead stopped an agent: when it was asked, answered, received by its
+  // connector, and whether it called again.
+  `
+  ALTER TABLE sessions ADD COLUMN stop_asked_at INTEGER;
+  ALTER TABLE sessions ADD COLUMN stop_answered_at INTEGER;
+  ALTER TABLE sessions ADD COLUMN stop_received_at INTEGER;
+  ALTER TABLE sessions ADD COLUMN stop_called_at INTEGER;
+  ALTER TABLE observed_waits ADD COLUMN stopped INTEGER NOT NULL DEFAULT 0;
   `,
 ];
 

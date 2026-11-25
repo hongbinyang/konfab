@@ -6,6 +6,7 @@ export type AgentState =
   | "waiting_approval"
   | "window_ended"
   | "on_break"
+  | "stopped"
   | "not_responding";
 
 export interface RoomSummary {
@@ -101,6 +102,19 @@ export interface Pass {
   created_at: number;
 }
 
+export interface StopState {
+  can: "now" | "after_turn" | "after_work" | null;
+  state: "asked" | "undelivered" | "answered" | "received" | null;
+  after: "turn" | "work" | null;
+  asked_at: number | null;
+  quiet_since: number | null;
+  long_ago: boolean;
+  called_at: number | null;
+  joined_again_at: number | null;
+  holds_lock: boolean;
+  open_permission: boolean;
+}
+
 export interface RejoinState {
   /** Absent from older servers, which only know this one. */
   app?: "codex" | "claude";
@@ -159,6 +173,8 @@ export interface RoomAgent {
   rejoin_prompt: string;
   /** Asking the agent's app to bring it back. Absent from older servers. */
   rejoin?: RejoinState;
+  /** Stopping the agent in this room. Absent from older servers. */
+  stop?: StopState;
   assignment: {
     label: string;
     skill_count: number;
@@ -270,6 +286,13 @@ export interface RoomState {
   passes?: Pass[];
   /** Agents that came back. Absent from older servers. */
   returns?: Array<{ id: number; agent_id: string; created_at: number }>;
+  /** Agents that were stopped, or whose stop no longer applies. */
+  stops?: Array<{
+    id: number;
+    agent_id: string;
+    created_at: number;
+    kind: string;
+  }>;
   activity: ActivityEvent[];
   permissions: Permission[];
   decisions: Decision[];

@@ -236,6 +236,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       });
     }
     if (error instanceof KonfabError) {
+      if (error.code === "session_stopped") {
+        const body = request.body as { session_id?: unknown } | null;
+        const key = request.headers["x-konfab-request-id"];
+        if (typeof body?.session_id === "string")
+          service.stops.refusedCall(
+            body.session_id,
+            typeof key === "string" ? key : undefined,
+          );
+      }
       return reply
         .code(error.statusCode)
         .send({ code: error.code, message: error.message });
@@ -547,12 +556,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const body = waitBody.parse(request.body);
     if (body.call_id)
       service.beginObservedWait(agentId, body.session_id, body.call_id);
-    return service.waitForTurn(
+    const result = await service.waitForTurn(
       agentId,
       body.session_id,
       body.first,
       body.timeout_seconds * 1000,
     );
+    if (result.status === "closed" && result.reason === "stopped")
+      service.stops.answeredWait(body.session_id, body.call_id);
+    return result;
+  });
+
+  // The connector has an answer that says "stop". It changes nothing else.
+  app.post("/agent/stop-received", async (request) => {
+    requireAgent(request);
+    const body = z.object(session).parse(request.body);
+    service.stops.received(body.session_id);
+    return { ok: true };
   });
 
   app.post("/agent/wait-finished", async (request) => {
@@ -1901,6 +1921,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.delete("/api/rooms/:id/agents/:agent/rejoin", async (request) => {
     const { id, agent } = rejoinParams.parse(request.params);
     service.rejoin.cancel(id, agent);
+    return { ok: true };
+  });
+
+  // The lead stops one agent in a room, or keeps it. Agents have no route.
+  app.post("/api/rooms/:id/agents/:agent/stop", async (request) => {
+    const { id, agent } = rejoinParams.parse(request.params);
+    service.stops.ask(id, agent);
+    return { ok: true };
+  });
+  app.delete("/api/rooms/:id/agents/:agent/stop", async (request) => {
+    const { id, agent } = rejoinParams.parse(request.params);
+    service.stops.keep(id, agent);
     return { ok: true };
   });
 

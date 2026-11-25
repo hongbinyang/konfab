@@ -25,6 +25,7 @@ import { MessageInput } from "./message-editor/MessageInput";
 import type { EditorHandle } from "./message-editor/RichEditor";
 import { PhoneNotices, useActivity } from "./PhoneNotices";
 import { RejoinAgents, RejoinControls } from "./Rejoin";
+import { StopControls } from "./Stop";
 import { RichText } from "./RichText";
 import {
   request,
@@ -59,6 +60,7 @@ const STATE_LABELS: Record<AgentState, string> = {
   waiting_approval: "Waiting for approval",
   window_ended: "Run window ended",
   on_break: "On break",
+  stopped: "Stopped",
   not_responding: "No contact",
 };
 
@@ -468,6 +470,7 @@ function Room({
         0);
   const passes = state.passes ?? [];
   const returns = state.returns ?? [];
+  const stops = state.stops ?? [];
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic);
@@ -481,7 +484,7 @@ function Room({
   );
   const listRef = useRef<HTMLOListElement>(null);
   const atBottom = useRef(true);
-  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${returns.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
+  const timelineKey = `${messages.at(-1)?.id}-${passes.at(-1)?.id}-${returns.at(-1)?.id}-${stops.at(-1)?.id}-${state.permissions.at(-1)?.id}`;
   // On a time tie, a message comes first, because a pass follows what it answers.
   const timeline = useMemo(
     () =>
@@ -492,12 +495,17 @@ function Room({
         })),
         ...passes.map((pass) => ({ kind: "pass" as const, ...pass })),
         ...returns.map((item) => ({ kind: "return" as const, ...item })),
+        ...stops.map(({ kind, ...item }) => ({
+          kind: "stop" as const,
+          what: kind,
+          ...item,
+        })),
         ...state.permissions.map((permission) => ({
           kind: "permission" as const,
           ...permission,
         })),
       ].sort((a, b) => a.created_at - b.created_at),
-    [messages, passes, returns, state.permissions],
+    [messages, passes, returns, stops, state.permissions],
   );
   const [olderActivity, setOlderActivity] = useState<ActivityEvent[]>([]);
   const [hasOlderActivity, setHasOlderActivity] = useState(true);
@@ -1020,6 +1028,14 @@ function Room({
             <li key={`pass-${item.id}`} className="pass">
               {displayName(item.agent_id)} passed
               {item.reason ? `: ${item.reason}` : ""}
+              <span className="time">{formatTime(item.created_at)}</span>
+            </li>
+          ) : item.kind === "stop" ? (
+            <li key={`stop-${item.id}`} className="pass">
+              {displayName(item.agent_id)}{" "}
+              {item.what === "stopped"
+                ? "was stopped"
+                : "joined again; your Stop no longer applies"}
               <span className="time">{formatTime(item.created_at)}</span>
             </li>
           ) : item.kind === "return" ? (
@@ -1955,6 +1971,14 @@ function RoomRouting({ state, act }: { state: RoomState; act: Act }) {
   if (!routing) return null;
   const name = (id: string) =>
     state.agents.find((agent) => agent.id === id)?.display_name ?? id;
+  const stopped = (id: string) => {
+    const agent = state.agents.find((item) => item.id === id);
+    return agent?.state === "stopped"
+      ? " · stopped"
+      : agent?.stop?.state === "asked"
+        ? " · stopping"
+        : "";
+  };
   return (
     <section
       className={`routing-status${routing.no_continuation ? " needs-routing" : ""}`}
@@ -1990,7 +2014,7 @@ function RoomRouting({ state, act }: { state: RoomState; act: Act }) {
               {routing.queued
                 .map(
                   (item) =>
-                    `${name(item.agent_id)} (queued${item.repair_source_message_id !== null ? ` · repair for #${item.repair_source_message_id}` : ""}${!routing.eligible_agents.includes(item.agent_id) ? " · needs rejoin" : ""})`,
+                    `${name(item.agent_id)} (queued${item.repair_source_message_id !== null ? ` · repair for #${item.repair_source_message_id}` : ""}${stopped(item.agent_id) || (!routing.eligible_agents.includes(item.agent_id) ? " · needs rejoin" : "")})`,
                 )
                 .join(" → ")}
             </p>
@@ -2112,7 +2136,7 @@ function RunCountdown({ agent }: { agent: RoomAgent }) {
       }
     >
       {!snapshot.clock
-        ? `On break · ${formatRemaining(remaining).replace(/left$/, "saved")}`
+        ? formatRemaining(remaining).replace(/left$/, "saved")
         : remaining <= 0 && !paused
           ? "Run window ended"
           : `${paused ? "Paused · " : ""}${formatRemaining(remaining)}`}
@@ -3038,6 +3062,7 @@ function AgentDetails({
   return (
     <>
       <ContactNotice agent={agent} />
+      <StopControls roomId={roomId} agent={agent} act={act} />
       <RejoinControls roomId={roomId} agent={agent} act={act} />
       {agent.working && (
         <p className={workingStale ? "warning-text" : "muted"}>

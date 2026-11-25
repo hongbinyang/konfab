@@ -60,7 +60,7 @@ describe("upgrading roles to skills", () => {
     try {
       // The skill upgrade, then what came after it.
       expect(db.pragma("user_version", { simple: true })).toBe(
-        SKILL_UPGRADE_VERSION + 4,
+        SKILL_UPGRADE_VERSION + 5,
       );
       // The colliding names get suffixes; the unrelated skill and the stray folder stay.
       expect(pins(db, "claude")).toEqual([

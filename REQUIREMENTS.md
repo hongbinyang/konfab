@@ -552,3 +552,22 @@ Verified once in the app's own window: conversation open, turn ended normally (2
 | RC10 | MUST | The model's part is an instruction, not a boundary; the documentation says so. The manual prompts work in every state. |
 
 Verified by hand with the watcher in the app's own window, once (2026-11-24): the agent had ended its own turn, and the lead's click brought it back. Verified with a plain waiting command (2026-11-23): the app started a conversation again whose turn the agent had ended, after 2 and after 32 minutes; after Stop it started it as well, and the agent stayed out. Not yet verified: an app that was closed, compaction in between, usage limits, sleep, what a resting watcher costs, and whether the app asks for each command.
+
+## 25. Stopping one agent
+
+**Status:** Implemented on `feature/stop-agent`; in review. Design: [Stop button for one agent](docs/design/stop-agent.md).
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| ST1 | MUST | On an agent's own card, and nowhere else, the lead can ask that agent to leave the room's loop: at once when it waits, after a running turn, or at its next wait when it reported work outside a turn. Agents have no route to it. |
+| ST2 | MUST | Nothing that runs in the app is interrupted, and the page says so. The name doesn't promise more: "Stop agent", "Stop after turn", "Stop after this work". |
+| ST3 | MUST | The end of a turn and the stop are one transaction, and the answer of the post, pass or wait says "stop", also when it is repeated after a lost answer. |
+| ST4 | MUST | Asked, answered and received by its connector are different states. "Stopped" is only shown for received. No text says that the model read it, that its app has stopped or that it uses no allowance. |
+| ST5 | MUST | A session that is asked to stop gets no further turn and holds nobody up. Nothing queued is lost, doubled or given to somebody else. |
+| ST6 | MUST | Until it has stopped, the lead can keep it. Rejoin isn't offered while a stop is asked. |
+| ST7 | MUST | Later calls of a stopped session are refused, change nothing and count as no contact; the card says that it called. |
+| ST8 | MUST | The rest of the run window is kept once, however often it is stopped and joins again. |
+| ST9 | MUST | A join while a stop is asked ends that stop, and the card, the room and the activity say so without saying who wanted it. |
+| ST10 | MUST | While a stop is asked, locks stay until their own end, also when nothing is heard. |
+
+Not yet verified: both apps' own windows.

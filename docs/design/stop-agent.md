@@ -1,6 +1,6 @@
 # Stop button for one agent
 
-**Status:** reviewed; being built. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
+**Status:** built on `feature/stop-agent`; in review. The test by hand is still to be done. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
 
 ## Goal
 
@@ -50,7 +50,7 @@ No question is asked first: it can be undone (**Keep in room** or **Rejoin**). W
 5. **Any later call** of that session is refused with the same instruction, changes nothing and sets `stop_called_at`. It doesn't count as contact. Not counted as a call: `wait-finished`, `stop-received`, a repeated request with the same number (a lost answer), and the rest of the same held wait.
 6. **Repeats after a lost answer:** the repeated post or pass finds its turn completed and is answered as before, with "stop" added from the session's state, not from the stored answer. So it is right whether the stop came before or after. A repeated wait is answered `closed` again.
 
-During a turn, the answers of `report_status` and `wait_for_turn` say once that the lead asked for a stop after this turn. That is only a hint, so that an agent doesn't plan further work; nothing relies on it.
+During a turn, the answers of `report_status` and `wait_for_turn` say that the lead asked for a stop after this turn. That is only a hint, so that an agent doesn't plan further work; nothing relies on it.
 
 ### Coming back
 
@@ -75,18 +75,18 @@ During a turn, the answers of `report_status` and `wait_for_turn` say once that 
 
 All of this is in the transactions that exist; only conditions are added. A session with `stop_asked_at` **gets no further turn** and **doesn't hold the queue**.
 
-| Situation                                        | What happens                                                                                                                                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| It has a queued turn                             | the row stays as it is (its number, reason, notices). New messages join it, as today: one queued turn per agent                                                                      |
-| Others behind it                                 | `activateNext` passes over a queued turn whose agent has no live session; "asked" counts as that. Their order among themselves stays                                                 |
-| It comes back, or is kept                        | its row has its old number, so it is next when the running turn ends. Nothing that others have started is taken back                                                                 |
-| Parallel answers                                 | each has its own row. Running ones finish; the session ends with the last. Queued ones stay queued for it. The limit of parallel turns counts running ones only, so it blocks nobody |
-| A format's step is its                           | the step's row stays queued, and **the format waits**, also when others are queued outside the format, as today. Skip is the lead's                                                  |
-| A format reaches its step while _asked_          | the row is made and waits                                                                                                                                                            |
-| Its turn times out while _asked_                 | queued again exactly as today, once. The session stays _asked_; it isn't ended, so a long command keeps its locks                                                                    |
-| A join while its turn runs                       | queued again as today, and the new session gets it                                                                                                                                   |
-| `next: self`, a hand-off or a mention to it      | queued as always                                                                                                                                                                     |
-| `hand_off`, automatic continuation, the watchdog | treat it as an agent that needs a rejoin                                                                                                                                             |
+| Situation                                        | What happens                                                                                                                                                                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| It has a queued turn                             | the row stays as it is (its number, reason, notices). New messages join it, as today: one queued turn per agent                                                                                                                 |
+| Others behind it                                 | `activateNext` passes over a queued turn whose agent has no live session; "asked" counts as that. Their order among themselves stays                                                                                            |
+| It comes back, or is kept                        | its row has its old number, so it is next when the running turn ends. Nothing that others have started is taken back                                                                                                            |
+| Parallel answers                                 | each has its own row. Running ones finish; the session ends with the last. Queued ones stay queued for it. The limit of parallel turns counts running ones only, so it blocks nobody                                            |
+| A format's step is its                           | the step's row stays queued, and **the format waits**, also when others are queued outside the format, as today. Skip is the lead's                                                                                             |
+| A format reaches its step while _asked_          | the row is made and waits                                                                                                                                                                                                       |
+| Its turn times out while _asked_                 | as today: an ordinary turn is skipped, and its one automatic retry waits until the agent is back; a parallel or format turn is queued again, once. The session stays _asked_; it isn't ended, so a long command keeps its locks |
+| A join while its turn runs                       | queued again as today, and the new session gets it                                                                                                                                                                              |
+| `next: self`, a hand-off or a mention to it      | queued as always                                                                                                                                                                                                                |
+| `hand_off`, automatic continuation, the watchdog | treat it as an agent that needs a rejoin                                                                                                                                                                                        |
 
 Stop and **Keep in room** are immediate transactions on the same database as `activateNext`, `activateParallel`, `finishTurn` and `abandonAndRequeue`: whichever comes first decides, and each looks at `stop_asked_at` and the turns inside its own transaction.
 
@@ -122,7 +122,7 @@ Everything takes the same write lock, so one comes first.
 | post or pass                        | Keep in room                                                          | too late (409): "It has stopped; use Rejoin"                                                                          |
 | Stop during reported work           | its next `wait_for_turn`                                              | no turn: told to stop                                                                                                 |
 | Stop during reported work           | the report goes stale, or contact is lost                             | still _asked_, locks kept; the card says that nothing is heard; Rejoin isn't offered, Keep in room and the prompt are |
-| Stop during a turn                  | the turn times out                                                    | queued again, still _asked_; told at its next call                                                                    |
+| Stop during a turn                  | the turn times out                                                    | as today (see the queue), still _asked_; told at its next call                                                        |
 | Stop during a turn                  | pause or resume                                                       | no effect on each other; a paused room can be left                                                                    |
 | Stop during a turn                  | break                                                                 | the session ends once, with the break's reason; the room is on a break. Rejoin is as in a break                       |
 | break                               | Stop                                                                  | not offered (the agent is leaving already); the call is 409                                                           |
@@ -144,7 +144,7 @@ Everything takes the same write lock, so one comes first.
 - Room header and participants: "Codex: Stopped". The count of working agents leaves it out.
 - The room shows "Codex was stopped" and, as today, "Codex is back".
 - Activity: "stop asked", "stop undone", "stopped", "called after stop", "joined after a stop".
-- Export and agents' messages: nothing. Other agents see it only where they already see who can be handed work.
+- Agents' messages: nothing. An export lists it with the room's other activity. Other agents see it only where they already see who can be handed work.
 
 ## Not included
 

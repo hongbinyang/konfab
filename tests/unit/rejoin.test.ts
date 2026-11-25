@@ -666,7 +666,10 @@ describe("asking agents to rejoin", () => {
     try {
       const old = openDatabase(path);
       old.exec(
-        `DROP TABLE watchers; DROP TRIGGER watcher_token_changed; DROP TRIGGER watcher_agent_archived;
+        `ALTER TABLE sessions DROP COLUMN stop_asked_at; ALTER TABLE sessions DROP COLUMN stop_answered_at;
+         ALTER TABLE sessions DROP COLUMN stop_received_at; ALTER TABLE sessions DROP COLUMN stop_called_at;
+         ALTER TABLE observed_waits DROP COLUMN stopped;
+         DROP TABLE watchers; DROP TRIGGER watcher_token_changed; DROP TRIGGER watcher_agent_archived;
          ALTER TABLE sessions DROP COLUMN route; ALTER TABLE rejoin_requests DROP COLUMN route;
          ALTER TABLE sessions DROP COLUMN first_wait_at; PRAGMA user_version = 35`,
       );

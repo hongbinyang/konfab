@@ -3,7 +3,7 @@ import type { RoomAgent } from "./api";
 
 export type Unreachable = {
   agent_id: string;
-  state: "not_responding" | "not_joined" | "window_ended";
+  state: "not_responding" | "not_joined" | "window_ended" | "stopped";
   last_contact_at: number | null;
 };
 
@@ -108,6 +108,7 @@ export function ContactNotice({
 
 function reason(item: Unreachable): string {
   if (item.state === "not_joined") return "hasn't joined this room";
+  if (item.state === "stopped") return "is stopped";
   if (item.state === "window_ended")
     return "has reached the end of its run window";
   return item.last_contact_at === null
