@@ -34,7 +34,14 @@ test("the lead can switch phone notices, and only a person's actions count as ac
     await page.waitForTimeout(300);
     expect(pings).toBe(0);
     await openLead();
-    await expect(section).toContainText("npm run setup -- --telegram");
+    await section.getByRole("button", { name: "Set up…" }).click();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Phone notices" }),
+    ).toBeVisible();
+    // A reload starts counting again.
+    await page.reload();
+    pings = 0;
+    await openLead();
     await page.keyboard.press("Shift");
     await expect.poll(() => pings).toBe(1);
 

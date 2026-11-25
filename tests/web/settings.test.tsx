@@ -33,7 +33,7 @@ describe("the Settings page", () => {
   let answer: (url: string) => [number, object];
   const dirty = vi.fn();
   const open = async (first: "phone" | "rejoin" = "rejoin") => {
-    render(<Settings first={first} onDirtyChange={dirty} />);
+    render(<Settings at={{ section: first }} onDirtyChange={dirty} />);
     await screen.findByRole("heading", { level: 2, name: "Settings" });
   };
   const writes = () =>
@@ -129,7 +129,7 @@ describe("the Settings page", () => {
         .getAttribute("aria-current"),
     ).toBe("page");
     expect(screen.getByLabelText("phone_notices.away_minutes")).toBeTruthy();
-    expect(await screen.findByText(/not set up/)).toBeTruthy();
+    expect(await screen.findByText(/Not set up/)).toBeTruthy();
   });
 
   it("saves a switch by its click, after a question where it needs one", async () => {

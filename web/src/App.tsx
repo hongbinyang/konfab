@@ -106,6 +106,10 @@ export function App() {
   const [libraryDirty, setLibraryDirty] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
+  // Another object each time, so that the section is shown again.
+  const [settingsAt, setSettingsAt] = useState<{ section: "phone" | "rejoin" }>(
+    { section: "phone" },
+  );
   const [signedOut, setSignedOut] = useState(false);
   const [pageConnected, setPageConnected] = useState(false);
   useActivity();
@@ -281,7 +285,7 @@ export function App() {
         {showLibrary ? (
           <Library roomId={selectedId} onDirtyChange={setLibraryDirty} />
         ) : showSettings ? (
-          <Settings onDirtyChange={setSettingsDirty} />
+          <Settings at={settingsAt} onDirtyChange={setSettingsDirty} />
         ) : room ? (
           <Room
             key={room.room.id}
@@ -302,6 +306,12 @@ export function App() {
         room={room}
         act={act}
         pageConnected={pageConnected}
+        onPhoneSetUp={() => {
+          if (!showSettings && !mayLeave()) return;
+          setSettingsAt({ section: "phone" });
+          setShowSettings(true);
+          setShowLibrary(false);
+        }}
       />
     </div>
   );
@@ -2400,11 +2410,13 @@ function Panel({
   room,
   act,
   pageConnected,
+  onPhoneSetUp,
 }: {
   overview: Overview;
   room: RoomState | null;
   act: Act;
   pageConnected: boolean;
+  onPhoneSetUp: () => void;
 }) {
   const [preferredOpen, setPanelOpen] = usePanelPreference(
     "konfab.ui.v1.panel",
@@ -2484,7 +2496,7 @@ function Panel({
             {pageConnected ? "Page connected" : "Page disconnected"}
           </p>
           <NotificationSetting />
-          <PhoneNotices />
+          <PhoneNotices onSetUp={onPhoneSetUp} />
         </CollapsibleSection>
         {overview.permissions.length > 0 && (
           <CollapsibleSection

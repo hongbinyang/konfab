@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { Modal } from "./Modal";
-import { PhoneNotices } from "./PhoneNotices";
+import { PhoneSetup } from "./PhoneSetup";
 import { request, RequestError } from "./api";
 
 type Value = string | number | boolean | null;
@@ -102,15 +102,17 @@ type Draft = { field: string; base: Value };
 
 const toField = (value: Value) => (value === null ? "" : String(value));
 
+const FIRST = { section: "phone" } as const;
+
 export function Settings({
-  first = "phone",
+  at = FIRST,
   onDirtyChange,
 }: {
-  first?: "phone" | "rejoin";
+  at?: { section: "phone" | "rejoin" };
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const [view, setView] = useState<View | null>(null);
-  const [section, setSection] = useState<"phone" | "rejoin">(first);
+  const [section, setSection] = useState<"phone" | "rejoin">(at.section);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
@@ -136,7 +138,7 @@ export function Settings({
     const timer = setInterval(() => void load(), 5_000);
     return () => clearInterval(timer);
   }, [load]);
-  useEffect(() => setSection(first), [first]);
+  useEffect(() => setSection(at.section), [at]);
   const changed = Object.entries(drafts).filter(([key, { field }]) => {
     const setting = view?.settings.find((item) => item.key === key);
     return setting && toField(setting.saved) !== field.trim();
@@ -253,7 +255,7 @@ export function Settings({
         <p className="sr-only" role="status">
           {saved}
         </p>
-        {section === "phone" && <PhoneNotices />}
+        {section === "phone" && <PhoneSetup />}
         {rows.map((setting) => (
           <Row
             key={setting.key}

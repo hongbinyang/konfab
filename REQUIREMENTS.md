@@ -591,7 +591,7 @@ Not yet verified by hand: opening each app from the page, the agent's own answer
 
 ## 27. Settings in the page and on the command line
 
-**Status:** First phase implemented (Rejoin, the options of phone notices, and the command line for all settings in `config.yaml`). Design: [Settings](docs/design/settings.md). Everything the setup commands do, and all settings in the page, come with later phases.
+**Status:** First phase implemented (Rejoin, the options of phone notices, and the command line for all settings in `config.yaml`), and setting up phone notices in the page, except pasting the token there ([plan](docs/design/settings-phone-setup.md)). Design: [Settings](docs/design/settings.md). Everything the setup commands do, and all settings in the page, come with later phases.
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
@@ -603,4 +603,9 @@ Not yet verified by hand: opening each app from the page, the agent's own answer
 | SE6 | MUST | Turning Rejoin or the watchers off closes open requests and tells nothing more to a watcher; what was told before is documented. |
 | SE7 | MUST | Nothing runs another Codex command before the lead's yes to exactly that file, also after it was changed by hand or has changed. One that was set before counts as agreed once. Its identity is looked at again before each run. |
 | SE8 | MUST | The routes need the lead's session and this page's own origin, and refuse an agent's token and unknown or not-yet-editable settings. |
-| SE9 | MUST | Existing files work unchanged, `npm run setup` does what it did, and going back to an earlier version works. |
+| SE9 | MUST | Existing files work unchanged, `npm run setup` does what it did, and going back to an earlier version works, except that phone notices that were set up with this one need a setup there. |
+| SE10 | MUST | Phone notices are set up, tested, turned on and off, and removed in the page and on the command line. The token is in no request or answer of the page, log, event, export, backup, note or argument. |
+| SE11 | MUST | Each setup stores its token in an item of its own that is never replaced. It comes into use only by its own setup's one commit, which is refused if the setup it began with isn't the current one. Nothing of the earlier setup is touched before. |
+| SE12 | MUST | An item is deleted only if it can't come into use again, and never while it can't be told what is in use. Only macOS's own "not found" means that nothing is there. What isn't known is shown, and nothing is deleted or asked of the Keychain by itself at a start. |
+| SE13 | MUST | Tokens of earlier versions, which another Konfab folder may use, are never deleted without a question. |
+| SE14 | MUST | A notice or test is sent with the chat, bot and token of one setup that is still the current one and on, or not at all. Reading a token never holds up the server. |

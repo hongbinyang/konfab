@@ -152,12 +152,7 @@ export class PhoneSetup {
   view(): SetupView | null {
     const current = this.live();
     if (!current) return null;
-    if (
-      current.step === "token" &&
-      current.way === "terminal" &&
-      !current.busy &&
-      !current.item
-    )
+    if (current.step === "token" && current.way === "terminal" && !current.busy)
       void this.look(current);
     return {
       id: current.id,

@@ -116,14 +116,20 @@ Press the same keys again to remove a format (for a link, choose **Remove link**
 
 Off unless you set it up. While you are away from the Konfab page, Konfab can send short notices to your own Telegram chat: an agent mentioned @lead, a permission request is waiting, or a room has stopped. They never contain message text, files, links or agent names. Telegram carries them, so it sees them and when they are sent.
 
-1. In Telegram, write to **@BotFather**, send `/newbot`, and make a bot **only for Konfab**.
-2. Run `npm run setup -- --telegram` and paste the token when asked. It isn't shown, and macOS keeps it in your Keychain (elsewhere, set `KONFAB_TELEGRAM_TOKEN` for setup and the server from a file only you can read). Never post it in a room.
-3. Setup shows a code to send to the bot from your phone, so it knows the chat is yours. It asks before contacting Telegram, before sending a test and before turning notices on.
+In Telegram, write to **@BotFather**, send `/newbot`, and make a bot **only for Konfab**. Then set it up in the page or in the terminal; it is the same setup.
+
+- **In the page:** **⚙ Settings → Phone notices → Set up…** (also under **Lead** in the right panel). Its four steps: the bot, a code to send from your phone so that Konfab knows the chat is yours, a test, and **Turn on**. For the token the page shows a command with a code, `npm run setup -- --telegram --token-only …`: macOS asks for the token in the terminal and keeps it in your Keychain, and the page goes on by itself. The token never goes through the page, and can't be pasted there for now.
+- **In the terminal:** `npm run setup -- --telegram`. It asks before contacting Telegram, before sending a test and before turning notices on.
+- **On other systems than macOS** there is no Keychain: set `KONFAB_TELEGRAM_TOKEN` for setup and the server, from a file only you can read. The page then uses that.
+
+Never post the token in a room. Until the last step, an earlier setup goes on working. A setup in the page ends after 15 minutes, with **Cancel**, or when Konfab restarts.
 
 - **When:** after 10 minutes without a click, key or scroll on the page; at most one notice per room in 10 minutes and 20 a day. Change this in **⚙ Settings → Phone notices**, or with `npm run config` (see [Configuration](#configuration)); it is in use at once.
-- **Turn off:** the switch under **Lead** in the right panel, or in **⚙ Settings → Phone notices**. `npm run setup -- --telegram --remove` removes the chat and the stored token; tell @BotFather to end the bot.
+- **Turn off:** the switch under **Lead** in the right panel, or in **⚙ Settings → Phone notices**. **Remove** there, or `npm run setup -- --telegram --remove`, stops them, forgets the chat and deletes the stored token; tell @BotFather to end the bot. On the command line there are also `--status`, `--on`, `--off` and `--test`.
+- **Tokens that aren't used:** what may be left in your Keychain after a setup that ended early is shown with **Remove it**; Konfab doesn't delete it by itself. A token from before this version (`konfab-telegram-token-a` or `-b`) may also be used by another Konfab folder of yours, so it is only removed after a question. Konfab can't promise that a token is erased from memory, or that a removal that macOS didn't confirm has worked.
+- **Going back to an earlier Konfab** after setting up with this one: it doesn't know the new place of the token, sends nothing, and needs a setup of its own.
 - **One way:** after setup Konfab reads nothing from Telegram; writing to the bot does nothing.
-- **Who can reach the token:** programs running as you that macOS lets read that Keychain item, which can include an agent that runs commands. With it, someone could send as this bot, but not use your Telegram account.
+- **Who can reach the token:** programs running as you that macOS lets read that Keychain item, which can include an agent that runs commands. With it, someone could send as this bot, but not use your Telegram account. The same goes for Konfab's memory and the page's session.
 
 ## 5. Skills
 

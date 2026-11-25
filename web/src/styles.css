@@ -1828,3 +1828,96 @@ input.switch[type="checkbox"]:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.phone-card {
+  margin: 4px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.phone-card h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.phone-card h3:focus {
+  outline: none;
+}
+
+.phone-card h3 .muted {
+  font-weight: 400;
+}
+
+.phone-card p {
+  margin: 8px 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.phone-card p.muted {
+  font-size: 13px;
+}
+
+.phone-steps {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.phone-steps i {
+  flex: 1;
+  height: 4px;
+  border-radius: 9px;
+  background: var(--border);
+}
+
+.phone-steps i.on {
+  background: var(--accent);
+}
+
+.phone-card .phone-code {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface);
+  font:
+    600 18px ui-monospace,
+    monospace;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+.phone-command,
+.phone-actions,
+.phone-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-command code {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.phone-buttons {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.phone-setup button:not(.link, .quiet) {
+  padding: 5px 11px;
+  font-size: 13px;
+}
+
+.phone-setup button.link {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.phone-setup .left-over {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

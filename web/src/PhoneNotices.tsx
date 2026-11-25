@@ -1,11 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { request } from "./api";
 
-type View = {
+export type PhoneSetupView = {
+  id: string;
+  way: "terminal" | "env";
+  step: "token" | "bot" | "code" | "chat" | "test" | "finish";
+  command: string | null;
+  busy: boolean;
+  again: boolean;
+  bot: string | null;
+  code: string | null;
+  seconds_left: number | null;
+  chat_name: string | null;
+  arrived: boolean | null;
+  problem: string | null;
+};
+export type PhoneView = {
   state: "not_set_up" | "off" | "on";
   chat_name: string | null;
   away_minutes: number;
   problem: string | null;
+  /** Absent from older servers. */
+  setup?: PhoneSetupView | null;
+  ways?: ("terminal" | "env")[];
+  left_over?: { item: string; at: number; unsure: boolean; old: boolean }[];
 };
 
 /** Tells Konfab that someone is really using the page, at most once a minute. */
@@ -28,35 +46,69 @@ export function useActivity(): void {
   }, []);
 }
 
-/** The lead's switch for notices through Telegram. */
-export function PhoneNotices() {
-  const [view, setView] = useState<View | null>(null);
+/**
+ * The lead's view of it, looked at more often while a setup is under way.
+ * Answers from before a change aren't shown after it.
+ */
+export function usePhone() {
+  const [view, setView] = useState<PhoneView | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const changes = useRef(0);
   const load = useCallback(() => {
-    request<View>("/api/phone-notices").then(setView, () => undefined);
+    const at = changes.current;
+    request<PhoneView>("/api/phone-notices").then(
+      (next) => {
+        if (at === changes.current) setView(next);
+      },
+      () => undefined,
+    );
   }, []);
+  const underWay = Boolean(view?.setup);
   useEffect(() => {
     load();
-    const timer = setInterval(load, 60_000);
+    const timer = setInterval(load, underWay ? 2_000 : 60_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, underWay]);
+  const send = useCallback(
+    async (path: string, body: object, method = "POST"): Promise<boolean> => {
+      changes.current += 1;
+      setBusy(true);
+      setError("");
+      try {
+        const next = await request<PhoneView>(`/api/phone-notices${path}`, {
+          method,
+          body,
+        });
+        changes.current += 1;
+        setView(next);
+        return true;
+      } catch (caught) {
+        changes.current += 1;
+        setError(
+          caught instanceof Error ? caught.message : "That didn't work.",
+        );
+        load();
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load],
+  );
+  return { view, error, busy, send };
+}
+
+type Phone = ReturnType<typeof usePhone>;
+
+/** The lead's switch for notices through Telegram. */
+export function PhoneSwitch({ phone }: { phone: Phone }) {
+  const { view, error, busy, send } = phone;
   if (!view) return null;
-  const set = (enabled: boolean) => {
-    setBusy(true);
-    setError("");
-    request<View>("/api/phone-notices", { method: "PUT", body: { enabled } })
-      .then(setView, () => setError("That couldn't be changed. Try again."))
-      .finally(() => setBusy(false));
-  };
+  const set = (enabled: boolean) => void send("", { enabled }, "PUT");
   return (
-    <section className="phone-notices" aria-label="Phone notices">
-      {view.state === "not_set_up" ? (
-        <p className="muted">
-          Phone notices (Telegram): not set up. Run{" "}
-          <code>npm run setup -- --telegram</code>.
-        </p>
-      ) : (
+    <>
+      {view.state !== "not_set_up" && (
         <>
           <label>
             <input
@@ -92,6 +144,31 @@ export function PhoneNotices() {
           {error}
         </p>
       )}
+    </>
+  );
+}
+
+/** Under Lead, in the right panel. */
+export function PhoneNotices({ onSetUp }: { onSetUp?: () => void }) {
+  const phone = usePhone();
+  if (!phone.view) return null;
+  return (
+    <section className="phone-notices" aria-label="Phone notices">
+      {phone.view.state === "not_set_up" && (
+        <p className="muted">
+          Phone notices (Telegram): not set up.{" "}
+          {phone.view.ways && onSetUp ? (
+            <button type="button" className="quiet" onClick={onSetUp}>
+              Set up…
+            </button>
+          ) : (
+            <>
+              Run <code>npm run setup -- --telegram</code>.
+            </>
+          )}
+        </p>
+      )}
+      <PhoneSwitch phone={phone} />
     </section>
   );
 }

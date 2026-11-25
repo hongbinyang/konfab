@@ -84,7 +84,11 @@ async function waitForOwnServer(
 // Starts a built Konfab server in a throwaway home with a fake HOME, so it
 // never touches ~/.konfab, desktop-app settings or real credentials.
 export async function startKonfab(
-  options: { port?: number; timeoutMs?: number } = {},
+  options: {
+    port?: number;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+  } = {},
 ): Promise<KonfabServer> {
   const root = mkdtempSync(join(tmpdir(), "konfab-e2e-"));
   let child: ChildProcess | undefined;
@@ -125,6 +129,7 @@ echo "Queued message 11111111-2222-7333-8444-555555555555 for thread \${2#--thre
       KONFAB_GITHUB_TOKEN: SYNTHETIC_GITHUB_TOKEN,
       // Not a token, so a real one in the Keychain is never used.
       KONFAB_TELEGRAM_TOKEN: "konfab-e2e-no-token",
+      ...options.env,
     };
     execFileSync("node", ["dist/cli/setup.js", "--manual"], {
       env,

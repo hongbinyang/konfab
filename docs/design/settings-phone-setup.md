@@ -1,6 +1,6 @@
 # Settings, phase 2: setting up phone notices in the page
 
-**Status:** reviewed; parts A and B are being built with stand-ins only. No Keychain test was run for it, and K1 to K7 wait for the lead. It makes the part "Phone notices in the page" of [Settings](settings.md) concrete, and changes three things there (marked **Changed**).
+**Status:** reviewed; parts A and B are built, with stand-ins only; Paste here (C and D) isn't. No Keychain test was run for it, and K1 to K7 wait for the lead. It makes the part "Phone notices in the page" of [Settings](settings.md) concrete, and changes three things there (marked **Changed**).
 
 ## What the lead gets
 

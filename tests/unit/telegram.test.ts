@@ -964,6 +964,89 @@ describe("phone notices", () => {
     expect(telegram.sent()).toHaveLength(1);
   });
 
+  it("sends with one setup's chat, bot and token, or nothing, when it changes while the token is read", async () => {
+    const one = readSettings(home)!;
+    for (const change of [
+      () => writeSettings(home, { ...one, setup_id: "two", chat_id: 5 }),
+      () => writeSettings(home, { ...one, enabled: false }),
+      () => rmSync(settingsPath(home)),
+      // Off and on again: what came while it was off isn't sent later.
+      () => {
+        writeSettings(home, { ...one, enabled: false });
+        writeSettings(home, one);
+      },
+    ]) {
+      telegram.calls = [];
+      writeSettings(home, one);
+      let go!: () => void;
+      const held = new Promise<void>((done) => (go = done));
+      const slow = new TelegramNotices({
+        db,
+        home,
+        options: {
+          away_minutes: 10,
+          quiet_from: null,
+          quiet_to: null,
+          room_names: false,
+          room_every_minutes: 1,
+          max_per_day: 20,
+        },
+        token: async () => {
+          await held;
+          return { state: "found", token: TOKEN };
+        },
+        client: () => client(300),
+        now: () => now,
+      });
+      await slow.tick();
+      mention();
+      now += 11 * MINUTE;
+      const pass = slow.tick();
+      await new Promise((done) => setTimeout(done, 10));
+      change();
+      go();
+      await pass;
+      expect(telegram.calls).toEqual([]);
+    }
+  });
+
+  it("doesn't ask macOS again for ten minutes when it doesn't give the token", async () => {
+    let reads = 0;
+    let state: "unknown" | "found" = "unknown";
+    const look = new TelegramNotices({
+      db,
+      home,
+      options: {
+        away_minutes: 10,
+        quiet_from: null,
+        quiet_to: null,
+        room_names: false,
+        room_every_minutes: 10,
+        max_per_day: 20,
+      },
+      token: async () => {
+        reads += 1;
+        return state === "found"
+          ? { state, token: TOKEN }
+          : { state: "unknown" };
+      },
+      client: () => client(300),
+      now: () => now,
+      warn: (text) => warnings.push(text),
+    });
+    await look.tick();
+    mention();
+    await later(11, look);
+    await later(5, look);
+    expect(reads).toBe(1);
+    expect(look.view().problem).toBe("macOS didn't give the bot token.");
+    expect(telegram.calls).toEqual([]);
+    state = "found";
+    await later(6, look);
+    expect(telegram.sent()).toHaveLength(1);
+    expect(look.view().problem).toBeNull();
+  });
+
   it("ignores a broken or group setting, and a broken record of what was sent", async () => {
     writeFileSync(statePath(home), "{");
     mention();
