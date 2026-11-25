@@ -1,6 +1,6 @@
 # Settings, phase 2: setting up phone notices in the page
 
-**Status:** plan for review. Nothing is built, and no Keychain test was run for it. It makes the part "Phone notices in the page" of [Settings](settings.md) concrete, and changes three things there (marked **Changed**).
+**Status:** reviewed; parts A and B are being built with stand-ins only. No Keychain test was run for it, and K1 to K7 wait for the lead. It makes the part "Phone notices in the page" of [Settings](settings.md) concrete, and changes three things there (marked **Changed**).
 
 ## What the lead gets
 
@@ -41,7 +41,17 @@ Step 1 always has two ways; step 2 to 4 are the same:
 
 If a trial fails, **Paste here** isn't built, and everything else is. If storing fails on somebody's computer (locked, refused, a limit, an unknown result), step 4 says so, with **Try again** and **In the terminal**, and the earlier setup works on.
 
-`--token-only` stores into a new item and writes a note (item, bot number, time; no token). The page takes a note that is less than 15 minutes old, and reads that item once.
+**Who owns a note.** Notes are in this Konfab folder only (`telegram-notes.json`, private), so another folder never sees them. The page's setup shows a command with a code of its own: `npm run setup -- --telegram --token-only <code>`. The note is made for that code. Only the setup with that code can claim it: in the lock, once, ready, less than 15 minutes old, and not claimed before. A second setup has another code. The code isn't a secret and proves nothing but which setup is meant.
+
+| Note    | Meaning                                      | Can be claimed     |
+| ------- | -------------------------------------------- | ------------------ |
+| storing | the terminal is asking, or died while it did | no                 |
+| ready   | read back; with the bot's number             | once, by its setup |
+| claimed | by a setup that is under way                 | no                 |
+| unknown | it isn't known whether something was stored  | no                 |
+| unused  | left over, or replaced                       | **never again**    |
+
+Cancel, the end of the setup's time, or a restart make a ready or claimed note a left-over: shown, with **Remove it**. Nothing is deleted by itself but the item of a setup that was just replaced or removed by the lead.
 
 ## The Keychain: what is known, and what isn't
 
@@ -85,22 +95,29 @@ Today it is read in a way that the whole server waits for. Changed to one that d
 
 ### Deleting
 
-Only names from the notes, one at a time, after looking in the same lock that `telegram.json` doesn't name them. A result that isn't "deleted" or "wasn't there" keeps the note: "A token that isn't used may still be in your Keychain (its name)", with **Remove it**. **An item that the current setup names is never deleted,** except by **Remove**, which first takes the setup away.
+**The invariant:** a name enters `telegram.json` only by a commit, and a commit takes only a _claimed_ note of its own setup. A deletion first turns the note into _unused_ in the lock, where it also looks that `telegram.json` doesn't name it (or can't be read: then nothing is deleted). An unused note is never claimed or committed again, so an item can't come into use after that look, and deleting it outside the lock is safe. Names are random and never made twice.
+
+**The places of before (`a`, `b`) are never deleted by Konfab itself,** since another Konfab folder may use the same one, which can't be found out. They are shown: "An earlier token may still be in your Keychain (konfab-telegram-token-a). Another Konfab folder of yours may use it." with its own button and question. This also goes for `--remove` in the terminal, which deleted both until now.
+
+Only names from the notes, one at a time. **Only macOS's own "not found" counts as not there;** every other failure, a limit or a refused window is unknown. A result that isn't "deleted" or "wasn't there" keeps the note: "A token that isn't used may still be in your Keychain (its name)", with **Remove it**. **An item that the current setup names is never deleted,** except by **Remove**, which first takes the setup away.
 
 ## One setup at a time, and nothing undone
 
 - **In the server's memory:** one setup, with a random number that each step must name. A second tab sees "A setup is under way" and can end it; the first one's next step is then refused.
 - **Committing** happens in the settings' lock (phase 1): read `telegram.json`; if its setup number isn't the one this setup began with, refuse ("Phone notices were changed meanwhile"); else write. So a setup never brings back what was removed, and two setups (page and terminal) can't undo each other.
 - **On, off, remove** use the same lock and read again inside it. Today on and off in the page read and write without one: a setup in the terminal that ends in between is undone by it. Fixed by this.
+- **Right before the commit,** in the lock: the setup number it began with, and that its note is still claimed by it.
+- **A notice being sent** uses one reading of `telegram.json` for chat, bot and place. After the token was read and before sending, it is read again: another setup number, or off, and nothing is sent.
 - The Keychain is never called inside the lock.
 
-| Interrupted                                        | Then                                                              |
-| -------------------------------------------------- | ----------------------------------------------------------------- |
-| before step 4                                      | nothing was stored; the earlier setup works                       |
-| between the note and storing                       | a note without an item; **Remove it** finds nothing and clears it |
-| between storing and writing                        | an unused item with its note                                      |
-| after writing, before the earlier token is deleted | the new setup works; the earlier item has a note                  |
-| during Remove                                      | off first; then as above                                          |
+| Interrupted                                                 | Then                                                                                                                                         |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| before step 4                                               | nothing was stored; the earlier setup works                                                                                                  |
+| between the note and storing                                | a note without an item; **Remove it** finds nothing and clears it                                                                            |
+| the terminal dies after storing, before it noted the result | the note says _storing_; after 15 minutes it is a left-over: "may be in your Keychain". It is never taken as ready, and never read by itself |
+| between storing and writing                                 | an unused item with its note                                                                                                                 |
+| after writing, before the earlier token is deleted          | the new setup works; the earlier item has a note                                                                                             |
+| during Remove                                               | off first; then as above                                                                                                                     |
 
 ## Routes
 
@@ -116,6 +133,10 @@ Only names from the notes, one at a time, after looking in the same lock that `t
 - The field: `type="password"`, no name, no suggestions, not kept in the page's state; read and emptied with the click, also on a failure. Pasting trims blanks.
 - Waiting for the code shows the time left and can be read aloud once a minute, not every second. Each step's heading gets the focus. Cancel is always there.
 - Keyboard, both themes, 375 px. The look was accepted with the mock-up of [Settings](settings.md).
+
+## What isn't promised
+
+That everything is cleaned up (what isn't known is shown, with its name); that a token is erased from memory (it is dropped; the runtime decides when its memory is used again); that an earlier Konfab works on with a new setup; that setting up is the same in the page everywhere (pasting depends on the trials, the terminal way on macOS, and on other systems the token comes from the environment).
 
 ## What it doesn't protect against
 
