@@ -123,7 +123,8 @@ type Plain = Record<string, unknown>;
 
 /** The same change on plain values, to compare with. */
 function expected(before: unknown, change: Change): unknown {
-  const root = structuredClone(before ?? {}) as Plain;
+  // Without what is shared in the file, so that nothing changes along with it.
+  const root = JSON.parse(JSON.stringify(before ?? {})) as Plain;
   const parent = (key: string, make: boolean): [Plain, string] | null => {
     const path = pathOf(key);
     let at = root;
