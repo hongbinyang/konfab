@@ -44,7 +44,9 @@ npm run config -- set rejoin.claude_watcher true
 npm run config -- reset phone_notices.away_minutes
 ```
 
-It says the same as the page: what changed, and when it takes effect. It works with the server on or off. `npm run setup -- --telegram` and `--github-token` stay.
+It says the same as the page: what changed, and when it takes effect. It works with the server on or off. `npm run setup -- --telegram` (also with `--remove`) and `--github-token` stay.
+
+What the page has and the command line hasn't yet is added: `npm run setup -- --telegram --status`, `--on`, `--off` and `--test`.
 
 ## Each setting
 
@@ -72,6 +74,34 @@ It says the same as the page: what changed, and when it takes effect. It works w
 - **`server.port`** would take the page away from under the lead, and both connectors with it.
 
 Both can be changed on the command line and in the file.
+
+### Where values come from, and which one counts
+
+| Kind                                       | Kept in                              | Counts                                                                                               |
+| ------------------------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Settings                                   | `config.yaml`                        | an option of the command (such as `--manual`), then the file, then the default                       |
+| A room's own (check-in, parallel mentions) | database, as now                     | the room's, then the default. `parallel_lead_mentions` is only for new rooms, as now                 |
+| Run hours                                  | `config.yaml`                        | the agent's, then its app's, then the default, as now                                                |
+| Phone notices: chat, on or off             | `telegram.json`, as now              | that file. It belongs to one setup and one token, so it stays apart from the options                 |
+| Tokens                                     | Keychain, or an environment variable | as now: for phone notices the place that the setup names; for GitHub the variable, then the Keychain |
+
+**Saved and in use** are two things, and both are shown when they differ: "Saved: 9000. In use: 8787 until Konfab restarts." A row never shows only the saved one. After a broken file: "In use: the values from before. The file has an error in line 12."
+
+### Existing installations
+
+- The file's form doesn't change and nothing is moved. A file without a setting has its default, as now; the page adds a key only when it is changed, and **Reset** removes it.
+- Unknown keys stay (an older file can have `room` or `ui`, which nothing reads any more). Going back to an older Konfab works: it ignores keys it doesn't know.
+- A phone setup made in the terminal is shown and can be used, tested, replaced or removed in the page, and the other way round.
+
+### Interrupted
+
+| At                                | Then                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| Saving, before the rename         | the old file, whole; the temporary one is removed at the next start                |
+| Saving, after the rename          | the new file, whole; it is read within 2 seconds, or at the next start             |
+| Phone setup, before the last step | the earlier setup works; the new token is removed, at the latest at the next start |
+| Phone setup, after the last step  | the new setup works; the earlier token is removed, at the latest at the next start |
+| Removing phone notices            | off first, then the token; if that fails it is said and can be tried again         |
 
 ## How it works
 
@@ -133,12 +163,14 @@ The switch says what it does before it is turned on: "Asks Claude agents, when t
 | 2     | setting up phone notices in the page, after the Keychain trial                                                                                                                     |
 | 3     | all other settings, the GitHub token, `pre_approvals`                                                                                                                              |
 
-The user guide changes with each phase: **Configuration** starts with the page, then the command line, then the file; its table is made from the list; phone notices and Rejoin for Claude start with the page and keep the command line. REQUIREMENTS gets a section.
+README, user guide and REQUIREMENTS change with each phase, and only for what that phase ships: **Configuration** starts with the page, then the command line, then the file; its table is made from the list; phone notices and Rejoin for Claude start with the page and keep the command line. REQUIREMENTS gets a section.
 
 ## Tests
 
 - **One list:** every key of the schema is in the list, on the page or named as an exception, on the command line, and in the guide's table.
 - **The file:** comments, order, unknown keys, odd but right YAML (anchors, quotes, Windows line ends, empty file, no file); broken YAML; a link, a folder, another owner, read-only, a full disk; a crash before and after the rename; two processes at the same moment; changed by hand between showing and saving.
+- **Saved and in use:** shown apart whenever they differ; after a restart they agree.
+- **Existing installations:** files from earlier versions, with none of the new keys and with unknown ones; a phone setup from the terminal; going back to the earlier version.
 - **Effect:** for each "at once", changed in a running server and seen in what it does; for the others, the page says when.
 - **Equal:** the same change by page, command line and by hand gives the same file values and effect.
 - **Routes:** lead only; unknown, shown-only and wrong values refused, nothing written.
