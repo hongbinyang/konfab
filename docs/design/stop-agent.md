@@ -1,6 +1,6 @@
 # Stop button for one agent
 
-**Status:** proposal for review. Nothing is built. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
+**Status:** reviewed; being built. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
 
 ## Goal
 
@@ -176,6 +176,7 @@ By hand, with the lead, in both apps: stop while waiting; stop during a turn; Ke
 - Work that the app does outside a Konfab turn is only known from what the agent reported. One that works without reporting it looks as if it were waiting, and is stopped at its next call; what it does in its app isn't touched.
 - An agent that isn't calling (hung, or waiting for a question in its app) can't be told.
 
-## Question for the lead
+## Decided by the lead
 
-When an agent **works outside a turn** (it reported "working", as while building or testing), should **Stop** end its session **at once**, or **at its next `wait_for_turn`**? Proposed, and written above: at its next wait, shown as **Stop after this work**. It keeps its locks and a permission it waits for, and can be undone meanwhile; but it can take long.
+1. **Work outside a turn** is stopped at its next `wait_for_turn` (Stop after this work), not at once.
+2. The action is **on the agent's own card**, and nowhere else.
