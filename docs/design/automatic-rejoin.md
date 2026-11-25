@@ -39,6 +39,7 @@ The rejoin itself is proven once for each of the two last rows, with the server 
 | Claude: a 2-minute background command started by the agent, which then ended its turn                    | **Started again by itself**, once, 4 seconds after the command ended; the agent joined again without a pasted prompt                                                                                               |
 | Claude: a command that waited 32 minutes for a file the lead then made; the agent had ended its own turn | **Rejoined**, once: running again 6 seconds after the file was made, without a pasted prompt                                                                                                                       |
 | Claude: a 4-minute command, then **Stop** pressed by the lead while waiting                              | **Started again by itself**, once, when the command ended. The agent **didn't join again**: it had been told to stop and wait for the lead, and the wake-up isn't the lead's word. It joined after a pasted prompt |
+| Claude: the built watcher, **Rejoin** selected, the agent had ended its turn (2026-11-24)                | **Rejoined**, once: joined 6 seconds after the click, back 4 seconds later                                                                                                                                         |
 
 So Claude has a way that needs the agent's own help in advance: see [a background watcher](rejoin-claude.md). No documented way to send a prompt into an open Claude conversation was found.
 

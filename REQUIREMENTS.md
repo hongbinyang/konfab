@@ -536,7 +536,7 @@ Verified once in the app's own window: conversation open, turn ended normally (2
 
 ## 24. Asking Claude agents to rejoin
 
-**Status:** Implemented on `feature/rejoin-watcher`, off by default, marked experimental; in review. Design: [a background watcher](docs/design/rejoin-claude.md).
+**Status:** Implemented, off by default, marked experimental. Design: [a background watcher](docs/design/rejoin-claude.md).
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
@@ -551,4 +551,4 @@ Verified once in the app's own window: conversation open, turn ended normally (2
 | RC9 | MUST | Stop isn't overruled: the prompt says not to use a request after it, and the page says to paste the rejoin prompt. |
 | RC10 | MUST | The model's part is an instruction, not a boundary; the documentation says so. The manual prompts work in every state. |
 
-Verified by hand with a plain waiting command, not yet with the watcher (2026-11-23): the app started a conversation again whose turn the agent had ended, after 2 and after 32 minutes; after Stop it started it as well, and the agent stayed out. Not yet verified: the watcher in the app's own window, an app that was closed, compaction in between, usage limits, sleep, what a resting watcher costs, and whether the app asks for each command.
+Verified by hand with the watcher in the app's own window, once (2026-11-24): the agent had ended its own turn, and the lead's click brought it back. Verified with a plain waiting command (2026-11-23): the app started a conversation again whose turn the agent had ended, after 2 and after 32 minutes; after Stop it started it as well, and the agent stayed out. Not yet verified: an app that was closed, compaction in between, usage limits, sleep, what a resting watcher costs, and whether the app asks for each command.

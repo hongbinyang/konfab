@@ -239,7 +239,7 @@ The Claude app has no way to put a prompt into an open conversation from outside
 
 | How Claude stopped                                                                 | **Rejoin**                                                          |
 | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| It ended its own turn, for example after `@claude end your turn and stop the loop` | brings it back                                                      |
+| It ended its own turn, for example after `@claude end your turn and stop the loop` | brings it back (tested once)                                        |
 | You pressed **Stop**                                                               | doesn't: Stop tells Claude to wait for you. Paste the rejoin prompt |
 | Claude was closed                                                                  | greyed out: the watcher ended with it. Paste the rejoin prompt      |
 | A usage limit, a compacted conversation, hours of sleep                            | not tested                                                          |
