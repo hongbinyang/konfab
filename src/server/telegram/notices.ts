@@ -4,11 +4,11 @@ import {
   readSettings,
   readState,
   settingsStamp,
-  writeSettings,
   writeState,
   type NoticeState,
 } from "./store.js";
-import { botId, type TokenSlot } from "./token.js";
+import { turn } from "./places.js";
+import { botId, type TokenRead, type TokenSlot } from "./token.js";
 
 export type NoticeOptions = {
   away_minutes: number;
@@ -32,6 +32,7 @@ type Need = {
 const GATHER_MS = 60_000;
 const TRIES = 3;
 const RETRY_MS = 30_000;
+const UNKNOWN_MS = 10 * 60_000;
 
 export type NoticesView = {
   state: "not_set_up" | "off" | "on";
@@ -50,7 +51,7 @@ export class TelegramNotices {
   private running: Promise<void> | null = null;
   private problem: string | null = null;
   /** Set when trying again can't help until something is changed. */
-  private stuckAt: number | null = null;
+  private stuckAt: string | null = null;
   private retryAt = 0;
   private tries = 0;
 
@@ -59,7 +60,7 @@ export class TelegramNotices {
       db: Db;
       home: string;
       options: NoticeOptions;
-      token: (slot: TokenSlot) => string | null;
+      token: (place: { slot: TokenSlot; item?: string }) => Promise<TokenRead>;
       client?: (token: string) => Pick<TelegramClient, "send">;
       now?: () => number;
       warn?: (message: string) => void;
@@ -88,24 +89,14 @@ export class TelegramNotices {
     };
   }
 
-  setEnabled(enabled: boolean): NoticesView {
-    const settings = readSettings(this.deps.home);
-    if (settings) {
+  async setEnabled(enabled: boolean): Promise<NoticesView> {
+    if (readSettings(this.deps.home)) {
       // Also what "try again" does after a problem.
       this.problem = null;
       this.stuckAt = null;
       this.retryAt = 0;
       this.tries = 0;
-      if (settings.enabled !== enabled) {
-        writeSettings(this.deps.home, { ...settings, enabled });
-        // What happens while it is off is never sent later.
-        const state = readState(this.deps.home, settings.setup_id);
-        writeState(this.deps.home, {
-          ...state,
-          rooms: {},
-          baseline: enabled ? this.newest() : null,
-        });
-      }
+      await turn(this.deps.home, enabled, this.newest());
     }
     return this.view();
   }
@@ -128,8 +119,14 @@ export class TelegramNotices {
   }
 
   private async pass(): Promise<void> {
+    const stamp = settingsStamp(this.deps.home);
     const settings = readSettings(this.deps.home);
     if (!settings?.enabled) return;
+    /** Nothing of an earlier setup, or from before it was off, is written. */
+    const keep = (value: NoticeState) => {
+      if (settingsStamp(this.deps.home) === stamp)
+        writeState(this.deps.home, value);
+    };
     const now = this.now();
     let state = readState(this.deps.home, settings.setup_id);
     if (!state.baseline) {
@@ -154,17 +151,26 @@ export class TelegramNotices {
     );
     // A moment for related things to become one notice.
     if (!needs.some((need) => now - need.created_at >= GATHER_MS)) return;
-    const token = this.deps.token(settings.slot);
+    const read = await this.deps.token(settings);
+    if (read.state === "unknown") {
+      // A locked Keychain, for example. Not asked again and again.
+      this.retryAt = this.now() + UNKNOWN_MS;
+      this.fail("macOS didn't give the bot token.");
+      return;
+    }
     // Never with a token that isn't this setup's own.
-    if (!token || botId(token) !== settings.bot_id) {
+    if (read.state === "none" || botId(read.token) !== settings.bot_id) {
       this.stuckAt = settingsStamp(this.deps.home);
       this.fail(
-        token
+        read.state === "found"
           ? "The stored bot token is for another bot. Run setup again."
           : "The bot token isn't stored any more. Run setup again.",
       );
       return;
     }
+    // Chat, bot and token of one setup, which is still the one and on.
+    if (settingsStamp(this.deps.home) !== stamp) return;
+    const { token } = read;
     const before = state;
     const after = this.marked(state, needs, now);
     // Recorded first: a crash can lose a notice, but never repeat it.
@@ -183,7 +189,7 @@ export class TelegramNotices {
           : new TelegramError("Phone notices had a problem.", "maybe");
       if (known.delivered === "never") {
         this.stuckAt = settingsStamp(this.deps.home);
-        writeState(this.deps.home, before);
+        keep(before);
       } else if (known.delivered === "no") {
         this.tries += 1;
         // After a few tries, wait as long as for a new notice.
@@ -191,7 +197,7 @@ export class TelegramNotices {
         if (this.tries >= TRIES) this.tries = 0;
         this.retryAt =
           this.now() + Math.max(wait, (known.retryAfterSeconds ?? 0) * 1000);
-        writeState(this.deps.home, before);
+        keep(before);
       }
       this.fail(known.message);
     }

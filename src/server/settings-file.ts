@@ -239,7 +239,7 @@ function edit(text: string, change: Change): string {
 }
 
 /** One writer at a time; the system ends it with the process. */
-async function withLock<T>(home: string, action: () => T): Promise<T> {
+export async function withLock<T>(home: string, action: () => T): Promise<T> {
   const lock = new Database(join(home, "config.lock"), { timeout: 0 });
   try {
     const until = Date.now() + LOCK_MS;

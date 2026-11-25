@@ -12,7 +12,9 @@ import { isAgreed, noteFirst } from "./rejoin/own-command.js";
 import { readSettingsFile, tidySettingsFiles } from "./settings-file.js";
 import { LogFile, logDirectory } from "./log-file.js";
 import { TelegramNotices } from "./telegram/notices.js";
-import { resolveTelegramToken } from "./telegram/token.js";
+import { TelegramClient } from "./telegram/client.js";
+import { PhoneSetup } from "./telegram/setup.js";
+import { Keychain } from "./telegram/token.js";
 import { checkCommand, sendRejoin } from "./rejoin/codex.js";
 import { canOpen, openApp } from "./rejoin/open.js";
 import { macProcesses } from "./rejoin/processes.js";
@@ -124,13 +126,26 @@ watchers.enabled = watches(config.rejoin);
 service.rejoin.watchers = watchers.enabled ? wakes : null;
 watchers.tidy();
 
+const keychain = new Keychain();
+// Only for an isolated server's own tests, and only on this computer.
+const telegramStandIn =
+  process.env.KONFAB_ISOLATED === "1" &&
+  /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.KONFAB_TELEGRAM_TEST ?? "")
+    ? process.env.KONFAB_TELEGRAM_TEST
+    : undefined;
+const phoneSetup = new PhoneSetup({
+  home,
+  keychain,
+  client: (token) => new TelegramClient(token, telegramStandIn),
+  changed: () => service.changed(),
+});
 // The same object all the time: it is read at every pass.
 const noticeOptions = { ...config.phone_notices };
 const notices = new TelegramNotices({
   db,
   home,
   options: noticeOptions,
-  token: (slot) => resolveTelegramToken(slot),
+  token: (place) => keychain.read(place),
   warn: (message) => app.log.warn(message),
 });
 
@@ -159,6 +174,7 @@ function applySettings(next: Config, before: Config): void {
 
 const app = await buildApp({
   notices,
+  phoneSetup,
   sendRejoin: async (conversation, number) => {
     const result = await sendRejoin(rejoinCommand(), conversation, number);
     if (result === "refused") void checkRejoin();

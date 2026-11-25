@@ -28,7 +28,9 @@ import {
   statePath,
   writeSettings,
 } from "../../src/server/telegram/store.js";
-import { resolveTelegramToken } from "../../src/server/telegram/token.js";
+import { readNotes } from "../../src/server/telegram/places.js";
+import { Keychain, type TokenRead } from "../../src/server/telegram/token.js";
+import { FakeKeychain } from "./fake-keychain.js";
 
 // Made up; no test contacts Telegram.
 const TOKEN = "1234567890:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQr";
@@ -173,20 +175,99 @@ describe("the Telegram client", () => {
     expect(telegram.calls[0]?.body).toEqual({ limit: 100, timeout: 0 });
   });
 
-  it("reads only a token that looks like one, from its own place, and none when isolated", () => {
-    const keychain = (args: string[]) =>
-      args.includes("konfab-telegram-token-b") ? TOKEN : "x";
+  it("reads only a token that looks like one, from its own place, and none when isolated", async () => {
+    const asked: string[][] = [];
+    const of = (
+      env: NodeJS.ProcessEnv,
+      platform: string,
+      code = 0,
+      out = TOKEN,
+    ) =>
+      new Keychain(env, platform as NodeJS.Platform, async (args) => {
+        asked.push(args);
+        return { code, out };
+      });
+    const b = { slot: "b" } as const;
+    const found = { state: "found", token: TOKEN };
     const env = { KONFAB_TELEGRAM_TOKEN: TOKEN };
-    expect(resolveTelegramToken("b", {}, "darwin", keychain)).toBe(TOKEN);
-    expect(resolveTelegramToken("a", {}, "darwin", keychain)).toBeNull();
-    // The environment never stands in for a Keychain slot, or the other way.
-    expect(resolveTelegramToken("a", env, "darwin", keychain)).toBeNull();
-    expect(resolveTelegramToken("env", {}, "darwin", keychain)).toBeNull();
-    expect(resolveTelegramToken("env", env, "linux", keychain)).toBe(TOKEN);
-    expect(resolveTelegramToken("b", {}, "linux", keychain)).toBeNull();
-    expect(
-      resolveTelegramToken("b", { KONFAB_ISOLATED: "1" }, "darwin", keychain),
-    ).toBeNull();
+    expect(await of({}, "darwin").read(b)).toEqual(found);
+    expect(asked).toEqual([
+      [
+        "find-generic-password",
+        "-a",
+        expect.any(String),
+        "-s",
+        "konfab-telegram-token-b",
+        "-w",
+      ],
+    ]);
+    // The environment never stands in for the Keychain, or the other way.
+    expect(await of(env, "darwin", 44).read(b)).toEqual({ state: "none" });
+    expect(await of({}, "darwin").read({ slot: "env" })).toEqual({
+      state: "none",
+    });
+    expect(await of(env, "linux").read({ slot: "env" })).toEqual(found);
+    expect(await of({}, "linux").read(b)).toEqual({ state: "none" });
+    expect(await of({ KONFAB_ISOLATED: "1" }, "darwin").read(b)).toEqual({
+      state: "none",
+    });
+    expect(asked).toHaveLength(2);
+  });
+
+  it("takes only macOS's own answer for nothing as nothing", async () => {
+    const of = (run: () => Promise<{ code: number | null; out: string }>) =>
+      new Keychain({}, "darwin", run);
+    const unknown = { state: "unknown" };
+    for (const [code, out] of [
+      [1, ""],
+      [36, ""],
+      [51, TOKEN],
+      [128, ""],
+      [null, ""],
+      [0, ""],
+      [0, "not a token"],
+      [0, `${TOKEN}\nmore`],
+    ] as const) {
+      const keychain = of(async () => ({ code, out }));
+      expect(await keychain.read({ slot: "a" }), `${code}`).toEqual(unknown);
+    }
+    const breaks = of(() => Promise.reject(new Error("no")));
+    expect(await breaks.read({ slot: "a" })).toEqual(unknown);
+    expect(await breaks.remove("konfab-telegram-token-a")).toBe("unknown");
+    for (const [code, result] of [
+      [0, "deleted"],
+      [44, "none"],
+      [1, "unknown"],
+      [null, "unknown"],
+    ] as const)
+      expect(
+        await of(async () => ({ code, out: "" })).remove(
+          "konfab-telegram-token-b",
+        ),
+      ).toBe(result);
+  });
+
+  it("asks macOS only for names that Konfab makes", async () => {
+    let started = 0;
+    const keychain = new Keychain({}, "darwin", async () => {
+      started += 1;
+      return { code: 0, out: TOKEN };
+    });
+    for (const item of [
+      "",
+      "login",
+      "konfab-telegram-token-c",
+      "konfab-telegram-token-",
+      `konfab-telegram-token-${"0".repeat(31)}`,
+      `konfab-telegram-token-${"0".repeat(32)} -w`,
+    ]) {
+      expect(await keychain.remove(item)).toBe("unknown");
+      expect(await keychain.read({ slot: "own", item })).toEqual({
+        state: "unknown",
+      });
+      expect(keychain.storeByHand(item)).toBe(false);
+    }
+    expect(started).toBe(0);
   });
 });
 
@@ -218,7 +299,7 @@ describe("setting up phone notices", () => {
       },
     }));
   /** Answers questions by a part of their text; anything else is a no. */
-  let keychain: Map<string, string>;
+  let keychain: FakeKeychain;
   const run = (
     answers: Record<string, string>,
     change: Partial<Parameters<typeof setupTelegram>[0]> = {},
@@ -233,14 +314,7 @@ describe("setting up phone notices", () => {
         );
         return key === undefined ? "" : (answers[key] as string);
       },
-      platform: "darwin",
-      fromEnvironment: false,
-      storeToken: (slot) => Boolean(keychain.set(slot, TOKEN)),
-      removeToken: (slot) => {
-        keychain.delete(slot);
-        return true;
-      },
-      token: (slot) => keychain.get(slot) ?? null,
+      keychain,
       client: () => client(),
       sleep: async (ms) => {
         time += ms;
@@ -260,7 +334,7 @@ describe("setting up phone notices", () => {
   beforeEach(() => {
     said = "";
     asked = [];
-    keychain = new Map();
+    keychain = new FakeKeychain(TOKEN);
     time = 1_800_000_000_000;
   });
 
@@ -276,12 +350,14 @@ describe("setting up phone notices", () => {
       chat_id: CHAT,
       chat_name: "Lead",
       enabled: true,
-      slot: "b",
+      slot: "own",
+      item: expect.stringMatching(/^konfab-telegram-token-[0-9a-f]{32}$/),
       bot_id: "1234567890",
       setup_id: expect.any(String),
     });
     // The replaced setup's token is gone.
-    expect([...keychain.keys()]).toEqual(["b"]);
+    expect([...keychain.items.keys()]).toEqual([readSettings(home)!.item]);
+    expect(readNotes(home)).toEqual([]);
     if (process.platform !== "win32")
       expect(statSync(settingsPath(home)).mode & 0o777).toBe(0o600);
     expect(said).not.toContain(TOKEN);
@@ -363,14 +439,19 @@ describe("setting up phone notices", () => {
     beforeEach(() => {
       writeSettings(home, old);
       file = readFileSync(settingsPath(home), "utf8");
-      keychain.set("a", OLD_TOKEN);
+      keychain.items.set("konfab-telegram-token-a", OLD_TOKEN);
       updates(message());
     });
     /** Byte for byte, with its own token, and nothing left of the new one. */
     const untouched = () => {
       expect(readFileSync(settingsPath(home), "utf8")).toBe(file);
-      expect([...keychain]).toEqual([["a", OLD_TOKEN]]);
-      expect(readdirSync(home)).toEqual(["telegram.json"]);
+      expect([...keychain.items]).toEqual([
+        ["konfab-telegram-token-a", OLD_TOKEN],
+      ]);
+      expect(readNotes(home)).toEqual([]);
+      expect(
+        readdirSync(home).filter((name) => !name.startsWith("config.lock")),
+      ).toEqual(["telegram.json"]);
     };
 
     it.each(Object.keys(ALL))(
@@ -414,19 +495,58 @@ describe("setting up phone notices", () => {
       },
     );
 
-    const fails = () => {
-      throw new Error("broken");
-    };
     it.each([
-      ["saving the token is refused", { storeToken: () => false }],
-      ["saving the token breaks", { storeToken: fails }],
-      ["the token can't be read", { token: () => null }],
-      ["reading the token breaks", { token: fails }],
-      ["it isn't a token", { client: fails }],
-    ])("leaves it untouched when %s", async (_name, change) => {
-      expect(await run(ALL, change)).toBe(false);
+      ["saving the token is refused", () => (keychain.refuses = true)],
+      ["saving the token breaks", () => (keychain.breaks = true)],
+    ])("leaves it untouched when %s", async (_name, spoil) => {
+      spoil();
+      expect(await run(ALL)).toBe(false);
       untouched();
       expect(telegram.sent()).toEqual([]);
+    });
+
+    it("leaves it untouched when the client can't be made", async () => {
+      expect(
+        await run(ALL, {
+          client: () => {
+            throw new Error("broken");
+          },
+        }),
+      ).toBe(false);
+      untouched();
+    });
+
+    it("keeps a note, and deletes nothing, when it isn't known whether the token was saved", async () => {
+      keychain.unknown = true;
+      expect(await run(ALL)).toBe(false);
+      expect(readFileSync(settingsPath(home), "utf8")).toBe(file);
+      expect(readNotes(home)).toMatchObject([{ state: "unknown" }]);
+      expect(keychain.removed).toEqual([]);
+      expect(telegram.calls).toEqual([]);
+    });
+
+    it("doesn't undo what was changed while it ran", async () => {
+      for (const change of [
+        () => rmSync(settingsPath(home)),
+        () => writeSettings(home, { ...old, setup_id: "another" }),
+      ]) {
+        writeSettings(home, old);
+        said = "";
+        updates(message());
+        expect(
+          await run(ALL, {
+            ask: async (question) => {
+              if (question.includes("Turn phone")) change();
+              return "y";
+            },
+          }),
+        ).toBe(false);
+        expect(said).toContain("changed meanwhile");
+        expect(readSettings(home)?.setup_id ?? null).not.toBe("old-setup");
+        expect(readSettings(home)?.chat_id ?? null).not.toBe(CHAT);
+        expect([...keychain.items.keys()]).toEqual(["konfab-telegram-token-a"]);
+      }
+      // Off meanwhile is the same setup: it is replaced, as was asked.
     });
 
     it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
@@ -447,7 +567,9 @@ describe("setting up phone notices", () => {
       const questions = (await run(ALL), asked.length);
       for (let at = 1; at <= questions; at += 1) {
         writeSettings(home, old);
-        keychain = new Map([["a", OLD_TOKEN]]);
+        keychain = new FakeKeychain(TOKEN);
+        keychain.items.set("konfab-telegram-token-a", OLD_TOKEN);
+        rmSync(join(home, "telegram-notes.json"), { force: true });
         said = "";
         updates(message());
         let count = 0;
@@ -459,15 +581,21 @@ describe("setting up phone notices", () => {
               ? new Promise<string>(() => undefined)
               : Promise.resolve("y");
           },
-          removeToken: () => {
-            throw new Error("it cleaned up");
-          },
         });
         for (let wait = 0; wait < 200 && count < at; wait += 1)
           await new Promise((done) => setTimeout(done, 5));
         expect(count).toBe(at);
         expect(readFileSync(settingsPath(home), "utf8")).toBe(file);
-        expect(keychain.get("a")).toBe(OLD_TOKEN);
+        expect(keychain.items.get("konfab-telegram-token-a")).toBe(OLD_TOKEN);
+        expect(keychain.removed).toEqual([]);
+        // What may be stored has its note.
+        expect(
+          [...keychain.items.keys()].filter(
+            (item) =>
+              item !== "konfab-telegram-token-a" &&
+              !readNotes(home).some((note) => note.item === item),
+          ),
+        ).toEqual([]);
       }
     });
 
@@ -487,7 +615,7 @@ describe("setting up phone notices", () => {
             room_every_minutes: 1,
             max_per_day: 100,
           },
-          token: (slot) => keychain.get(slot) ?? null,
+          token: (place) => keychain.read(place),
           client: (token) => ({
             send: async (chat) => {
               used.push(`${token.split(":")[0]} ${chat}`);
@@ -538,10 +666,29 @@ describe("setting up phone notices", () => {
       db.close();
     });
 
+    it("never deletes the place of an earlier version, which another folder may use", async () => {
+      expect(await run(ALL)).toBe(true);
+      expect(readSettings(home)?.slot).toBe("own");
+      expect(keychain.items.get("konfab-telegram-token-a")).toBe(OLD_TOKEN);
+      expect(keychain.removed).toEqual([]);
+      expect(said).toContain("another Konfab folder of yours may use it");
+      expect(readNotes(home)).toMatchObject([
+        { item: "konfab-telegram-token-a", state: "unused" },
+      ]);
+    });
+
     it("says when a replaced token couldn't be removed; it isn't used any more", async () => {
-      expect(await run(ALL, { removeToken: () => false })).toBe(true);
-      expect(readSettings(home)?.slot).toBe("b");
-      expect(said).toContain("konfab-telegram-token-a");
+      await run(ALL);
+      const first = readSettings(home)!.item!;
+      keychain.keeps = true;
+      said = "";
+      updates(message());
+      expect(await run(ALL)).toBe(true);
+      expect(readSettings(home)?.item).not.toBe(first);
+      expect(said).toContain(first);
+      expect(readNotes(home)).toContainEqual(
+        expect.objectContaining({ item: first, state: "unused" }),
+      );
     });
   });
 
@@ -575,7 +722,7 @@ describe("phone notices", () => {
         max_per_day: 20,
         ...options,
       },
-      token: () => TOKEN,
+      token: async () => ({ state: "found", token: TOKEN }) as TokenRead,
       client: () => client(300),
       now: () => now,
       warn: (text) => warnings.push(text),
@@ -620,7 +767,7 @@ describe("phone notices", () => {
       setup_id: "one",
     });
     notices = make();
-    notices.setEnabled(true);
+    await notices.setEnabled(true);
   });
   afterEach(() => db.close());
 
@@ -733,10 +880,10 @@ describe("phone notices", () => {
     service.takeBreak("private-room");
     await later(15);
     expect(telegram.sent()).toEqual([]);
-    notices.setEnabled(false);
+    await notices.setEnabled(false);
     await later(15);
     // What happened while it was off isn't sent afterwards.
-    notices.setEnabled(true);
+    await notices.setEnabled(true);
     await later(15);
     expect(telegram.sent()).toEqual([]);
   });
@@ -781,7 +928,7 @@ describe("phone notices", () => {
     expect(telegram.sent()).toHaveLength(1);
     expect(notices.view().problem).toContain("can't write to the chat");
     telegram.replies.delete("sendMessage");
-    notices.setEnabled(true);
+    await notices.setEnabled(true);
     await later(1);
     expect(telegram.sent()).toHaveLength(2);
     expect(warnings).toHaveLength(1);
@@ -851,6 +998,7 @@ describe("phone notices", () => {
         headers: { host },
       });
       const cookie = String(login.headers["set-cookie"]).split(";")[0]!;
+      const origin = `http://${host}`;
       const ask = (
         method: "GET" | "PUT" | "POST",
         url: string,
@@ -883,7 +1031,12 @@ describe("phone notices", () => {
       await later(11);
       expect(
         (
-          await ask("PUT", "/api/phone-notices", { cookie }, { enabled: false })
+          await ask(
+            "PUT",
+            "/api/phone-notices",
+            { cookie, origin },
+            { enabled: false },
+          )
         ).json().state,
       ).toBe("off");
       const all = [
@@ -897,10 +1050,11 @@ describe("phone notices", () => {
       ].join();
       expect(all).not.toContain(TOKEN);
       expect(all).not.toContain(String(CHAT));
-      expect(readdirSync(home).sort()).toEqual([
-        "telegram-state.json",
-        "telegram.json",
-      ]);
+      expect(
+        readdirSync(home)
+          .filter((name) => !name.startsWith("config.lock"))
+          .sort(),
+      ).toEqual(["telegram-state.json", "telegram.json"]);
     } finally {
       await app.close();
     }

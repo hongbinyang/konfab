@@ -1,83 +1,160 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { userInfo } from "node:os";
 import { TOKEN_PATTERN } from "./client.js";
 
 const security = "/usr/bin/security";
+const LIMIT_MS = 10_000;
+const MAX_BYTES = 8192;
+/** macOS's own answer for "there is none". Nothing else means that. */
+const NOT_FOUND = 44;
 
 /**
- * Where a setup's token is. A new setup uses the Keychain slot that the
- * current one doesn't, so the current one keeps working until the new one is
- * complete. "env" is KONFAB_TELEGRAM_TOKEN.
+ * Where a setup's token is: an item of its own in the Keychain, one of the two
+ * places of earlier versions, or KONFAB_TELEGRAM_TOKEN.
  */
-export type TokenSlot = "a" | "b" | "env";
-export const KEYCHAIN_SLOTS = ["a", "b"] as const;
-const service = (slot: TokenSlot) => `konfab-telegram-token-${slot}`;
+export type TokenSlot = "own" | "a" | "b" | "env";
+
+const OWN = /^konfab-telegram-token-[0-9a-f]{32}$/;
+const OLD = /^konfab-telegram-token-[ab]$/;
+export const isOwnItem = (item: unknown): item is string =>
+  typeof item === "string" && OWN.test(item);
+export const isOldItem = (item: unknown): item is string =>
+  typeof item === "string" && OLD.test(item);
+/** Never made twice, and never replaced. */
+export const newItem = (): string =>
+  `konfab-telegram-token-${randomBytes(16).toString("hex")}`;
+/** Null: the environment. */
+export const itemOf = (place: {
+  slot: TokenSlot;
+  item?: string;
+}): string | null =>
+  place.slot === "env"
+    ? null
+    : place.slot === "own"
+      ? (place.item ?? "")
+      : `konfab-telegram-token-${place.slot}`;
 
 /** The bot a token is for. Not a secret: the rest of the token is. */
 export const botId = (token: string): string => token.split(":")[0] ?? "";
 
-type Read = (args: string[]) => string;
-const readKeychain: Read = (args) =>
-  execFileSync(security, args, {
-    encoding: "utf8",
-    timeout: 10_000,
-    maxBuffer: 8192,
-    stdio: ["ignore", "pipe", "ignore"],
+/** "none" only if it is surely not there. */
+export type TokenRead =
+  { state: "found"; token: string } | { state: "none" } | { state: "unknown" };
+export type Removed = "deleted" | "none" | "unknown";
+
+export type Ran = { code: number | null; out: string };
+export type Run = (args: string[]) => Promise<Ran>;
+
+/** Without a shell, and without holding up the server. */
+const run: Run = (args) =>
+  new Promise((done) => {
+    let out = "";
+    let finished = false;
+    const finish = (code: number | null) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      child.stdout.destroy();
+      child.unref();
+      done({ code, out });
+    };
+    const child = spawn(security, args, {
+      shell: false,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const stop = () => {
+      child.kill("SIGKILL");
+      out = "";
+      finish(null);
+    };
+    const timer = setTimeout(stop, LIMIT_MS);
+    child.stdout.on("data", (chunk: Buffer) => {
+      out += chunk.toString();
+      if (out.length > MAX_BYTES) stop();
+    });
+    child.once("error", () => finish(null));
+    child.once("close", (code) => finish(code));
   });
 
-/** The token in this slot only, or null. Never logged, shown or given to an agent. */
-export function resolveTelegramToken(
-  slot: TokenSlot,
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-  read: Read = readKeychain,
-): string | null {
-  let token: string | undefined;
-  if (slot === "env") token = env.KONFAB_TELEGRAM_TOKEN?.trim();
-  // An isolated run never reads stored credentials.
-  else if (platform === "darwin" && env.KONFAB_ISOLATED !== "1") {
+export class Keychain {
+  constructor(
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly start: Run = run,
+  ) {}
+
+  /** An isolated run never uses stored credentials. */
+  get usable(): boolean {
+    return this.platform === "darwin" && this.env.KONFAB_ISOLATED !== "1";
+  }
+
+  get fromEnvironment(): boolean {
+    return Boolean(this.env.KONFAB_TELEGRAM_TOKEN);
+  }
+
+  /** Of this place only. Never logged, shown or given to an agent. */
+  async read(place: { slot: TokenSlot; item?: string }): Promise<TokenRead> {
+    const item = itemOf(place);
+    if (item === null) {
+      const token = this.env.KONFAB_TELEGRAM_TOKEN?.trim();
+      return token && TOKEN_PATTERN.test(token)
+        ? { state: "found", token }
+        : { state: "none" };
+    }
+    if (!this.usable) return { state: "none" };
+    if (!isOwnItem(item) && !isOldItem(item)) return { state: "unknown" };
+    let ran: Ran;
     try {
-      token = read([
+      ran = await this.start([
         "find-generic-password",
         "-a",
         userInfo().username,
         "-s",
-        service(slot),
+        item,
         "-w",
-      ]).trim();
+      ]);
     } catch {
-      // None is stored, or it can't be read. Command output is never shown.
+      return { state: "unknown" };
     }
+    if (ran.code === NOT_FOUND) return { state: "none" };
+    const token = ran.out.trim();
+    // Output is never shown.
+    return ran.code === 0 && TOKEN_PATTERN.test(token)
+      ? { state: "found", token }
+      : { state: "unknown" };
   }
-  return token && TOKEN_PATTERN.test(token) ? token : null;
-}
 
-/** Asks for the token with hidden input, in macOS's own command. */
-export function storeTelegramToken(slot: TokenSlot): boolean {
-  return (
-    spawnSync(
-      security,
-      [
-        "add-generic-password",
+  /** Only names that Konfab makes. */
+  async remove(item: string): Promise<Removed> {
+    if (!this.usable || (!isOwnItem(item) && !isOldItem(item)))
+      return "unknown";
+    try {
+      const { code } = await this.start([
+        "delete-generic-password",
         "-a",
         userInfo().username,
         "-s",
-        service(slot),
-        "-U",
-        "-w",
-      ],
-      { stdio: "inherit" },
-    ).status === 0
-  );
-}
+        item,
+      ]);
+      return code === 0 ? "deleted" : code === NOT_FOUND ? "none" : "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
 
-export function removeTelegramToken(slot: TokenSlot): boolean {
-  if (process.platform !== "darwin" || slot === "env") return true;
-  const { status } = spawnSync(
-    security,
-    ["delete-generic-password", "-a", userInfo().username, "-s", service(slot)],
-    { stdio: "ignore" },
-  );
-  // 44: there was none.
-  return status === 0 || status === 44;
+  /**
+   * In a terminal: macOS's own command asks for it with hidden input. Without
+   * "replace", so that nothing that is there is changed.
+   */
+  storeByHand(item: string): boolean {
+    if (!this.usable || !isOwnItem(item)) return false;
+    return (
+      spawnSync(
+        security,
+        ["add-generic-password", "-a", userInfo().username, "-s", item, "-w"],
+        { stdio: "inherit" },
+      ).status === 0
+    );
+  }
 }

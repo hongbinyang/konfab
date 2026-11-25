@@ -17,8 +17,10 @@ import type { SkillSources } from "../domain/skill-sources.js";
 import type { Route, SendResult } from "../domain/rejoin.js";
 import { RefusedWatch, type Watchers } from "../rejoin/watchers.js";
 import { settingsRoutes, type SettingsAccess } from "./settings.js";
+import { phoneRoutes } from "./phone.js";
+import type { PhoneSetup } from "../telegram/setup.js";
 import { KonfabError, type KonfabService } from "../domain/service.js";
-import type { NoticesView, TelegramNotices } from "../telegram/notices.js";
+import type { TelegramNotices } from "../telegram/notices.js";
 
 const MAX_SERVER_WAIT_SECONDS = 30;
 const SESSION_COOKIE = "konfab_session";
@@ -122,6 +124,7 @@ const extendBody = z.object({ minutes: z.number().int().min(1).max(1440) });
 export interface AppOptions {
   service: KonfabService;
   notices?: TelegramNotices;
+  phoneSetup?: PhoneSetup;
   sendRejoin?: (conversation: string, number: string) => Promise<SendResult>;
   /** Brings an app to the front; whether the command worked. */
   openApp?: (app: "codex" | "claude") => Promise<boolean>;
@@ -2021,23 +2024,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     options.notices?.active();
     return { ok: true };
   });
-  const noPhoneNotices: NoticesView = {
-    state: "not_set_up",
-    chat_name: null,
-    away_minutes: 10,
-    problem: null,
-  };
-  app.get(
-    "/api/phone-notices",
-    async () => options.notices?.view() ?? noPhoneNotices,
-  );
-  app.put("/api/phone-notices", async (request) => {
-    const { enabled } = z
-      .object({ enabled: z.boolean() })
-      .strict()
-      .parse(request.body);
-    options.notices?.active();
-    return options.notices?.setEnabled(enabled) ?? noPhoneNotices;
+  phoneRoutes(app, {
+    notices: options.notices,
+    setup: options.phoneSetup,
+    origins: allowedOrigins,
   });
 
   app.get("/api/events", (request, reply) => {
