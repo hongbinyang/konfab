@@ -7,6 +7,11 @@
   display: block;
 }
 
+/* Closer, so that the ring doesn't touch the button below. */
+.message-editor > textarea:focus-visible {
+  outline-offset: 0;
+}
+
 .message-editor.rich {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -15,6 +20,17 @@
 
 .message-editor.rich:focus-within {
   border-color: var(--accent);
+}
+
+/* The ring is around the whole box: around the text alone it would cross the
+   buttons, which are in the same box. */
+.message-editor-text:focus-visible {
+  outline: none;
+}
+
+.message-editor.rich:has(.message-editor-text:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .message-editor-tools {
