@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../../src/server/api/app.js";
 import { configPath, parseConfig } from "../../src/server/config.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
@@ -58,6 +58,8 @@ describe("the settings routes", () => {
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), "konfab-settings-api-"));
     chmodSync(home, 0o700);
+    // Other tests count what commands leave in the usual one.
+    vi.stubEnv("TMPDIR", home);
     writeFileSync(
       configPath(home),
       "# mine\nserver:\n  port: 9000\nrejoin:\n  wanted_minutes: 5\n",
@@ -96,6 +98,7 @@ describe("the settings routes", () => {
     cookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
   });
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await app.close();
     db.close();
     rmSync(home, { recursive: true, force: true });

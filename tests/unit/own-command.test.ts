@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkCommand,
   lookAtCommand,
@@ -62,9 +62,12 @@ ${line}
       home = mkdtempSync(join(tmpdir(), "konfab-home-"));
       command = join(root, "codex");
       ran = join(root, "ran");
+      // Other tests count what commands leave in the usual one.
+      vi.stubEnv("TMPDIR", home);
       standIn();
     });
     afterEach(() => {
+      vi.unstubAllEnvs();
       rmSync(root, { recursive: true, force: true });
       rmSync(home, { recursive: true, force: true });
     });
