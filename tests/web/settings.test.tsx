@@ -423,6 +423,182 @@ describe("the Settings page", () => {
     }
   });
 
+  /** Holds back the answers of writes until they are let go. */
+  const hold = () => {
+    const waiting: (() => void)[] = [];
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      const answered = await real(url, init);
+      if (init?.method !== "GET")
+        await new Promise<void>((done) => waiting.push(done));
+      return answered;
+    });
+    return async () => {
+      await act(async () => {
+        waiting.shift()!();
+        await Promise.resolve();
+      });
+    };
+  };
+  const savedAs = (key: string, value: unknown) => {
+    answer = () => {
+      view = {
+        ...view,
+        hash: `${view.hash}+`,
+        settings: view.settings.map((setting) =>
+          setting.key === key
+            ? { ...setting, saved: value, in_use: value }
+            : setting,
+        ),
+      };
+      return [200, view];
+    };
+  };
+
+  it("keeps what is typed while a save is on its way", async () => {
+    await open();
+    const minutes = screen.getByLabelText<HTMLInputElement>(
+      "rejoin.wanted_minutes",
+    );
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, "20");
+    savedAs("rejoin.wanted_minutes", 20);
+    const go = hold();
+    await userEvent.click(saveButton());
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, "25");
+    await go();
+    expect(minutes.value).toBe("25");
+    expect(
+      screen.getByText(/1 change: rejoin.wanted_minutes, 20 → 25/),
+    ).toBeTruthy();
+    // Over the value just saved, so there is no conflict with it.
+    expect(screen.queryByText(/Changed elsewhere/)).toBeNull();
+    expect(saveButton().disabled).toBe(false);
+    savedAs("rejoin.wanted_minutes", 25);
+    await userEvent.click(saveButton());
+    await go();
+    expect(writes()).toEqual([
+      { hash: "h1", set: { "rejoin.wanted_minutes": 20 } },
+      { hash: "h1+", set: { "rejoin.wanted_minutes": 25 } },
+    ]);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
+  it("keeps it also when that save fails, and sees another writer in between", async () => {
+    await open();
+    const minutes = screen.getByLabelText<HTMLInputElement>(
+      "rejoin.wanted_minutes",
+    );
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, "20");
+    answer = () => [500, { message: "no" }];
+    const go = hold();
+    await userEvent.click(saveButton());
+    await userEvent.type(minutes, "1");
+    await go();
+    expect(minutes.value).toBe("201");
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, "20");
+    // Saved as 20, but by the answer it is another writer's 45 already.
+    savedAs("rejoin.wanted_minutes", 45);
+    await userEvent.click(saveButton());
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, "30");
+    await go();
+    expect(minutes.value).toBe("30");
+    expect(
+      await screen.findByText(/Changed elsewhere to 45 while you typed/),
+    ).toBeTruthy();
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it("keeps what is typed while a reset is on its way", async () => {
+    await open("phone");
+    const minutes = screen.getByLabelText<HTMLInputElement>(
+      "phone_notices.away_minutes",
+    );
+    savedAs("phone_notices.away_minutes", 10);
+    const go = hold();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Reset phone_notices.away_minutes" }),
+    );
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, "7");
+    await go();
+    expect(minutes.value).toBe("7");
+    expect(screen.queryByText(/Changed elsewhere/)).toBeNull();
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it("keeps the other section's typing, while switching and saving", async () => {
+    await open("phone");
+    const away = () =>
+      screen.getByLabelText<HTMLInputElement>("phone_notices.away_minutes");
+    await userEvent.clear(away());
+    await userEvent.type(away(), "7");
+    const section = (name: string) =>
+      userEvent.click(screen.getByRole("button", { name }));
+    await section("Rejoin");
+    const wanted = () =>
+      screen.getByLabelText<HTMLInputElement>("rejoin.wanted_minutes");
+    await userEvent.clear(wanted());
+    await userEvent.type(wanted(), "20");
+    savedAs("rejoin.wanted_minutes", 20);
+    const go = hold();
+    await userEvent.click(saveButton());
+    await section("Phone notices");
+    expect(away().value).toBe("7");
+    await userEvent.type(away(), "1");
+    await go();
+    expect(away().value).toBe("71");
+    expect(writes()).toEqual([
+      { hash: "h1", set: { "rejoin.wanted_minutes": 20 } },
+    ]);
+    await section("Rejoin");
+    expect(wanted().value).toBe("20");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
+  it("uses an answer about a command only for the path and dialog it was asked for", async () => {
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    let dialog = screen.getByRole("dialog");
+    const field = () =>
+      within(dialog).getByLabelText<HTMLInputElement>("Absolute path");
+    const press = (name: string) =>
+      userEvent.click(within(dialog).getByRole("button", { name }));
+    const use = () =>
+      within(dialog).queryByRole("button", { name: "Use this file" });
+    await userEvent.type(field(), "/opt/a");
+    answer = () => [
+      200,
+      { ok: true, path: "/opt/a", stamp: "s", signed_by: null },
+    ];
+    const go = hold();
+    await press("Look at it");
+    await userEvent.type(field(), "b");
+    await go();
+    // Looked at /opt/a, but the field says /opt/ab.
+    expect(use()).toBeNull();
+    expect(dialog.textContent).not.toContain("Konfab will run");
+    await press("Look at it");
+    await go();
+    expect(use()).not.toBeNull();
+    answer = () => [200, view];
+    await userEvent.click(use()!);
+    await userEvent.type(field(), "c");
+    expect(field().value).toBe("/opt/ab");
+    // Closed and opened again: the late answer doesn't close this one.
+    await press("Cancel");
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    dialog = screen.getByRole("dialog");
+    await go();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    await userEvent.type(field(), "/opt/d");
+    expect(field().value).toBe("/opt/d");
+  });
+
   it("asks before it replaces a command that was changed elsewhere", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

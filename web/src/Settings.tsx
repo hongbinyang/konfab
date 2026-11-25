@@ -163,6 +163,7 @@ export function Settings({
     setSaved("");
     saves.current += 1;
     const keys = [...Object.keys(change.set ?? {}), ...(change.reset ?? [])];
+    const sent = drafts;
     try {
       const next = await request<View>("/api/settings", {
         method: "PATCH",
@@ -170,9 +171,19 @@ export function Settings({
       });
       saves.current += 1;
       setView(next);
+      // What was typed after the click stays, over the value just saved.
       setDrafts((all) =>
         Object.fromEntries(
-          Object.entries(all).filter(([key]) => !keys.includes(key)),
+          Object.entries(all).flatMap(([key, draft]) => {
+            if (!keys.includes(key)) return [[key, draft]];
+            if (draft.field === sent[key]?.field) return [];
+            const base =
+              change.set && key in change.set
+                ? change.set[key]!
+                : (view.settings.find((item) => item.key === key)?.default ??
+                  null);
+            return [[key, { ...draft, base }]];
+          }),
         ),
       );
       setSaved(`Saved: ${what}.`);
@@ -513,6 +524,9 @@ function CommandSteps({
   const [look, setLook] = useState<Look | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  // An answer counts only for the dialog and the path it was asked for.
+  const asked = useRef(0);
   const run = (action: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -526,13 +540,19 @@ function CommandSteps({
   const moved = open && base !== value;
   const send = (body: object) =>
     run(async () => {
-      onSaved(
-        await request<View>("/api/settings/codex-command", {
-          method: "POST",
-          body: { hash: view.hash, ...body },
-        }),
-      );
-      setOpen(false);
+      const mine = asked.current;
+      setSending(true);
+      try {
+        onSaved(
+          await request<View>("/api/settings/codex-command", {
+            method: "POST",
+            body: { hash: view.hash, ...body },
+          }),
+        );
+        if (mine === asked.current) setOpen(false);
+      } finally {
+        setSending(false);
+      }
     });
   return (
     <>
@@ -548,6 +568,7 @@ function CommandSteps({
         disabled={off}
         onClick={() => {
           setPath(value ?? "");
+          asked.current += 1;
           setBase(value);
           setLook(null);
           setError("");
@@ -596,12 +617,12 @@ function CommandSteps({
                   aria-disabled={busy}
                   onClick={() =>
                     run(async () => {
-                      setLook(
-                        await request<Look>(
-                          "/api/settings/codex-command/look",
-                          { method: "POST", body: { path: path.trim() } },
-                        ),
+                      const mine = asked.current;
+                      const seen = await request<Look>(
+                        "/api/settings/codex-command/look",
+                        { method: "POST", body: { path: path.trim() } },
                       );
+                      if (mine === asked.current) setLook(seen);
                     })
                   }
                 >
@@ -615,7 +636,10 @@ function CommandSteps({
             Absolute path{" "}
             <input
               value={path}
+              // What is being saved can't be another one meanwhile.
+              readOnly={sending}
               onChange={(event) => {
+                asked.current += 1;
                 setPath(event.target.value);
                 setLook(null);
               }}
