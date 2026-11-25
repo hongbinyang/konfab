@@ -81,6 +81,13 @@
   overflow-wrap: anywhere;
 }
 
+/* Room for the three lines of the hint. */
+@media (max-width: 480px) {
+  .message-editor-text {
+    min-height: 92px;
+  }
+}
+
 .message-editor-text p {
   min-height: 1.4em;
   margin: 0;

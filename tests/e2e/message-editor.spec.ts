@@ -892,12 +892,18 @@ test("the focus ring is around the whole box and crosses none of its buttons", a
         path: `${process.env.KONFAB_SHOTS}/focus-${what}-${testInfo.project.name}.png`,
       });
   };
-  for (const tools of [false, true]) {
-    if (tools) {
+  for (const [what, size] of [
+    ["rich", 1280],
+    ["rich-narrow", 375],
+    ["tools", 1280],
+    ["tools-narrow", 375],
+  ] as const) {
+    await page.setViewportSize({ width: size, height: 800 });
+    if (what === "tools") {
       await page.getByRole("button", { name: "Formatting menu" }).click();
       await box(page).click();
     }
-    await shot(tools ? "tools" : "rich");
+    await shot(what);
     expect((await rings(".message-editor-text")).style).toBe("none");
     const { style, width, ring, buttons } = await rings(".message-editor");
     expect(style).toBe("solid");
@@ -910,6 +916,7 @@ test("the focus ring is around the whole box and crosses none of its buttons", a
       expect(button.bottom).toBeLessThan(ring.bottom - width);
     }
   }
+  await page.setViewportSize({ width: 1280, height: 800 });
   // A button in it has its own ring, and only that.
   await page.keyboard.press("Tab");
   await expect(
