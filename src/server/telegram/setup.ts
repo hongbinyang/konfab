@@ -246,12 +246,17 @@ export class PhoneSetup {
     }
   }
 
+  /** Neither ended by the lead nor by time, as of now. */
+  private goesOn(current: Current): boolean {
+    return !current.ended && this.live() === current;
+  }
+
   private still(current: Current): void {
-    if (current.ended || this.live() !== current)
-      throw new SetupProblem("Setup was ended.");
+    if (!this.goesOn(current)) throw new SetupProblem("Setup was ended.");
   }
 
   private async take(current: Current, token: string): Promise<void> {
+    this.still(current);
     const bot = await checkBot(this.deps.client(token));
     this.still(current);
     current.token = token;
@@ -273,6 +278,7 @@ export class PhoneSetup {
         current.pairing!,
         current.setup,
         this.now(),
+        () => this.goesOn(current),
       );
       if (!note) return;
       current.item = note.item;
@@ -420,23 +426,32 @@ export class PhoneSetup {
         bot_id: botId(current.token!),
         setup_id: current.setup,
       };
-      // Not given up meanwhile, by the lead or by time.
-      this.still(current);
       const result = await commit(
         this.deps.home,
         next,
         current.began,
         this.now(),
+        // Not ended meanwhile, by the lead or by time: whichever is first,
+        // this or the saving, the other no longer happens.
+        () => this.goesOn(current),
+        (what) => {
+          if (what !== "settings") return;
+          done = true;
+          this.end();
+        },
       );
-      if (!result.done)
-        throw new SetupProblem(
-          "Phone notices were changed meanwhile, or this setup's token was removed. Nothing was changed; start again.",
-        );
-      done = true;
       old = result.old;
+      if (done) return;
+      this.still(current);
+      throw new SetupProblem(
+        "Phone notices were changed meanwhile, or this setup's token was removed. Nothing was changed; start again.",
+      );
     });
-    if (!done) return refuse("setup_changed", current.problem ?? "Not saved");
-    this.end();
+    if (!done)
+      return refuse(
+        current.ended ? "setup_ended" : "setup_changed",
+        current.problem ?? "Not saved",
+      );
     // The replaced setup's own item, which nothing can use any more.
     if (old) await this.forget(old);
   }

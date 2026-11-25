@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   removeNotices,
@@ -231,7 +232,7 @@ describe("which stored tokens are whose", () => {
       const item = await ready();
       await take();
       await expect(
-        commit(home, own(item), "old", now, (what) => {
+        commit(home, own(item), "old", now, undefined, (what) => {
           if (what === where) throw new Error("as if it died");
         }),
       ).rejects.toThrow("as if it died");
@@ -680,18 +681,228 @@ describe("setting up in the page", () => {
     await sending;
     expect(setup.view()).toBeNull();
     expect(readSettings(home)).toBeNull();
+    // Already saved: there is nothing left to cancel.
     const fourth = await toFinish();
-    const saving = setup.finish(fourth, true).catch((error: Error) => error);
-    setup.cancel(fourth);
+    const saving = setup.finish(fourth, true);
+    expect(() => setup.cancel(fourth)).toThrow(/has ended/);
     await saving;
-    // Either it was saved or it wasn't, and nothing is lost.
-    const used = readSettings(home)?.item;
-    expect(
-      [...keychain.items.keys()].every(
-        (item) =>
-          item === used || readNotes(home).some((note) => note.item === item),
-      ),
-    ).toBe(true);
+    expect(readSettings(home)).toMatchObject({ enabled: true });
+  });
+
+  describe("while saving waits for another writer", () => {
+    /** Another program of this folder is saving. */
+    const hold = () => {
+      const lock = new Database(join(home, "config.lock"));
+      lock.exec("BEGIN IMMEDIATE");
+      return () => {
+        lock.exec("ROLLBACK");
+        lock.close();
+      };
+    };
+    const ended = { code: "setup_ended" };
+    const late = WANTED_MS + 6 * 60_000;
+    const earlier = async () => {
+      await setup.finish(await toFinish(), true);
+      bot.messages = [];
+      return readFileSync(settingsPath(home), "utf8");
+    };
+
+    it.each<[string, (id: string) => void]>([
+      ["cancelled", (id) => setup.cancel(id)],
+      ["out of time", () => void (now += late)],
+      [
+        "out of time, and the page looks",
+        () => {
+          now += late;
+          expect(setup.view()).toBeNull();
+        },
+      ],
+    ])("saves nothing when it is %s", async (_name, stop) => {
+      for (const file of [null, await earlier()]) {
+        if (file === null) await removeSetup(home, now);
+        else if (readSettings(home) === null)
+          writeFileSync(settingsPath(home), file);
+        bot.messages = [];
+        const before = existsSync(settingsPath(home))
+          ? readFileSync(settingsPath(home), "utf8")
+          : null;
+        const id = await toFinish();
+        const removed = keychain.removed.length;
+        const release = hold();
+        const saving = setup.finish(id, true).catch((error: Error) => error);
+        await settle();
+        stop(id);
+        release();
+        expect(await saving).toMatchObject(ended);
+        expect(
+          existsSync(settingsPath(home))
+            ? readFileSync(settingsPath(home), "utf8")
+            : null,
+        ).toBe(before);
+        expect(setup.view()).toBeNull();
+        // Its token is shown as left over, and nothing was deleted unasked.
+        expect(keychain.removed).toHaveLength(removed);
+        expect(setup.leftOvers().length).toBeGreaterThan(0);
+      }
+    });
+
+    it("saves nothing with the environment's token either", async () => {
+      keychain.fromEnvironment = true;
+      const { id } = await setup.start("env");
+      await setup.code(id);
+      bot.messages = [message()];
+      await look();
+      setup.confirm(id, true);
+      const release = hold();
+      const saving = setup.finish(id, true).catch((error: Error) => error);
+      await settle();
+      setup.cancel(id);
+      release();
+      expect(await saving).toMatchObject(ended);
+      expect(readSettings(home)).toBeNull();
+    });
+
+    it("leaves a second setup alone, which then is the one that is saved", async () => {
+      const first = await toFinish();
+      const release = hold();
+      const saving = setup.finish(first, true).catch((error: Error) => error);
+      await settle();
+      setup.cancel(first);
+      const second = await setup.start("terminal");
+      release();
+      expect(await saving).toMatchObject(ended);
+      expect(readSettings(home)).toBeNull();
+      expect(view()).toMatchObject({ id: second.id, step: "token" });
+      const [left] = setup.leftOvers();
+      bot.messages = [];
+      await terminal(codeOf(second.command));
+      view();
+      await settle();
+      await setup.code(second.id);
+      bot.messages = [message()];
+      await look();
+      setup.confirm(second.id, true);
+      await setup.finish(second.id, false);
+      expect(readSettings(home)).toMatchObject({ enabled: false });
+      expect(readSettings(home)!.item).not.toBe(left!.item);
+    });
+
+    it("doesn't end a second setup that begins right after it was saved", async () => {
+      const saving = setup.finish(await toFinish(), true);
+      const second = await setup.start("terminal");
+      await saving;
+      expect(view().id).toBe(second.id);
+      expect(readSettings(home)).toMatchObject({ enabled: true });
+    });
+
+    it("saves it when nothing ended it", async () => {
+      const id = await toFinish();
+      const release = hold();
+      const saving = setup.finish(id, true);
+      await settle();
+      expect(readSettings(home)).toBeNull();
+      release();
+      await saving;
+      expect(readSettings(home)).toMatchObject({ enabled: true });
+      expect(setup.view()).toBeNull();
+    });
+
+    it("ends with nothing set up when all is removed meanwhile", async () => {
+      await earlier();
+      const id = await toFinish();
+      const release = hold();
+      const saving = setup.finish(id, true).catch((error: Error) => error);
+      await settle();
+      const removing = setup.remove();
+      release();
+      expect(await saving).toMatchObject(ended);
+      await removing;
+      expect(readSettings(home)).toBeNull();
+    });
+
+    it("doesn't take or read a stored token for a setup that has ended", async () => {
+      const started = await setup.start("terminal");
+      await terminal(codeOf(started.command));
+      const reads = keychain.reads.length;
+      const release = hold();
+      view();
+      await settle();
+      setup.cancel(started.id);
+      release();
+      await new Promise((done) => setTimeout(done, 150));
+      expect(readNotes(home)).toMatchObject([
+        { state: "ready", claimed: null },
+      ]);
+      expect(keychain.reads).toHaveLength(reads);
+      expect(bot.calls).toEqual([]);
+    });
+
+    it("doesn't contact Telegram for one that was cancelled while its token is read", async () => {
+      keychain.fromEnvironment = true;
+      let go!: () => void;
+      const held = new Promise<void>((done) => (go = done));
+      const read = keychain.read.bind(keychain);
+      vi.spyOn(keychain, "read").mockImplementation(async (from) => {
+        await held;
+        return read(from);
+      });
+      const starting = setup.start("env");
+      setup.cancel(view().id);
+      go();
+      await starting;
+      await settle();
+      expect(bot.calls).toEqual([]);
+      expect(setup.view()).toBeNull();
+    });
+
+    it("doesn't take a stored token whose time ended meanwhile", async () => {
+      const started = await setup.start("terminal");
+      await terminal(codeOf(started.command));
+      const release = hold();
+      view();
+      await settle();
+      now += WANTED_MS;
+      release();
+      await new Promise((done) => setTimeout(done, 150));
+      expect(readNotes(home)).toMatchObject([{ claimed: null }]);
+      expect(setup.leftOvers()).toHaveLength(1);
+    });
+
+    it.each<[string, () => void]>([
+      [
+        "another setup is saved",
+        () => writeSettings(home, base({ setup_id: "another" })),
+      ],
+      [
+        "its token is given up",
+        () => {
+          const path = join(home, NOTES);
+          writeFileSync(
+            path,
+            readFileSync(path, "utf8").replace('"ready"', '"unused"'),
+          );
+        },
+      ],
+    ])("saves nothing from the terminal when %s", async (_name, change) => {
+      let release!: () => void;
+      const running = setupTelegram(
+        cli({
+          ask: async (question) => {
+            bot.messages = [message()];
+            if (question.includes("Turn phone")) release = hold();
+            return "y";
+          },
+        }),
+      );
+      await vi.waitFor(() => expect(release).toBeDefined());
+      await settle();
+      change();
+      const then = readSettings(home);
+      release();
+      expect(await running).toBe(false);
+      expect(readSettings(home)).toEqual(then);
+      expect(said.join(" ")).toContain("changed meanwhile");
+    });
   });
 
   it("ends by itself after its time, and what it left is shown, not deleted", async () => {

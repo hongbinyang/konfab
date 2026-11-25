@@ -115,8 +115,11 @@ export const claim = (
   code: string,
   setup: string,
   now: number,
+  /** Asked in the lock: waiting for it can take a while. */
+  still: () => boolean = () => true,
 ): Promise<Note | null> =>
   withLock(home, () => {
+    if (!still()) return null;
     const notes = readNotes(home);
     const note = notes.find(
       (one) =>
@@ -169,10 +172,13 @@ export const commit = (
   next: TelegramSettings,
   began: string | null,
   now: number,
-  /** Test seam: the process could end after either write. */
+  /** Asked in the lock: the setup can be ended while it waits for it. */
+  still: () => boolean = () => true,
+  /** After each write, still in the lock. From "settings" on it is saved. */
   written: (what: "notes" | "settings") => void = () => undefined,
 ): Promise<{ done: boolean; old: string | null }> =>
   withLock(home, () => {
+    if (!still()) return { done: false, old: null };
     const current = readSettings(home);
     if ((current?.setup_id ?? null) !== began)
       return { done: false, old: null };

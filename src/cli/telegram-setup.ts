@@ -1,6 +1,5 @@
 import { createInterface } from "node:readline/promises";
 import { konfabHome } from "../server/config.js";
-import { SettingsError } from "../server/settings-file.js";
 import { TelegramClient, type Chat } from "../server/telegram/client.js";
 import {
   beginItem,
@@ -207,10 +206,7 @@ export async function setupTelegram(deps: SetupDeps): Promise<boolean> {
         );
     } else say(unchanged());
   } catch (error) {
-    if (!done)
-      say(
-        `${error instanceof SettingsError ? `${error.message}.` : problemText(error)} ${unchanged()}`,
-      );
+    if (!done) say(`${problemText(error)} ${unchanged()}`);
   } finally {
     // Its own, and nothing can have come to use it.
     if (!done && item) await forget(deps, item);

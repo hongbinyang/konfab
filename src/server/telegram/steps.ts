@@ -1,4 +1,5 @@
 import { randomInt } from "node:crypto";
+import { SettingsError } from "../settings-file.js";
 import { TelegramError, type Chat, type TelegramClient } from "./client.js";
 
 /** What the terminal and the page ask and check alike, in the same words. */
@@ -23,7 +24,9 @@ export const problemText = (error: unknown): string =>
       ? error.conflict
         ? "Something else is reading this bot. Nothing was changed there. Make a bot only for Konfab."
         : error.message
-      : "Setup had a problem.";
+      : error instanceof SettingsError
+        ? `${error.message}.`
+        : "Setup had a problem.";
 
 // Without letters and digits that look alike.
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";

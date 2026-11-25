@@ -106,7 +106,7 @@ Only names from the notes, one at a time. **Only macOS's own "not found" counts 
 - **In the server's memory:** one setup, with a random number that each step must name. A second tab sees "A setup is under way" and can end it; the first one's next step is then refused.
 - **Committing** happens in the settings' lock (phase 1): read `telegram.json`; if its setup number isn't the one this setup began with, refuse ("Phone notices were changed meanwhile"); else write. So a setup never brings back what was removed, and two setups (page and terminal) can't undo each other.
 - **On, off, remove** use the same lock and read again inside it. Today on and off in the page read and write without one: a setup in the terminal that ends in between is undone by it. Fixed by this.
-- **Right before the commit,** in the lock: the setup number it began with, and that its note is still claimed by it.
+- **Right before the commit,** in the lock: that the setup wasn't cancelled and has time left (it can have waited for the lock), the setup number it began with, and that its note is still claimed by it. The setup ends in the same moment in which it is saved. So either it was ended first and nothing is saved, or it was saved first and there is nothing left to cancel; and it never ends a second one that began meanwhile. Claiming a note asks the same in the lock. The terminal's setup has no cancel but the end of its process, which also ends its waiting.
 - **A notice being sent** uses one reading of `telegram.json` for chat, bot and place. After the token was read and before sending, it is read again: another setup number, or off, and nothing is sent.
 - The Keychain is never called inside the lock.
 
