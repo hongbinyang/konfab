@@ -1,6 +1,6 @@
 # Settings in the page and on the command line
 
-**Status:** accepted by the lead (2026-11-25); phase 1 is being built. The lead asked for it on 2026-11-25: "configs should be supported by both commandline and UI", for example turning on Rejoin for Claude agents and phone notices; `npm run setup` stays.
+**Status:** accepted by the lead (2026-11-25); phase 1 is in use, phase 2 is being planned. The lead asked for it on 2026-11-25: "configs should be supported by both commandline and UI", for example turning on Rejoin for Claude agents and phone notices; `npm run setup` stays.
 
 ## Today: every setting and every action of setup
 
@@ -149,6 +149,8 @@ If the hash differs: "The file has changed. Here are the values now." Nothing is
 **Environment.** A value that an environment variable overrides is shown as that, and is off.
 
 ## Phone notices in the page
+
+The concrete plan, which changes three points below, is [phase 2: setting up phone notices in the page](settings-phone-setup.md).
 
 The setup's questions and checks become one engine with steps, used by both the command line and the page. The page shows one step at a time:
 
