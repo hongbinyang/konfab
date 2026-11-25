@@ -469,7 +469,12 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       description:
         "Only when a message from Konfab gives you a request: come back to a room the lead asked you to rejoin. Returns what join_room returns; then call wait_for_turn and continue the loop. If the status is closed, end your turn and do nothing else; don't call join_room instead.",
       inputSchema: {
-        request: z.string().max(200).describe("The request from the message"),
+        request: z
+          .string()
+          .max(200)
+          .describe(
+            'The request from the message. If you don\'t come back because the user stopped you in this app: "declined " and then the request, which only tells the lead.',
+          ),
       },
     },
     async ({ request }, extra) => {

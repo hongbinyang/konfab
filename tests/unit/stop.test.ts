@@ -878,4 +878,56 @@ describe("stopping one agent", () => {
       JSON.stringify(service.join("claude", ROOM).recent_messages),
     ).not.toContain("stop");
   });
+
+  it("asks all, one after the other, and a failure leaves the others asked", () => {
+    const results = () =>
+      service.stops
+        .askAll(roomId, ["claude", "codex", "nobody"])
+        .map((item) => `${item.agent_id}:${item.result}`);
+    service.postUserMessage(ROOM, "@claude look");
+    wait("claude", claude);
+    wait("codex", codex);
+    expect(results()).toEqual([
+      "claude:after_turn",
+      "codex:ended",
+      "nobody:not_there",
+    ]);
+    // Again: who was asked stays as it is.
+    const askedAt = session(claude).stop_asked_at;
+    now += 1000;
+    expect(results()).toEqual([
+      "claude:after_turn",
+      "codex:not_there",
+      "nobody:not_there",
+    ]);
+    expect(session(claude).stop_asked_at).toBe(askedAt);
+    expect(service.stops.keepAll(roomId, ["claude", "codex"])).toBe(1);
+    expect(view("claude").state).toBeNull();
+    expect(session(codex).state).toBe("ended");
+  });
+
+  it("goes on after an unexpected failure of one", () => {
+    const real = service.stops.ask.bind(service.stops);
+    vi.spyOn(service.stops, "ask").mockImplementation((room, id) => {
+      if (id === "claude") throw new Error("disk");
+      real(room, id);
+    });
+    wait("claude", claude);
+    wait("codex", codex);
+    expect(service.stops.askAll(roomId, ["claude", "codex"])).toEqual([
+      { agent_id: "claude", result: "failed" },
+      { agent_id: "codex", result: "ended" },
+    ]);
+  });
+
+  it("works in a paused room and doesn't stop one that joins afterwards", () => {
+    wait("claude", claude);
+    wait("codex", codex);
+    service.setRoomPaused(ROOM, true);
+    service.stops.askAll(roomId, ["claude", "codex"]);
+    const again = service.join("codex", ROOM).session_id;
+    expect(session(again).stop_asked_at).toBeNull();
+    const room = service.roomState(ROOM).room;
+    expect([room.paused, room.on_break]).toEqual([true, false]);
+  });
 });

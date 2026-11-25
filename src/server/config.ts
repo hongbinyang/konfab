@@ -107,6 +107,7 @@ const configSchema = z.object({
       codex_command: z.string().min(1).nullable().default(null),
       allow_untested_version: z.boolean().default(false),
       claude_watcher: z.boolean().default(false),
+      open_apps: z.boolean().default(true),
     })
     .default({
       enabled: true,
@@ -114,6 +115,7 @@ const configSchema = z.object({
       codex_command: null,
       allow_untested_version: false,
       claude_watcher: false,
+      open_apps: true,
     }),
   pre_approvals: z
     .array(z.object({ recipient: z.string().min(1), data: z.string().min(1) }))

@@ -131,10 +131,24 @@ export interface RejoinState {
     | "paused"
     | "on_break"
     | null;
+  /** The next three are absent from older servers. */
+  then?:
+    | "ready"
+    | "connected"
+    | "old_join"
+    | "unavailable"
+    | "no_watcher"
+    | "watchers_full"
+    | "elsewhere"
+    | null;
+  all_paused?: boolean;
+  can_open?: boolean;
   request: {
     state: "waiting" | "joined" | "closed";
     unsure: boolean;
     refused: boolean;
+    /** Absent from older servers. */
+    declined?: boolean;
     slow: boolean;
     asked_at: number;
   } | null;

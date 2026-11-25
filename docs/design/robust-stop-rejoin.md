@@ -1,6 +1,6 @@
 # Stop and Rejoin in every situation
 
-**Status:** proposal for discussion. Nothing is built. The lead asked for it on 2026-11-25: Stop and Rejoin should work in many situations, and be easy to use. It builds on [Rejoin agents](rejoin-agents.md), [Rejoin for Claude](rejoin-claude.md) and [Stop agent](stop-agent.md), whose checks stay: one-time requests, one transaction, no false "back".
+**Status:** phase 1 is built; phases 2 and 3 wait for tests by hand. The lead asked for it on 2026-11-25: Stop and Rejoin should work in many situations, and be easy to use. It builds on [Rejoin agents](rejoin-agents.md), [Rejoin for Claude](rejoin-claude.md) and [Stop agent](stop-agent.md), whose checks stay: one-time requests, one transaction, no false "back".
 
 ## What went wrong for the user
 
@@ -140,7 +140,7 @@ Codex writes its interruptions into its own files. Reading them would turn one "
 
 1. The lead wants a click on Konfab's buttons and links to count as the lead's own request: "konfab system level conversations can be on behalf of me so that buttons/links can wrap my requests". So the sentence of B may be tried. This says what the lead wishes; it doesn't settle how an app treats a background notice after its own Stop. B therefore stays a test by hand first, a hold-back stays a correct result, nothing may tell an agent to read its app's instructions differently, and A's way stays on the card.
 2. Yes, Konfab may open the apps' conversations on a click that says so. Any UI it needs is to be elegant and decent: one line that says where it stands, one main button, the rest as quiet links; a mock-up is shown before building.
-3. Open: the lead asked what "header" means. It is the bar at the top of the room, beside its name.
+3. Yes (room message 1868, after a mock-up of it and of the cards): Stop agents goes into the header, the bar at the top of the room.
 
 The questions as they were put:
 
@@ -159,6 +159,8 @@ The questions as they were put:
 | 1     | the texts at once; never a dead button (copy the prompt and open the app); Resume and rejoin; End the break and rejoin; the agent's own answer; Stop agents; the hint at Pause | nothing unknown                                                              |
 | 2     | Open the exact conversation, in both apps                                                                                                                                      | two tests by hand (below)                                                    |
 | 3     | Claude after its own Stop (decision 1 B); Claude's watcher started by the app itself when the conversation is opened (a hook)                                                  | tests by hand; the hook changes a Claude setting, so only with the lead's OK |
+
+**As built in phase 1, where it differs:** the buttons say **Open Codex** and **Open Claude** (the app, not the conversation, which is phase 2). Whether the app runs isn't looked at: after a Codex agent was asked, **Open Codex** is there at once. The agent's answer is `rejoin_room` with "declined " and the request in the same argument, so that an older server or connector can't mistake it. "Not back yet" comes after 20 seconds. `rejoin.open_apps` turns opening off.
 
 ## Tests by hand, with the lead
 

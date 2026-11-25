@@ -1,7 +1,12 @@
 import { useState } from "react";
-import { RejoinPrompts } from "./ContactNotice";
+import { JoinPrompts, RejoinPrompts } from "./ContactNotice";
+import { Modal } from "./Modal";
 import { request, type RoomAgent, type StopState } from "./api";
 
+type Agent = Pick<
+  RoomAgent,
+  "id" | "display_name" | "stop" | "join_prompt" | "rejoin_prompt"
+>;
 type Act = (action: () => Promise<unknown>) => Promise<void>;
 
 const clock = (at: number) =>
@@ -79,13 +84,13 @@ export function StopControls({
   roomId,
   agent,
   act,
+  prompts = true,
 }: {
   roomId: number;
-  agent: Pick<
-    RoomAgent,
-    "id" | "display_name" | "stop" | "join_prompt" | "rejoin_prompt"
-  >;
+  agent: Agent;
   act: Act;
+  /** Other controls on the card have them otherwise. */
+  prompts?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const { stop } = agent;
@@ -140,7 +145,216 @@ export function StopControls({
           <RejoinPrompts agent={agent} />
         </>
       )}
-      {stop.state && stop.state !== "asked" && <RejoinPrompts agent={agent} />}
+      {prompts && stop.state && stop.state !== "asked" && (
+        <JoinPrompts agent={agent} />
+      )}
     </div>
+  );
+}
+
+const PLAN = {
+  now: "will be asked now",
+  after_turn: "in a turn · will be asked after it",
+  after_work: "working · will be asked after it",
+};
+const RESULT = {
+  ended: "its session in Konfab has ended",
+  after_turn: "asked after its turn",
+  after_work: "asked after its work",
+  not_there: "not there to be stopped",
+  failed: "couldn't be asked; look at its card",
+};
+type Result = { agent_id: string; result: keyof typeof RESULT };
+
+/** Agents that are there, or asked already. */
+const stoppable = (agents: Agent[]) =>
+  agents.filter((agent) => agent.stop?.can || agent.stop?.state === "asked");
+
+/** For a room: all agents that are there, after showing what each is told. */
+export function StopAgents({
+  roomId,
+  agents,
+  act,
+  open,
+  onOpen,
+  onClose,
+}: {
+  roomId: number;
+  agents: Agent[];
+  act: Act;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<Result[] | null>(null);
+  if (!agents.some((agent) => agent.stop)) return null;
+  const there = stoppable(agents);
+  const close = () => {
+    setResults(null);
+    onClose();
+  };
+  const name = (id: string) =>
+    agents.find((agent) => agent.id === id)?.display_name ?? id;
+  const send = () => {
+    if (busy) return;
+    setBusy(true);
+    void act(async () => {
+      try {
+        const done = await request<{ results: Result[] }>(
+          `/api/rooms/${roomId}/stop-agents`,
+          { method: "POST", body: { agents: there.map((agent) => agent.id) } },
+        );
+        if (
+          done.results.some((item) =>
+            ["not_there", "failed"].includes(item.result),
+          )
+        )
+          setResults(done.results);
+        else close();
+      } catch (error) {
+        // The page shows it, which this would hide.
+        close();
+        throw error;
+      }
+    }).finally(() => setBusy(false));
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="secondary stop-agents"
+        disabled={!there.length}
+        title={
+          there.length
+            ? "Asks the agents to leave the room, each at the right moment"
+            : "Available when an agent is there"
+        }
+        onClick={onOpen}
+      >
+        Stop agents
+      </button>
+      {open && (
+        <Modal
+          title="Stop agents"
+          onClose={close}
+          actions={
+            results ? (
+              <button type="button" onClick={close}>
+                Close
+              </button>
+            ) : (
+              <>
+                <button type="button" className="secondary" onClick={close}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!there.length}
+                  aria-disabled={busy}
+                  onClick={send}
+                >
+                  Stop agents
+                </button>
+              </>
+            )
+          }
+        >
+          <ul role={results ? "status" : undefined}>
+            {results
+              ? results.map((item) => (
+                  <li key={item.agent_id}>
+                    <span>{name(item.agent_id)}</span>
+                    <span>{RESULT[item.result]}</span>
+                  </li>
+                ))
+              : agents.map((agent) => (
+                  <li key={agent.id}>
+                    <span>{agent.display_name}</span>
+                    <span>
+                      {agent.stop?.can
+                        ? PLAN[agent.stop.can]
+                        : agent.stop?.state === "asked"
+                          ? "asked already"
+                          : "not there"}
+                      {agent.stop?.can && agent.stop.holds_lock
+                        ? " · holds a lock, which is released"
+                        : ""}
+                    </span>
+                  </li>
+                ))}
+          </ul>
+          {!results && (
+            <p className="muted">
+              They are asked to leave the room. Work already running in their
+              apps isn&apos;t interrupted, and Konfab can&apos;t see whether an
+              app has stopped.
+            </p>
+          )}
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** Only what is known of each, counted. Never "done" or "safe". */
+export function stopCounts(stops: (StopState | undefined)[]): string | null {
+  const words = stops.flatMap((stop) =>
+    !stop?.state
+      ? []
+      : stop.called_at !== null
+        ? ["called again"]
+        : stop.state === "asked"
+          ? [`after its ${stop.after ?? "turn"}`]
+          : stop.state === "received"
+            ? ["connector has it"]
+            : stop.state === "answered"
+              ? ["sent, not confirmed"]
+              : ["not delivered"],
+  );
+  if (!words.length) return null;
+  return `Stop: ${[...new Set(words)]
+    .map((word) => `${words.filter((item) => item === word).length} ${word}`)
+    .join(" · ")}`;
+}
+
+/** In the header, while a stop is asked or stands. */
+export function StopSummary({
+  roomId,
+  agents,
+  act,
+}: {
+  roomId: number;
+  agents: Agent[];
+  act: Act;
+}) {
+  const [busy, setBusy] = useState(false);
+  const text = stopCounts(agents.map((agent) => agent.stop));
+  const asked = agents.filter((agent) => agent.stop?.state === "asked");
+  if (!text) return null;
+  return (
+    <p className="stop-summary">
+      <span role="status">{text}</span>
+      {asked.length > 0 && (
+        <button
+          type="button"
+          className="link"
+          aria-disabled={busy}
+          title="Undoes the stop of those that haven't ended"
+          onClick={() => {
+            if (busy) return;
+            setBusy(true);
+            void act(() =>
+              request(`/api/rooms/${roomId}/keep-agents`, {
+                method: "POST",
+                body: { agents: asked.map((agent) => agent.id) },
+              }),
+            ).finally(() => setBusy(false));
+          }}
+        >
+          Keep all
+        </button>
+      )}
+    </p>
   );
 }

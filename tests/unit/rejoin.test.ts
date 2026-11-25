@@ -9,6 +9,7 @@ import {
   newNumber,
   rejoinMessage,
 } from "../../src/server/domain/rejoin.js";
+import { KonfabError } from "../../src/server/domain/errors.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 
 const ROOM = "rejoin";
@@ -123,6 +124,9 @@ describe("asking agents to rejoin", () => {
       app: "codex",
       resting: 0,
       offer: "ready",
+      then: null,
+      all_paused: false,
+      can_open: false,
       request: null,
       earlier: false,
     });
@@ -133,7 +137,9 @@ describe("asking agents to rejoin", () => {
       offer: null,
       request: { state: "waiting", unsure: false, slow: false },
     });
-    now += 60_000;
+    now += 19_999;
+    expect(view().request?.slow).toBe(false);
+    now += 1;
     expect(view().request?.slow).toBe(true);
     const joined = rejoin(asked.number);
     expect(joined).toMatchObject({ room: ROOM });
@@ -790,5 +796,149 @@ describe("asking agents to rejoin", () => {
       expect(JSON.stringify(shown)).not.toContain(number);
       expect(JSON.stringify(shown)).not.toContain(HERE);
     }
+  });
+
+  it("is closed by the agent's own answer, only by its own, and changes nothing else", () => {
+    const asked = ask();
+    service.rejoin.sent(asked.id, "taken");
+    const before = sessions();
+    for (const [number, conversation, app] of [
+      [asked.number, OTHER, "codex"],
+      [asked.number, HERE, "claude"],
+      [newNumber(), HERE, "codex"],
+    ])
+      expect(rejoin(`declined ${number}`, conversation, app)).toEqual(CLOSED);
+    expect(
+      service.rejoin.rejoin("codex", `declined ${asked.number}`, HERE, "watch"),
+    ).toEqual(CLOSED);
+    for (const odd of [
+      `Declined ${asked.number}`,
+      `declined  ${asked.number}`,
+      `${asked.number} declined`,
+      "declined ",
+    ])
+      expect(rejoin(odd)).toEqual(CLOSED);
+    expect(states()).toEqual(["waiting"]);
+
+    expect(rejoin(`declined ${asked.number}`)).toEqual(CLOSED);
+    expect(states()).toEqual(["closed:declined"]);
+    expect(view()).toMatchObject({
+      offer: "ready",
+      // It was delivered, so nothing is left in the app.
+      earlier: false,
+      request: { state: "closed", declined: true, refused: false },
+    });
+    expect(sessions()).toBe(before);
+    expect(events()).toEqual(["rejoin_asked", "rejoin_closed"]);
+    // Twice, and then the number itself: nothing.
+    expect(rejoin(`declined ${asked.number}`)).toEqual(CLOSED);
+    expect(rejoin(asked.number)).toEqual(CLOSED);
+    expect(states()).toEqual(["closed:declined"]);
+    expect(sessions()).toBe(before);
+  });
+
+  it("can't be declined after it joined, was cancelled or expired", () => {
+    const first = ask();
+    service.rejoin.sent(first.id, "taken");
+    const joined = rejoin(first.number);
+    expect(joined.session_id).toBeTruthy();
+    rejoin(`declined ${first.number}`);
+    expect(states()).toEqual(["joined"]);
+    service.poll("codex", joined.session_id!, true);
+    loseContact();
+    const second = ask();
+    service.rejoin.sent(second.id, "taken");
+    service.rejoin.cancel(roomId, "codex");
+    rejoin(`declined ${second.number}`);
+    const third = ask(true);
+    service.rejoin.sent(third.id, "taken");
+    now += 11 * 60_000;
+    rejoin(`declined ${third.number}`);
+    expect(states()).toEqual(["back", "closed:cancelled", "closed:expired"]);
+  });
+
+  it("a late declined one doesn't hide an earlier prompt that came after it", () => {
+    const first = ask();
+    service.rejoin.sent(first.id, "taken");
+    rejoin(`declined ${first.number}`);
+    const second = ask();
+    service.rejoin.sent(second.id, "taken");
+    service.rejoin.cancel(roomId, "codex");
+    expect(view().earlier).toBe(true);
+    // Delivered in order: the answer to the third says that the second came.
+    const third = ask(true);
+    service.rejoin.sent(third.id, "taken");
+    rejoin(`declined ${third.number}`);
+    expect(view().earlier).toBe(false);
+  });
+
+  it("says what it would be without the pause or the break, and opens only what was shown", () => {
+    service.setRoomPaused(ROOM, true);
+    expect(view()).toMatchObject({ offer: "paused", then: "ready" });
+    expect(() => ask()).toThrow(KonfabError);
+    service.takeBreak(ROOM);
+    expect(view()).toMatchObject({ offer: "paused", then: "ready" });
+    // Only the pause was shown, so the break stays and refuses it.
+    expect(service.openRoom(ROOM, ["pause"])).toEqual(["pause"]);
+    expect(view()).toMatchObject({ offer: "on_break", then: "ready" });
+    expect(() => ask()).toThrow(KonfabError);
+    expect(service.openRoom(ROOM, ["pause"])).toEqual([]);
+    expect(service.openRoom(ROOM, ["pause", "break"])).toEqual(["break"]);
+    expect(view()).toMatchObject({ offer: "ready", then: null });
+    service.setAllPaused(true);
+    expect(view()).toMatchObject({
+      offer: "paused",
+      then: "ready",
+      all_paused: true,
+    });
+    expect(service.openRoom(ROOM, ["pause", "break"])).toEqual([]);
+    expect(view().offer).toBe("paused");
+    service.setAllPaused(false);
+    service.takeBreak(ROOM);
+    service.archiveRoom(roomId);
+    expect(view()).toMatchObject({ offer: "archived", then: null });
+    expect(() => service.openRoom(ROOM, ["break"])).toThrow(/archived/);
+    expect(
+      service.activity(ROOM).filter((event) => event.type === "break_ended"),
+    ).toHaveLength(1);
+  });
+
+  it("sees at the last moment whether it is back, before a paste", () => {
+    service.rejoin.opens = () => true;
+    const look = () => service.rejoin.beforePaste(roomId, "codex");
+    expect(look()).toEqual({ app: "codex", can_open: true, here: false });
+    const asked = ask();
+    service.rejoin.sent(asked.id, "taken");
+    expect(look().here).toBe(false);
+    const joined = rejoin(asked.number);
+    expect(look().here).toBe(true);
+    service.poll("codex", joined.session_id!, true);
+    expect(look().here).toBe(true);
+    // One that is asked to stop isn't back, nor one that was stopped.
+    service.postUserMessage(ROOM, "@codex look");
+    service.poll("codex", joined.session_id!, true);
+    expect(look().here).toBe(true);
+    service.stops.ask(roomId, "codex");
+    expect(service.stops.view(roomId, "codex").state).toBe("asked");
+    expect(look().here).toBe(false);
+  });
+
+  it("opens only apps it is known for, with a conversation and a room that is open", () => {
+    const seen: string[] = [];
+    service.rejoin.opens = (app) => (seen.push(app), true);
+    service.ensureAgent("other", "Other");
+    service.setMembers(roomId, ["claude", "codex", "other"]);
+    service.join("other", ROOM);
+    const can = (id: string) => service.rejoin.view(roomId, id).can_open;
+    expect([can("codex"), can("claude"), can("other")]).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    service.join("claude", ROOM);
+    expect(can("claude")).toBe(true);
+    expect(new Set(seen)).toEqual(new Set(["codex", "claude"]));
+    service.archiveRoom(roomId);
+    expect(can("codex")).toBe(false);
   });
 });

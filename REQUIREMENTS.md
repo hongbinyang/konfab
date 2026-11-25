@@ -529,7 +529,7 @@ Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Wi
 | RJ9 | MUST | Only a command whose path, owner, folders, signature (for the app's own copy) and version were checked is run, without a shell. Anything else turns the button off, and `npm run doctor` says why. |
 | RJ10 | MUST | The request is stored only as a hash, and is in no page, log, activity, export, receipt or agent reply. The conversation is only in the database, its backups and the command's arguments. |
 | RJ11 | MUST | Automated tests use a stand-in and never send with the real command. |
-| RJ12 | MUST | While a Codex agent can't be asked, the button is greyed out and says why. It isn't shown where nothing the lead does would make it work. |
+| RJ12 | MUST | The button is greyed out only while the agent is there, and says why. For an agent that is away, the card always leads on (section 26). |
 | RJ13 | MUST | The room shows that an agent is back at its first wait that counts (not one that only learns of a break or an ended run window) after joining again, however it came back. |
 
 Verified once in the app's own window: conversation open, turn ended normally (2026-11-23). Not yet verified: a conversation stopped with Stop in it, one that is closed or not in front, usage limits, archived conversations, and any system but macOS. The experimental mark stays until the window checks pass.
@@ -548,7 +548,7 @@ Verified once in the app's own window: conversation open, turn ended normally (2
 | RC6 | MUST | A request is told to a watcher at most once, in one transaction with all checks of section 23, and only on an open call. "Sent" means that the watcher wrote the whole line and Konfab received its confirmation; anything else is unsure and isn't sent again. Only a wait by the agent counts as back. |
 | RC7 | MUST | At most 3 registered watchers for a conversation and 6 for an app. A place is freed only by proof that the process is gone; what isn't clear keeps it, however long. Konfab sends no signal to any process. |
 | RC8 | MUST | A watcher that has done its work wakes nobody. One is told to end only while its own agent is waiting, at most twice a day for a conversation, and not after a clean-up that seems to have woken it. |
-| RC9 | MUST | Stop isn't overruled: the prompt says not to use a request after it, and the page says to paste the rejoin prompt. |
+| RC9 | MUST | Stop isn't overruled: the prompt says not to come back with a request after it, and how to answer that, which only tells the lead. The page says to paste the rejoin prompt. |
 | RC10 | MUST | The model's part is an instruction, not a boundary; the documentation says so. The manual prompts work in every state. |
 
 Verified by hand with the watcher in the app's own window, once (2026-11-24): the agent had ended its own turn, and the lead's click brought it back. Verified with a plain waiting command (2026-11-23): the app started a conversation again whose turn the agent had ended, after 2 and after 32 minutes; after Stop it started it as well, and the agent stayed out. Not yet verified: an app that was closed, compaction in between, usage limits, sleep, what a resting watcher costs, and whether the app asks for each command.
@@ -559,7 +559,7 @@ Verified by hand with the watcher in the app's own window, once (2026-11-24): th
 
 | ID | Priority | Requirement |
 | -- | -- | -- |
-| ST1 | MUST | On an agent's own card, and nowhere else, the lead can ask that agent to leave the room's loop: at once when it waits, after a running turn, or at its next wait when it reported work outside a turn. Agents have no route to it. |
+| ST1 | MUST | On an agent's own card the lead can ask that agent to leave the room's loop: at once when it waits, after a running turn, or at its next wait when it reported work outside a turn. Agents have no route to it. |
 | ST2 | MUST | Nothing that runs in the app is interrupted, and the page says so. The name doesn't promise more: "Stop agent", "Stop after turn", "Stop after this work". |
 | ST3 | MUST | The end of a turn and the stop are one transaction, and the answer of the post, pass or wait says "stop", also when it is repeated after a lost answer. |
 | ST4 | MUST | Asked, answered and received by its connector are different states. "Stopped" is only shown for received. No text says that the model read it, that its app has stopped or that it uses no allowance. |
@@ -571,3 +571,20 @@ Verified by hand with the watcher in the app's own window, once (2026-11-24): th
 | ST10 | MUST | While a stop is asked, locks stay until their own end, also when nothing is heard. |
 
 Verified once in each app's own window (2026-11-24): a waiting agent was stopped, its connector confirmed it, it made no further call, and Rejoin brought it back without a prompt. Not yet verified there: stopping after a turn, Keep in room, reported work.
+
+## 26. Stop and Rejoin in every situation
+
+**Status:** First phase implemented. Design: [Stop and Rejoin in every situation](docs/design/robust-stop-rejoin.md).
+
+| ID | Priority | Requirement |
+| -- | -- | -- |
+| SR1 | MUST | For an agent that is away, the card always has one main next step: rejoin, resume and rejoin, or open its app and copy the prompt. What to do next is said at once. Nothing leads to a paste while the agent is there. |
+| SR2 | MUST | A control that opens an app or replaces the clipboard says so in its name; one that does both says both. Opening and copying have separate results, and neither stops the other. No text says that an app or a conversation has opened. |
+| SR3 | MUST | An app is opened only by the lead's click, with a fixed command and path, and `rejoin.open_apps: false` turns it off. Opening sends nothing to an agent and makes no session. |
+| SR4 | MUST | After such a click the page says whether the agent has come back meanwhile. While a request is open, it says what a paste would replace. |
+| SR5 | MUST | Resuming a room, or ending its break, together with a rejoin is asked first. The question names the whole room, the agents with queued turns, and who is asked. Only what was shown is changed; if the second step fails, the first stays and the page says both. An archived room is changed by none of it. |
+| SR6 | MUST | An agent can answer a request with "declined", through the same tool and argument, so that an older server or connector can't take it for a wish to come back. It closes its own open request and changes nothing else. |
+| SR7 | MUST | Stop agents, in the room's header, asks each agent that is there by the rules of section 25, in one transaction each. It shows first what each is told; a failure of one leaves the others asked. An agent that joins afterwards isn't stopped. Keep all undoes those that haven't ended. |
+| SR8 | MUST | Counts and lists of stopped agents say only what is known of each. No text says "done", "safe to close", or that an app has stopped. |
+
+Not yet verified by hand: opening each app from the page, the agent's own answer after its app's Stop, and the evening and the morning as a whole. Opening one exact conversation is a later phase.

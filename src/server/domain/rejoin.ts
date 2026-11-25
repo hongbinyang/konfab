@@ -17,8 +17,11 @@ const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ0123456789";
 const NUMBER = /^[A-HJKMNP-TV-Z0-9]{26}$/;
 const CONVERSATION =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The answer of an agent that doesn't come back: this, then the number. */
+const DECLINED = /^declined ([A-HJKMNP-TV-Z0-9]{26})$/;
 /** What a shown wait turns into "not back yet" after. */
-const SLOW_MS = 60_000;
+const SLOW_MS = 20_000;
+const SLOW_JOINED_MS = 60_000;
 const OPEN = "('sending','waiting','joined')";
 
 /** A routing signal from the app's call metadata, not proof of anything. */
@@ -60,28 +63,34 @@ type Row = {
   joined_at: number | null;
 };
 
+export type Offer =
+  | "ready"
+  | "connected"
+  | "old_join"
+  | "unavailable"
+  | "no_watcher"
+  | "watchers_full"
+  | "elsewhere";
+
 export type RejoinView = {
   /** Which app the texts are about. */
   app: "codex" | "claude";
   /** Watchers of that conversation that have done their work. */
   resting: number;
   /** Whether the lead can ask now, or why not; null where it isn't shown. */
-  offer:
-    | "ready"
-    | "connected"
-    | "old_join"
-    | "unavailable"
-    | "no_watcher"
-    | "watchers_full"
-    | "elsewhere"
-    | "archived"
-    | "paused"
-    | "on_break"
-    | null;
+  offer: Offer | "archived" | "paused" | "on_break" | null;
+  /** In a paused room or a break: what it would be without. */
+  then: Offer | null;
+  /** All rooms are paused, which one room can't undo. */
+  all_paused: boolean;
+  /** Its app can be brought to the front. */
+  can_open: boolean;
   request: {
     state: "waiting" | "joined" | "closed";
     unsure: boolean;
     refused: boolean;
+    /** The agent itself said that it doesn't come back. */
+    declined: boolean;
     slow: boolean;
     asked_at: number;
   } | null;
@@ -107,6 +116,8 @@ export class RejoinRequests {
   /** Whether it is missing because of something the lead can look into. */
   problem: () => boolean = () => false;
   wantedMs = 10 * 60_000;
+  /** Whether an app can be brought to the front. Set by the server. */
+  opens: (app: "codex" | "claude") => boolean = () => false;
   /** For apps that are woken by a watcher; null while that is off. */
   watchers:
     | ((
@@ -125,6 +136,8 @@ export class RejoinRequests {
       isMember: (roomId: number, agentId: string) => boolean;
       /** Neither waiting nor working. */
       isAway: (roomId: number, agentId: string) => boolean;
+      /** In contact, and not stopped or asked to stop. */
+      isHere: (roomId: number, agentId: string) => boolean;
       startSession: (
         roomId: number,
         agentId: string,
@@ -299,7 +312,7 @@ export class RejoinRequests {
              AND reason <> 'refused' AND joined_at IS NULL
              -- Codex delivers in order, so a later one that arrived means this did.
              AND id > (SELECT COALESCE(MAX(id), 0) FROM rejoin_requests
-                       WHERE conversation_id = ? AND joined_at IS NOT NULL)
+                       WHERE conversation_id = ? AND (joined_at IS NOT NULL OR reason = 'declined'))
            LIMIT 1`,
         )
         .get(conversation, conversation),
@@ -335,12 +348,19 @@ export class RejoinRequests {
           session.conversation_id!,
         )
       : undefined;
+    const shown = Boolean(row && (asked || activeJoin || closed));
     const base: RejoinView = {
       app: codex ? "codex" : "claude",
       resting: watcher?.resting ?? 0,
       offer: null,
+      then: null,
+      all_paused: this.deps.allPaused(),
+      can_open:
+        Boolean(session) &&
+        this.deps.room(roomId).archived_at === null &&
+        this.opensFor(agentId, codex),
       request:
-        row && (asked || activeJoin || closed)
+        row && shown
           ? {
               state:
                 row.state === "sending"
@@ -348,10 +368,11 @@ export class RejoinRequests {
                   : (row.state as "waiting" | "joined" | "closed"),
               unsure: row.unsure === 1,
               refused: row.reason === "refused",
+              declined: row.reason === "declined",
               slow:
-                now -
-                  (row.state === "joined" ? row.joined_at! : row.created_at) >=
-                SLOW_MS,
+                row.state === "joined"
+                  ? now - row.joined_at! >= SLOW_JOINED_MS
+                  : now - row.created_at >= SLOW_MS,
               asked_at: row.created_at,
             }
           : null,
@@ -365,19 +386,41 @@ export class RejoinRequests {
     if (!session.conversation_id) return no("old_join");
     // While a joined one is in contact, its own text says what is missing.
     if (!away) return activeJoin ? base : no("connected");
+    const reason = this.roomReason(roomId);
+    const offer: Offer =
+      this.isElsewhere(roomId, agentId, session.conversation_id) ||
+      this.openFor(session.conversation_id)
+        ? "elsewhere"
+        : !watcher || watcher.ready
+          ? "ready"
+          : watcher.full
+            ? "watchers_full"
+            : "no_watcher";
     return {
       ...base,
-      offer:
-        this.roomReason(roomId) ??
-        (this.isElsewhere(roomId, agentId, session.conversation_id) ||
-        this.openFor(session.conversation_id)
-          ? "elsewhere"
-          : !watcher || watcher.ready
-            ? "ready"
-            : watcher.full
-              ? "watchers_full"
-              : "no_watcher"),
+      offer: reason ?? offer,
+      then: reason && reason !== "archived" ? offer : null,
       earlier: this.mayBeInCodex(session.conversation_id),
+    };
+  }
+
+  /** Only for the two apps it is known for, whatever they are called. */
+  private opensFor(agentId: string, codex: boolean): boolean {
+    if (codex) return this.opens("codex");
+    return this.isWatched(agentId) && this.opens("claude");
+  }
+
+  /** What the lead sees before a paste, at this moment. */
+  beforePaste(
+    roomId: number,
+    agentId: string,
+  ): { app: "codex" | "claude"; can_open: boolean; here: boolean } {
+    const view = this.view(roomId, agentId);
+    return {
+      app: view.app,
+      can_open: view.can_open,
+      here:
+        view.request?.state === "joined" || this.deps.isHere(roomId, agentId),
     };
   }
 
@@ -598,8 +641,13 @@ export class RejoinRequests {
     route: Route = "queue",
   ): object {
     const from = conversationId(conversation);
-    if (typeof number !== "string" || !NUMBER.test(number) || !from)
+    if (typeof number !== "string" || !from) return CLOSED;
+    const declined = DECLINED.exec(number)?.[1];
+    if (declined) {
+      this.decline(appId, declined, from, route);
       return CLOSED;
+    }
+    if (!NUMBER.test(number)) return CLOSED;
     // The answer too is made inside, so that it fits what was stored.
     const reply = (row: Row, sessionId: string) =>
       this.deps.reply(row.room_id, row.agent_id, sessionId);
@@ -647,6 +695,31 @@ export class RejoinRequests {
       .immediate();
     this.deps.notify();
     return joined ?? CLOSED;
+  }
+
+  /**
+   * The agent says that it doesn't come back, because the user stopped it in
+   * its app. It closes its own open request and changes nothing else. It is in
+   * the same argument, so that an older server or connector can't take it for
+   * a wish to come back.
+   */
+  private decline(
+    appId: string,
+    number: string,
+    from: string,
+    route: Route,
+  ): void {
+    this.db
+      .transaction(() => {
+        this.closeStale();
+        this.close(
+          "number_hash = ? AND app_id = ? AND conversation_id = ? AND route = ? AND state IN ('sending','waiting')",
+          [hash(number), appId, from, route],
+          "declined",
+        );
+      })
+      .immediate();
+    this.deps.notify();
   }
 
   /** Called inside the transaction of a wait that counts as waiting. */

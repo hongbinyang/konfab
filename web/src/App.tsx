@@ -24,8 +24,13 @@ import {
 import { MessageInput } from "./message-editor/MessageInput";
 import type { EditorHandle } from "./message-editor/RichEditor";
 import { PhoneNotices, useActivity } from "./PhoneNotices";
-import { RejoinAgents, RejoinControls } from "./Rejoin";
-import { StopControls } from "./Stop";
+import {
+  RejoinAgents,
+  RejoinControls,
+  rejoinShown,
+  type RoomNow,
+} from "./Rejoin";
+import { StopAgents, StopControls, StopSummary } from "./Stop";
 import { RichText } from "./RichText";
 import {
   request,
@@ -432,6 +437,7 @@ function Room({
   const { room, agents } = state;
   const [teamOpen, setTeamOpen] = useState(false);
   const [formatOpen, setFormatOpen] = useState(false);
+  const [stopOpen, setStopOpen] = useState(false);
   const [olderMessages, setOlderMessages] = useState<RoomState["messages"]>([]);
   const [olderReadInfo, setOlderReadInfo] = useState<LeadReadInfo | null>(null);
   const messages = useMemo(
@@ -836,6 +842,9 @@ function Room({
                   </li>
                 ))}
               </ul>
+              {!room.archived && (
+                <StopSummary roomId={room.id} agents={agents} act={act} />
+              )}
               {room.brief && (
                 <details>
                   <summary>Brief for agents</summary>
@@ -875,6 +884,17 @@ function Room({
                 >
                   Edit
                 </button>
+                <span className="button-gap" aria-hidden="true" />
+                <StopAgents
+                  roomId={room.id}
+                  agents={agents}
+                  act={act}
+                  open={stopOpen}
+                  onOpen={() => setStopOpen(true)}
+                  onClose={() => setStopOpen(false)}
+                />
+                <RejoinAgents room={roomNow(state)} agents={agents} act={act} />
+                <span className="button-gap" aria-hidden="true" />
                 <button
                   type="button"
                   className="secondary"
@@ -890,7 +910,6 @@ function Room({
                 >
                   {room.paused ? "Resume" : "Pause"}
                 </button>
-                <RejoinAgents roomId={room.id} agents={agents} act={act} />
                 {!room.on_break && (
                   <button
                     type="button"
@@ -1188,10 +1207,27 @@ function Room({
       {room.on_break && (
         <p className="banner">
           Agents in this room are on break and aren&apos;t using allowance.
-          Messages you post will wait for them. To bring an agent back, copy its
-          join prompt and paste it into its app.
+          Messages you post will wait for them. To bring an agent back, use its
+          card.
         </p>
       )}
+      {room.paused &&
+        !room.archived &&
+        agents.some((agent) => agent.stop?.can) && (
+          <p className="banner">
+            <span>
+              Paused. Agents go on waiting and use some allowance. You can ask
+              them to leave the room instead.
+            </span>
+            <button
+              type="button"
+              className="quiet"
+              onClick={() => setStopOpen(true)}
+            >
+              Stop agents…
+            </button>
+          </p>
+        )}
       {limited && (
         <p className="banner">
           Agents have posted {room.agent_streak} messages in a row. Post a
@@ -2958,6 +2994,7 @@ function Agents({
                   replyQueued={room.queued.includes(member.id)}
                   peers={room.agents}
                   roomId={room.room.id}
+                  room={roomNow(room)}
                   archived={room.room.archived}
                   act={act}
                 />
@@ -2970,6 +3007,18 @@ function Agents({
       </section>
     </CollapsibleSection>
   );
+}
+
+/** What the question before a resume or the end of a break needs. */
+function roomNow(state: RoomState): RoomNow {
+  return {
+    id: state.room.id,
+    paused: state.room.paused,
+    on_break: state.room.on_break,
+    queued: state.queued.map(
+      (id) => state.agents.find((agent) => agent.id === id)?.display_name ?? id,
+    ),
+  };
 }
 
 function AgentManagement({
@@ -3031,6 +3080,7 @@ function AgentDetails({
   replyQueued,
   peers,
   roomId,
+  room,
   archived,
   act,
 }: {
@@ -3038,6 +3088,7 @@ function AgentDetails({
   replyQueued: boolean;
   peers: RoomAgent[];
   roomId: number;
+  room: RoomNow;
   archived: boolean;
   act: Act;
 }) {
@@ -3061,9 +3112,14 @@ function AgentDetails({
 
   return (
     <>
-      <ContactNotice agent={agent} />
-      <StopControls roomId={roomId} agent={agent} act={act} />
-      <RejoinControls roomId={roomId} agent={agent} act={act} />
+      <ContactNotice agent={agent} prompts={!rejoinShown(agent)} />
+      <StopControls
+        roomId={roomId}
+        agent={agent}
+        act={act}
+        prompts={!rejoinShown(agent)}
+      />
+      <RejoinControls room={room} agent={agent} act={act} />
       {agent.working && (
         <p className={workingStale ? "warning-text" : "muted"}>
           {workingStale

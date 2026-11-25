@@ -47,6 +47,12 @@ export type StopView = {
   open_permission: boolean;
 };
 
+export type StopResult = {
+  agent_id: string;
+  /** Of its session in Konfab; never of its app. */
+  result: "ended" | "after_turn" | "after_work" | "not_there" | "failed";
+};
+
 export class Stops {
   /** The last refused request of a session, so that its repeat isn't a call. */
   private readonly refused = new Map<string, string>();
@@ -126,6 +132,46 @@ export class Stops {
       })
       .immediate();
     this.deps.notify();
+  }
+
+  /** One after the other: a failure of one leaves the others asked. */
+  askAll(roomId: number, agentIds: string[]): StopResult[] {
+    return agentIds.map((agent_id) => {
+      try {
+        const before = this.view(roomId, agent_id);
+        if (before.state !== "asked") {
+          if (before.can === null) return { agent_id, result: "not_there" };
+          this.ask(roomId, agent_id);
+        }
+        const { state, after } = this.view(roomId, agent_id);
+        return {
+          agent_id,
+          result:
+            state !== "asked"
+              ? "ended"
+              : after === "turn"
+                ? "after_turn"
+                : "after_work",
+        };
+      } catch (error) {
+        return error instanceof KonfabError && error.code === "stop_unavailable"
+          ? { agent_id, result: "not_there" }
+          : { agent_id, result: "failed" };
+      }
+    });
+  }
+
+  /** Undoes those that haven't ended. How many. */
+  keepAll(roomId: number, agentIds: string[]): number {
+    return agentIds.filter((agent_id) => {
+      try {
+        this.keep(roomId, agent_id);
+        return true;
+      } catch (error) {
+        if (error instanceof KonfabError) return false;
+        throw error;
+      }
+    }).length;
   }
 
   keep(roomId: number, agentId: string): void {

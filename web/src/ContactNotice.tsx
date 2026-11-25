@@ -59,13 +59,30 @@ export function RejoinPrompts({
   );
 }
 
+/** On a card: the prompts, out of the way until they're wanted. */
+export function JoinPrompts({
+  agent,
+}: {
+  agent: Pick<RoomAgent, "join_prompt" | "rejoin_prompt">;
+}) {
+  return (
+    <details className="join-prompts">
+      <summary>Join prompts</summary>
+      <RejoinPrompts agent={agent} />
+    </details>
+  );
+}
+
 /**
  * Shown on an agent card when Konfab has had no contact for longer than the
  * agent should take. It describes last contact rather than guessing a cause.
  */
 export function ContactNotice({
   agent,
+  prompts = true,
 }: {
+  /** Other controls on the card have them otherwise. */
+  prompts?: boolean;
   agent: Pick<
     RoomAgent,
     | "state"
@@ -97,11 +114,15 @@ export function ContactNotice({
       <p className="warning-text">
         {agent.working ? `Working · no update${since}` : `No contact${since}`}
       </p>
-      <p className="muted">
-        Its conversation may have stopped. Paste the rejoin prompt into that app
-        to bring it back.
-      </p>
-      <RejoinPrompts agent={agent} />
+      {prompts && (
+        <>
+          <p className="muted">
+            Its conversation may have stopped. Paste the rejoin prompt into that
+            app to bring it back.
+          </p>
+          <JoinPrompts agent={agent} />
+        </>
+      )}
     </div>
   );
 }

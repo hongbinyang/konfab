@@ -818,6 +818,17 @@ export class KonfabService {
               "on_break",
             ].includes(state);
       },
+      isHere: (roomId, agentId) => {
+        const session = this.activeSession(roomId, agentId);
+        return (
+          session !== undefined &&
+          session.stop_asked_at == null &&
+          this.turnQuietSince(roomId, session) === null &&
+          ["waiting", "queued", "working", "waiting_approval"].includes(
+            this.agentState(roomId, agentId),
+          )
+        );
+      },
       newSessionId: randomUUID,
       startSession: (roomId, agentId, sessionId, conversation, route) => {
         this.startSession(roomId, agentId, sessionId, conversation, route);
@@ -2022,6 +2033,41 @@ export class KonfabService {
     })();
     this.logEvent(paused ? "room_paused" : "room_resumed", room.id, null, {});
     this.notify();
+  }
+
+  /** Refuses a room that isn't there. */
+  requireRoom(ref: RoomRef): void {
+    this.room(ref);
+  }
+
+  /**
+   * Resumes a room or ends its break, or both, as the lead's own click on the
+   * page: only what they were shown. Says what it changed.
+   */
+  openRoom(ref: RoomRef, parts: ("pause" | "break")[]): ("pause" | "break")[] {
+    const { id } = this.room(ref);
+    const changed = this.db
+      .transaction(() => {
+        const room = this.roomById(id);
+        if (room.archived_at !== null)
+          throw new KonfabError("room_archived", 409, "This room is archived");
+        const done: ("pause" | "break")[] = [];
+        if (parts.includes("pause") && room.paused === 1) {
+          this.db.prepare("UPDATE rooms SET paused = 0 WHERE id = ?").run(id);
+          this.logEvent("room_resumed", id, null, {});
+          done.push("pause");
+        }
+        if (parts.includes("break") && room.on_break === 1) {
+          this.db.prepare("UPDATE rooms SET on_break = 0 WHERE id = ?").run(id);
+          this.logEvent("break_ended", id, null, {});
+          done.push("break");
+        }
+        if (done.length) this.syncRunPauses();
+        return done;
+      })
+      .immediate();
+    this.notify();
+    return changed;
   }
 
   /** Stops agents from waiting, so they use no allowance until they rejoin. */

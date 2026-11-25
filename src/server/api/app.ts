@@ -122,6 +122,8 @@ export interface AppOptions {
   service: KonfabService;
   notices?: TelegramNotices;
   sendRejoin?: (conversation: string, number: string) => Promise<SendResult>;
+  /** Brings an app to the front; whether the command worked. */
+  openApp?: (app: "codex" | "claude") => Promise<boolean>;
   watchers?: Watchers;
   skills?: SkillLibrary;
   sources?: SkillSources;
@@ -1887,7 +1889,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     roomId: number,
     agentId: string,
     again: boolean,
-  ): Promise<void> => {
+  ): Promise<SendResult> => {
     if (!options.sendRejoin && !options.watchers)
       throw new KonfabError(
         "rejoin_unavailable",
@@ -1906,10 +1908,80 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     } finally {
       service.rejoin.sent(asked.id, result);
     }
+    return result;
   };
   const rejoinParams = z.object({
     id: z.coerce.number().int().positive(),
     agent: z.string().min(1).max(100),
+  });
+  // For several, or with the room first. Each is asked by its own rules, and
+  // what was done to the room stays if an agent then can't be asked.
+  const rejoinRoom = z
+    .object({
+      open: z.array(z.enum(["pause", "break"])).default([]),
+      agents: z
+        .array(
+          z
+            .object({
+              id: z.string().min(1).max(100),
+              again: z.boolean().default(false),
+            })
+            .strict(),
+        )
+        .max(100),
+    })
+    .strict();
+  app.post("/api/rooms/:id/rejoin", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const body = rejoinRoom.parse(request.body);
+    const opened = service.openRoom(id, body.open);
+    const results = await Promise.all(
+      body.agents.map(async (agent) => {
+        try {
+          return (await askToRejoin(id, agent.id, agent.again)) === "refused"
+            ? {
+                agent_id: agent.id,
+                ok: false,
+                error: "Its app didn't take it; nothing is waiting there",
+              }
+            : { agent_id: agent.id, ok: true };
+        } catch (error) {
+          if (!(error instanceof KonfabError)) app.log.error(error);
+          return {
+            agent_id: agent.id,
+            ok: false,
+            error:
+              error instanceof KonfabError
+                ? error.message
+                : "Something went wrong; look at the log",
+          };
+        }
+      }),
+    );
+    return { opened, results };
+  });
+  // Brings the agent's app to the front. It sends nothing to the agent.
+  app.post("/api/rooms/:id/agents/:agent/open", async (request) => {
+    const { id, agent } = rejoinParams.parse(request.params);
+    const { app: name, can_open } = service.rejoin.beforePaste(id, agent);
+    const opened =
+      can_open && options.openApp ? await options.openApp(name) : false;
+    return { opened, here: service.rejoin.beforePaste(id, agent).here };
+  });
+  const stopAgents = z
+    .object({ agents: z.array(z.string().min(1).max(100)).max(100) })
+    .strict();
+  app.post("/api/rooms/:id/stop-agents", async (request) => {
+    const { id } = idParams.parse(request.params);
+    service.requireRoom(id);
+    const { agents } = stopAgents.parse(request.body);
+    return { results: service.stops.askAll(id, agents) };
+  });
+  app.post("/api/rooms/:id/keep-agents", async (request) => {
+    const { id } = idParams.parse(request.params);
+    service.requireRoom(id);
+    const { agents } = stopAgents.parse(request.body);
+    return { kept: service.stops.keepAll(id, agents) };
   });
   const again = z.object({ again: z.boolean().default(false) }).strict();
   app.post("/api/rooms/:id/agents/:agent/rejoin", async (request) => {

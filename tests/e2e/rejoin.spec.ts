@@ -76,7 +76,10 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
   const hint = page
     .locator(".compact-agent", { hasText: "@codex" })
     .getByRole("group", { name: "Rejoin Codex" });
-  await expect(hint).toContainText("Available when the agent is away.");
+  await expect(hint.getByRole("button", { name: "Rejoin" })).toHaveAttribute(
+    "title",
+    "Available when the agent is away.",
+  );
   await expect(
     hint.getByRole("button", { name: "Rejoin", exact: true }),
   ).toBeDisabled();
@@ -110,7 +113,13 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
   await header.focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: /Rejoin agents/ });
-  await expect(dialog.getByRole("listitem")).toHaveText(["Codex"]);
+  await expect(dialog.getByRole("listitem")).toHaveText([
+    /^Codex\s*Codex will be asked$/,
+  ]);
+  if (process.env.KONFAB_SHOTS)
+    await page.screenshot({
+      path: join(process.env.KONFAB_SHOTS, `ask-${testInfo.project.name}.png`),
+    });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   expect(sent()).toBe(before);
@@ -127,10 +136,17 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
   );
   // The page shows the request before the command has run.
   await expect.poll(sent).toBe(before + 1);
-  await expect(group).toContainText("can't take back the prompt in Codex");
+  await expect(group).toContainText("press Resume there");
+  await expect(group.getByRole("button", { name: "Cancel" })).toHaveAttribute(
+    "title",
+    /can't take back the prompt in Codex/,
+  );
+  await group.getByText("Join prompts").click();
   await expect(
     group.getByRole("button", { name: "Copy rejoin prompt" }),
   ).toBeVisible();
+  // No app is opened by a test server, so nothing says that one would be.
+  await expect(group.getByRole("button", { name: /^Open/ })).toHaveCount(0);
   await expect(header).toHaveCount(0);
   if (process.env.KONFAB_SHOTS)
     await page.screenshot({
@@ -162,6 +178,46 @@ test("the lead asks an agent to rejoin, cancels and asks again", async ({
 
   await group.getByRole("button", { name: "Cancel" }).click();
   await expect(group.getByRole("status")).toHaveText(/^Rejoin closed\./);
+
+  // A paused room: one click, after a question that names the whole room.
+  write("UPDATE rooms SET paused = 1 WHERE name = ?", name);
+  await page.reload();
+  await page
+    .locator("nav, aside")
+    .getByRole("button", { name: `# ${name}` })
+    .first()
+    .click();
+  const resume = group.getByRole("button", { name: "Resume and rejoin" });
+  await resume.focus();
+  await page.keyboard.press("Enter");
+  const question = page.getByRole("dialog", { name: "Resume and rejoin" });
+  await expect(question).toContainText("This resumes the whole room.");
+  if (process.env.KONFAB_SHOTS)
+    await page.screenshot({
+      path: join(
+        process.env.KONFAB_SHOTS,
+        `resume-${testInfo.project.name}.png`,
+      ),
+    });
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(
+    await page.evaluate(
+      "document.documentElement.scrollWidth <= document.documentElement.clientWidth",
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.keyboard.press("Escape");
+  await expect(question).toBeHidden();
+  await expect(resume).toBeVisible();
+  expect(sent()).toBe(before + 1);
+  await resume.click();
+  await question.getByRole("button", { name: "Only resume" }).click();
+  await expect(question).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Pause", exact: true }),
+  ).toBeVisible();
+  expect(sent()).toBe(before + 1);
+
   const questions: string[] = [];
   page.once("dialog", (question) => {
     questions.push(question.message());

@@ -182,6 +182,10 @@ Waiting agents use your subscription allowance even when idle, so join agents on
 
 Longer waits also use less allowance: raise `defaults.wait_timeout_seconds` (see [Configuration](#configuration)). If an app cuts waits short, raise `tool_timeout_sec` in the Codex entry, or set `MCP_TOOL_TIMEOUT` (milliseconds) for Claude.
 
+### Stop agents
+
+**Stop agents** at the top of the room asks all its agents to leave the loop, for example in the evening. It first lists what each is told: now, or after its turn or work. Beside the participants you then see, for example, **Stop: 1 connector has it · 1 after its turn**; **Keep all** undoes it for those that haven't ended. It works in a paused room too.
+
 ### Stop one agent
 
 **Stop agent** on an agent's card asks that agent to leave the room's loop. Nobody else is affected, its conversation stays, and **Rejoin** can bring it back.
@@ -219,19 +223,23 @@ Rejoining after a break restores the saved balance once; other rejoins start a f
 
 Instead of pasting the prompt, select **Rejoin** on a Codex agent's card, or **Rejoin agents** in the room's header for all that can be asked. Konfab asks the Codex app to bring back the conversation the agent last joined from. The manual prompts always stay. Claude agents have only those unless you turn on [theirs](#the-rejoin-button-for-claude-agents-macos-experimental-off). Konfab never does this by itself.
 
-It can be used when the agent isn't waiting or working and its last join came through a connector that names its conversation, so **restart the Konfab connector once after this update**. Until then the button is greyed out and says why. It uses the agent's allowance. `npm run doctor` says whether it is available, and why not.
+It can be used when the agent isn't waiting or working and its last join came through a connector that names its conversation, so **restart the Konfab connector once after this update**. Until then the card says so and copies the prompt instead. It uses the agent's allowance. `npm run doctor` says whether it is available, and why not.
 
 | The card says                                      | What it means                                                                                                                             |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | **Rejoin asked 12:03 · waiting**                   | Codex took the prompt                                                                                                                     |
 | **… Konfab couldn't tell whether Codex took it**   | It may be there or not; Konfab doesn't send it again                                                                                      |
-| **Not back yet**                                   | Open its conversation in Codex. After **Stop**, Codex holds the prompt until another turn has ended                                       |
+| **Not back yet**                                   | Select **Open Codex** and look at its conversation. If it shows **Queue paused**, press **Resume** there                                  |
+| **It says it was stopped in …**                    | The agent didn't come back because you stopped it in its app. Paste the rejoin prompt there                                               |
 | **Codex didn't take it; nothing is waiting there** | Use the rejoin prompt                                                                                                                     |
 | **Joined · waiting for its first check**           | It is in the room, but hasn't called `wait_for_turn` yet                                                                                  |
 | **Joined, but not waiting yet**                    | Look at its conversation, or paste the rejoin prompt                                                                                      |
 | **Rejoin closed**                                  | Cancelled, over 10 minutes old, or the room has changed (pause, break, archive, removal, another join), or the agent was in contact again |
 | **Waiting for a turn**                             | It is back                                                                                                                                |
 
+- **In a paused room or a break** the button is **Resume and rejoin** or **End the break and rejoin**. It first names what changes for the whole room and whose queued turns can start. If the agent then can't be asked, the room stays resumed, and the page says so.
+- **When an agent that is away can't be asked,** the card has **Open Codex and copy the prompt** (or **Open Claude …**). Konfab asks the app to come to the front; choose the conversation and paste. Konfab can't see which conversation the app shows. If the agent has come back meanwhile, it says **Don't paste**. Off: `rejoin.open_apps: false`.
+- **Rejoin agents** at the top of the room lists everyone who is away: those that can be asked, and those that need you.
 - **A prompt can't be taken back.** Codex may deliver it hours later. It carries a one-time request that Konfab has closed by then, so the agent is told to end its turn and nothing changes in the room; that costs one short turn. If the model ignores this and joins in the ordinary way, Konfab can't tell that from a pasted prompt.
 - **Sending a second one** while an earlier prompt may still be in Codex asks you first. Only the newest can rejoin.
 - **What is sent:** a fixed text with that request, and nothing anyone wrote, not even the room's name.
@@ -259,14 +267,14 @@ The Claude app has no way to put a prompt into an open conversation from outside
 | How Claude stopped                                                                 | **Rejoin**                                                          |
 | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | It ended its own turn, for example after `@claude end your turn and stop the loop` | brings it back (tested once)                                        |
-| You pressed **Stop**                                                               | doesn't: Stop tells Claude to wait for you. Paste the rejoin prompt |
-| Claude was closed                                                                  | greyed out: the watcher ended with it. Paste the rejoin prompt      |
+| You pressed **Stop**                                                               | may not: Stop tells Claude to wait for you. Paste the rejoin prompt |
+| Claude was closed                                                                  | **Open Claude and copy the prompt**: the watcher ended with it      |
 | A usage limit, a compacted conversation, hours of sleep                            | not tested                                                          |
 
 - **What it runs:** `node …/konfab/dist/cli/watch.js …/.konfab/watch/<number>`, and nothing else. It reads that one file, calls only Konfab on this computer, and looks at the list of processes to end with the app.
 - **Limits:** at most 3 for a conversation and 6 for the app. Old ones rest until Claude is closed, about 56 MB each; Konfab tells one to end, at most twice a day for a conversation, while its agent is waiting. Konfab never ends a process itself. If it can't tell that an old one is gone, it starts no new one, and the manual prompt works.
 - **What is protected:** the same one-time request and checks as for Codex. The watcher's own ticket can only be told such a request; it can't join, read or post.
-- **It relies on the model** doing what its prompt says. If it doesn't start the watcher, the button is greyed out.
+- **It relies on the model** doing what its prompt says. If it doesn't start the watcher, the card opens Claude and copies the prompt instead.
 - **Turn it off:** `claude_watcher: false` and a restart of Konfab. Watchers that are still there rest.
 
 ## 9. Several agents per app
@@ -406,6 +414,7 @@ Settings in `config.yaml`:
 | `rejoin.codex_command`                            | none      | Absolute path of the Codex command, instead of the app's own copy; its signature isn't checked            |
 | `rejoin.allow_untested_version`                   | false     | Use a Codex version this hasn't been tried with                                                           |
 | `rejoin.claude_watcher`                           | false     | Offers the [Rejoin button for Claude agents](#the-rejoin-button-for-claude-agents-macos-experimental-off) |
+| `rejoin.open_apps`                                | true      | Lets a button bring Codex or Claude to the front (macOS)                                                  |
 | `pre_approvals`                                   | none      | Actions agents may take without asking (still logged)                                                     |
 
 Room settings (brief, project folder, parallel mentions, check-in interval) are in each room's **Edit** form.

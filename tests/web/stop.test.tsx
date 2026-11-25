@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StopState } from "../../web/src/api";
 import { UnreachableNotice } from "../../web/src/ContactNotice";
 import {
   RECEIVED_HELP,
   REPLACE_WARNING,
+  StopAgents,
   StopControls,
+  stopCounts,
   stopHelp,
+  StopSummary,
 } from "../../web/src/Stop";
 
 const at = new Date(2026, 10, 24, 18, 40).getTime();
@@ -42,6 +46,8 @@ const agent = (state: StopState | undefined) => ({
 
 describe("stopping an agent on its card", () => {
   let calls: string[];
+  let bodies: unknown[];
+  let answer: object;
   const act = async (action: () => Promise<unknown>) => {
     await action();
   };
@@ -50,9 +56,19 @@ describe("stopping an agent on its card", () => {
 
   beforeEach(() => {
     calls = [];
+    bodies = [];
+    answer = {};
+    // jsdom has no modal dialogs.
+    HTMLDialogElement.prototype.showModal = function () {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close = function () {
+      this.open = false;
+    };
     vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
       calls.push(`${init.method ?? "GET"} ${url}`);
-      return new Response("{}", {
+      bodies.push(init.body ? JSON.parse(String(init.body)) : null);
+      return new Response(JSON.stringify(answer), {
         headers: { "content-type": "application/json" },
       });
     });
@@ -195,5 +211,133 @@ describe("stopping an agent on its card", () => {
     expect(screen.getByRole("status").textContent).toContain(
       "Codex is stopped, so your mention is waiting.",
     );
+  });
+
+  const named = (id: string, state: StopState | undefined) => ({
+    ...agent(state),
+    id,
+    display_name: id,
+  });
+  const team = [
+    named("waits", stop({ can: "now", holds_lock: true })),
+    named("turn", stop({ can: "after_turn" })),
+    named("works", stop({ can: "after_work" })),
+    named("asked", stop({ state: "asked", after: "turn" })),
+    named("gone", stop()),
+  ];
+  function Room({ agents }: { agents: typeof team }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <StopAgents
+        roomId={4}
+        agents={agents}
+        act={act}
+        open={open}
+        onOpen={() => setOpen(true)}
+        onClose={() => setOpen(false)}
+      />
+    );
+  }
+
+  it("shows what each is told before it asks all, and asks those that are there", async () => {
+    render(<Room agents={team} />);
+    const button = screen.getByRole("button", { name: "Stop agents" });
+    await userEvent.click(button);
+    const dialog = screen.getByRole("dialog", { name: "Stop agents" });
+    expect(
+      within(dialog)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      "waitswill be asked now · holds a lock, which is released",
+      "turnin a turn · will be asked after it",
+      "worksworking · will be asked after it",
+      "askedasked already",
+      "gonenot there",
+    ]);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    );
+    expect(calls).toEqual([]);
+    await userEvent.click(button);
+    answer = { results: [{ agent_id: "waits", result: "ended" }] };
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Stop agents",
+      }),
+    );
+    expect(calls).toEqual(["POST /api/rooms/4/stop-agents"]);
+    expect(bodies).toEqual([{ agents: ["waits", "turn", "works", "asked"] }]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays open to say who couldn't be asked", async () => {
+    render(<Room agents={team} />);
+    await userEvent.click(screen.getByRole("button", { name: "Stop agents" }));
+    answer = {
+      results: [
+        { agent_id: "waits", result: "ended" },
+        { agent_id: "turn", result: "after_turn" },
+        { agent_id: "works", result: "failed" },
+        { agent_id: "asked", result: "not_there" },
+      ],
+    };
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Stop agents",
+      }),
+    );
+    const text = screen.getByRole("dialog").textContent!;
+    expect(text).toContain("workscouldn't be asked; look at its card");
+    expect(text).toContain("askednot there to be stopped");
+    expect(text).toContain("waitsits session in Konfab has ended");
+    expect(text).not.toMatch(/\bdone\b|\bsafe\b/i);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("is greyed out when nobody is there, and absent with an older server", () => {
+    const { container, rerender } = render(
+      <Room agents={[named("gone", stop())]} />,
+    );
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Stop agents" })
+        .disabled,
+    ).toBe(true);
+    rerender(<Room agents={[named("old", undefined)]} />);
+    expect(container.textContent).toBe("");
+  });
+
+  it("counts only what is known, and undoes those that haven't ended", async () => {
+    expect(stopCounts([stop(), undefined])).toBeNull();
+    expect(
+      stopCounts([
+        stop({ state: "received" }),
+        stop({ state: "asked", after: "turn" }),
+        stop({ state: "asked", after: "turn" }),
+        stop({ state: "asked", after: "work" }),
+        stop({ state: "answered" }),
+        stop({ state: "undelivered" }),
+        stop({ state: "received", called_at: at }),
+      ]),
+    ).toBe(
+      "Stop: 1 connector has it · 2 after its turn · 1 after its work · 1 sent, not confirmed · 1 not delivered · 1 called again",
+    );
+    render(<StopSummary roomId={4} agents={team} act={act} />);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Stop: 1 after its turn",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Keep all" }));
+    expect(calls).toEqual(["POST /api/rooms/4/keep-agents"]);
+    expect(bodies).toEqual([{ agents: ["asked"] }]);
+    cleanup();
+    render(
+      <StopSummary
+        roomId={4}
+        agents={[named("b", stop({ state: "received" }))]}
+        act={act}
+      />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

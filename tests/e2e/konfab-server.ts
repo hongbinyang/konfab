@@ -114,7 +114,7 @@ echo "Queued message 11111111-2222-7333-8444-555555555555 for thread \${2#--thre
     );
     writeFileSync(
       join(home, "config.yaml"),
-      `server:\n  port: ${port}\nrejoin:\n  codex_command: ${JSON.stringify(command)}\n`,
+      `server:\n  port: ${port}\nrejoin:\n  open_apps: false\n  codex_command: ${JSON.stringify(command)}\n`,
     );
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",

@@ -5,6 +5,7 @@ import { LogFile, logDirectory } from "./log-file.js";
 import { TelegramNotices } from "./telegram/notices.js";
 import { resolveTelegramToken } from "./telegram/token.js";
 import { checkCommand, sendRejoin } from "./rejoin/codex.js";
+import { canOpen, openApp } from "./rejoin/open.js";
 import { macProcesses } from "./rejoin/processes.js";
 import { Watchers } from "./rejoin/watchers.js";
 import { createRuntime } from "./runtime.js";
@@ -39,6 +40,12 @@ let rejoinReady = false;
 let rejoinProblem = false;
 service.rejoin.available = () => rejoinReady;
 service.rejoin.problem = () => rejoinProblem;
+// Only by the lead's click, and not from an isolated test server.
+const opensApps =
+  config.rejoin.enabled &&
+  config.rejoin.open_apps &&
+  process.env.KONFAB_ISOLATED !== "1";
+service.rejoin.opens = (app) => opensApps && canOpen(app);
 /** At the start, after a refusal, and now and then while it can't be used. */
 let recheck: NodeJS.Timeout | undefined;
 const checkRejoin = async (): Promise<void> => {
@@ -90,6 +97,7 @@ const app = await buildApp({
     if (result === "refused") void checkRejoin();
     return result;
   },
+  openApp: async (app) => opensApps && (await openApp(app)),
   watchers,
   service,
   skills,

@@ -78,8 +78,48 @@ test("the lead stops an agent on its card, keeps it, and sees what is confirmed"
   };
   const button = group.getByRole("button", { name: "Stop after turn" });
   await expect(button).toBeVisible();
-  // Only on the card.
-  await expect(page.getByRole("button", { name: /^Stop/ })).toHaveCount(1);
+  // On the card, and for all in the header.
+  await expect(page.getByRole("button", { name: /^Stop/ })).toHaveCount(2);
+  const all = page.getByRole("button", { name: "Stop agents", exact: true });
+  await all.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Stop agents" });
+  await expect(dialog).toContainText("in a turn · will be asked after it");
+  await expect(dialog).toContainText("not there");
+  if (process.env.KONFAB_SHOTS)
+    await page.screenshot({
+      path: join(
+        process.env.KONFAB_SHOTS,
+        `stop-all-${testInfo.project.name}.png`,
+      ),
+    });
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(
+    await page.evaluate(
+      "document.documentElement.scrollWidth <= document.documentElement.clientWidth",
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(group.getByRole("status")).toHaveCount(0);
+  await all.click();
+  await dialog.getByRole("button", { name: "Stop agents" }).click();
+  await expect(dialog).toBeHidden();
+  const summary = page.locator(".stop-summary");
+  await expect(summary).toContainText("Stop: 1 after its turn");
+  await shot("summary");
+  await summary.getByRole("button", { name: "Keep all" }).click();
+  await expect(summary).toHaveCount(0);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  const hint = page.getByRole("button", { name: "Stop agents…" });
+  await expect(hint).toBeVisible();
+  await shot("pause");
+  await hint.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(hint).toHaveCount(0);
   await shot("turn");
   await button.focus();
   await page.keyboard.press("Enter");
@@ -106,8 +146,10 @@ test("the lead stops an agent on its card, keeps it, and sees what is confirmed"
   await expect(card).toContainText("saved");
   await expect(card).not.toContainText("On break");
   await expect(page.getByText("Codex was stopped")).toBeVisible();
+  // Wherever the controls are that have them.
+  await card.getByText("Join prompts").click();
   await expect(
-    group.getByRole("button", { name: "Copy rejoin prompt" }),
+    card.getByRole("button", { name: "Copy rejoin prompt" }),
   ).toBeVisible();
   // Its connector has it.
   write(

@@ -33,6 +33,8 @@ describe("rejoin over the page and the connector", () => {
   let sent: { conversation: string; number: string }[];
   let send: () => Promise<SendResult>;
   let clients: Client[];
+  let opened: string[];
+  let opens: boolean;
   let roomId: number;
 
   const page = (method: "POST" | "DELETE", payload?: object) =>
@@ -40,6 +42,13 @@ describe("rejoin over the page and the connector", () => {
       method,
       url: `/api/rooms/${roomId}/agents/codex/rejoin`,
       headers: { host: HOST, cookie, origin: `http://${HOST}` },
+      ...(payload ? { payload } : {}),
+    });
+  const post = (path: string, payload?: object, headers: object = {}) =>
+    app.inject({
+      method: "POST",
+      url: `/api/rooms/${roomId}/${path}`,
+      headers: { host: HOST, cookie, origin: `http://${HOST}`, ...headers },
       ...(payload ? { payload } : {}),
     });
   const connect = async (name = "codex-mcp-client", conversation?: string) => {
@@ -86,6 +95,8 @@ describe("rejoin over the page and the connector", () => {
     logs = [];
     sent = [];
     clients = [];
+    opened = [];
+    opens = true;
     send = async () => "taken";
     db = openDatabase(":memory:");
     service = new KonfabService(db, {
@@ -95,6 +106,7 @@ describe("rejoin over the page and the connector", () => {
       maxMessageChars: 1000,
     });
     service.rejoin.available = () => true;
+    service.rejoin.opens = () => true;
     service.ensureAgent("claude", "Claude");
     service.ensureAgent("codex", "Codex");
     service.createRoom(ROOM, "", ["claude", "codex"]);
@@ -107,6 +119,10 @@ describe("rejoin over the page and the connector", () => {
       sendRejoin: (to, number) => {
         sent.push({ conversation: to, number });
         return send();
+      },
+      openApp: async (name) => {
+        opened.push(name);
+        return opens;
       },
       logger: true,
       logStream: new Writable({
@@ -391,5 +407,187 @@ describe("rejoin over the page and the connector", () => {
     away();
     expect((await page("POST", {})).statusCode).toBe(409);
     expect(sent).toEqual([]);
+  });
+
+  it("lets the agent say that it doesn't come back, through the same tool", async () => {
+    const call = await connect();
+    await call("join_room", { room: ROOM }, { threadId: HERE });
+    away();
+    await page("POST", {});
+    const { number } = sent[0]!;
+    expect(
+      await call(
+        "rejoin_room",
+        { request: `declined ${number}` },
+        { threadId: OTHER },
+      ),
+    ).toEqual(CLOSED);
+    expect(service.rejoin.view(roomId, "codex").request?.state).toBe("waiting");
+    expect(
+      await call(
+        "rejoin_room",
+        { request: `declined ${number}` },
+        { threadId: HERE },
+      ),
+    ).toEqual(CLOSED);
+    expect(service.rejoin.view(roomId, "codex").request).toMatchObject({
+      state: "closed",
+      declined: true,
+    });
+    expect(
+      await call("rejoin_room", { request: number }, { threadId: HERE }),
+    ).toEqual(CLOSED);
+    expect(logs.join("")).not.toContain(number);
+  });
+
+  it("resumes the room and then asks, and says what it did when asking fails", async () => {
+    const call = await connect();
+    await call("join_room", { room: ROOM }, { threadId: HERE });
+    away();
+    service.setRoomPaused(ROOM, true);
+    const body = { open: ["pause"], agents: [{ id: "codex" }] };
+    const first = await post("rejoin", body);
+    expect(first.json()).toEqual({
+      opened: ["pause"],
+      results: [{ agent_id: "codex", ok: true }],
+    });
+    expect(sent).toHaveLength(1);
+    // A second click: the room stays as it is, and one prompt is enough.
+    expect((await post("rejoin", body)).json()).toMatchObject({
+      opened: [],
+      results: [{ agent_id: "codex", ok: false }],
+    });
+    expect(sent).toHaveLength(1);
+    service.rejoin.cancel(roomId, "codex");
+    service.takeBreak(ROOM);
+    send = async () => "refused";
+    const refused = await post("rejoin", {
+      open: ["break"],
+      agents: [
+        { id: "codex", again: true },
+        { id: "claude" },
+        { id: "nobody" },
+      ],
+    });
+    expect(refused.json().opened).toEqual(["break"]);
+    expect(
+      refused
+        .json()
+        .results.map((item: { agent_id: string; ok: boolean }) => [
+          item.agent_id,
+          item.ok,
+        ]),
+    ).toEqual([
+      ["codex", false],
+      ["claude", false],
+      ["nobody", false],
+    ]);
+    expect(refused.json().results[0].error).toContain("didn't take it");
+    expect(service.roomState(ROOM).room).toMatchObject({
+      paused: false,
+      on_break: false,
+    });
+    for (const odd of [
+      { agents: [], open: ["archive"] },
+      { agents: [{ id: "codex", message: "hello" }] },
+      { open: ["pause"] },
+    ])
+      expect((await post("rejoin", odd)).statusCode).toBe(400);
+  });
+
+  it("refuses a break that was started after the question was shown", async () => {
+    const call = await connect();
+    await call("join_room", { room: ROOM }, { threadId: HERE });
+    away();
+    service.setRoomPaused(ROOM, true);
+    service.takeBreak(ROOM);
+    const answer = await post("rejoin", {
+      open: ["pause"],
+      agents: [{ id: "codex" }],
+    });
+    expect(answer.json()).toMatchObject({
+      opened: ["pause"],
+      results: [{ ok: false }],
+    });
+    expect(service.roomState(ROOM).room.on_break).toBe(true);
+    expect(sent).toEqual([]);
+  });
+
+  it("changes nothing in an archived room", async () => {
+    const call = await connect();
+    await call("join_room", { room: ROOM }, { threadId: HERE });
+    away();
+    service.setRoomPaused(ROOM, true);
+    service.archiveRoom(roomId);
+    const answer = await post("rejoin", {
+      open: ["pause"],
+      agents: [{ id: "codex" }],
+    });
+    expect(answer.statusCode).toBe(409);
+    expect(service.roomState(ROOM).room.paused).toBe(true);
+    expect((await post("agents/codex/open")).json().opened).toBe(false);
+    expect(opened).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it("opens the app on the lead's click, sends nothing, and sees whether the agent came back", async () => {
+    const call = await connect();
+    const { session_id } = await call(
+      "join_room",
+      { room: ROOM },
+      { threadId: HERE },
+    );
+    away();
+    const open = async () => (await post("agents/codex/open")).json();
+    expect(await open()).toEqual({ opened: true, here: false });
+    opens = false;
+    expect(await open()).toEqual({ opened: false, here: false });
+    service.poll("codex", session_id, true);
+    expect(await open()).toEqual({ opened: false, here: true });
+    expect(opened).toEqual(["codex", "codex", "codex"]);
+    expect(sent).toEqual([]);
+    // Never joined: there is no conversation to look for.
+    expect((await post("agents/claude/open")).json().opened).toBe(false);
+    expect(opened).toHaveLength(3);
+  });
+
+  it("stops and keeps all those that the page showed", async () => {
+    const call = await connect();
+    await call("join_room", { room: ROOM }, { threadId: HERE });
+    const agents = ["codex", "claude"];
+    expect((await post("stop-agents", { agents })).json()).toEqual({
+      results: [
+        { agent_id: "codex", result: "ended" },
+        { agent_id: "claude", result: "not_there" },
+      ],
+    });
+    expect((await post("keep-agents", { agents })).json()).toEqual({ kept: 0 });
+    expect((await post("stop-agents", { all: true })).statusCode).toBe(400);
+    roomId += 1000;
+    expect((await post("stop-agents", { agents })).statusCode).toBe(404);
+  });
+
+  it("lets only the signed-in lead on this page do any of it", async () => {
+    for (const path of [
+      "rejoin",
+      "agents/codex/open",
+      "stop-agents",
+      "keep-agents",
+    ]) {
+      const body = { agents: [] };
+      expect((await post(path, body, { cookie: "" })).statusCode).toBe(401);
+      expect(
+        (await post(path, body, { origin: "http://evil.test" })).statusCode,
+      ).toBeGreaterThanOrEqual(400);
+      expect(
+        (
+          await post(path, body, {
+            cookie: "",
+            authorization: `Bearer ${token}`,
+          })
+        ).statusCode,
+      ).toBe(401);
+    }
+    expect(opened).toEqual([]);
   });
 });
