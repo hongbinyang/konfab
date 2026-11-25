@@ -1,10 +1,10 @@
 # Stop button for one agent
 
-**Status:** proposal for review. Nothing is built. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all").
+**Status:** proposal for review. Nothing is built. The lead asked for it on 2026-11-24 and agreed that a running turn always finishes, and that it is for one agent at first (no "Stop all"). The name is decided: **Stop agent**, and **Stop after turn** while it works.
 
 ## Goal
 
-The lead selects **Stop** on an agent's card. The agent leaves the room's loop, costs no allowance, and its conversation stays as it is, so **Rejoin** can bring it back. Nobody else is affected. It is the counterpart of **Rejoin**.
+The lead selects **Stop agent** on an agent's card. The agent is asked to leave the room's loop, so that it doesn't go on waiting; its conversation stays as it is, so **Rejoin** can bring it back. Nobody else is affected. It is the counterpart of **Rejoin**.
 
 It isn't the app's own Stop button: Konfab can't interrupt work that an app is doing, and doesn't try to. No agent can use it.
 
@@ -12,7 +12,7 @@ It isn't the app's own Stop button: Konfab can't interrupt work that an app is d
 
 | The agent is                                                           | On its card              | A click does                                                            |
 | ---------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------- |
-| Waiting for a turn, or has one queued                                  | **Stop**                 | its session ends; its waiting call is answered with "stop"              |
+| Waiting for a turn, or has one queued                                  | **Stop agent**           | its session ends; its waiting call is answered with "stop"              |
 | In a turn, or waiting for a permission in it                           | **Stop after turn**      | the turn finishes; then the same                                        |
 | Working outside a turn (it reported work, and no waiting call is open) | **Stop after this work** | it is stopped at its next `wait_for_turn` (see the question at the end) |
 | Away, not joined, its run window over, or on a break                   | Not shown                |                                                                         |
@@ -29,6 +29,8 @@ After the click:
 | any of these, and it calls again later                        | Stopped 18:40, but it called again at 18:42. Its calls are refused. Look in its app.                                    | 90 seconds after that call                              |
 
 **What each state proves.** _answered_: Konfab made the answer. _received_: the connector, a program on this computer, has it. Neither proves that the model read it, that the app's turn ended, or that allowance is no longer used; no text says so. A lost answer, a broken wait or a repeated call can't make _received_.
+
+**Help text** of every form of the button: "Stops this agent in this room after its current turn; work already running in its app is not interrupted. This isn't the app's own Stop button." For one that waits, without "after its current turn".
 
 No question is asked first: it can be undone (**Keep in room** or **Rejoin**). When the agent holds a lock, the button's help says that it is released when its session ends.
 
@@ -170,7 +172,6 @@ By hand, with the lead, in both apps: stop while waiting; stop during a turn; Ke
 - Work that the app does outside a Konfab turn is only known from what the agent reported. One that works without reporting it looks as if it were waiting, and is stopped at its next call; what it does in its app isn't touched.
 - An agent that isn't calling (hung, or waiting for a question in its app) can't be told.
 
-## Questions for the lead
+## Question for the lead
 
-1. When an agent **works outside a turn** (it reported "working", as while building or testing), should **Stop** end its session **at once**, or **at its next `wait_for_turn`**? Proposed, and written above: at its next wait, shown as **Stop after this work**. It keeps its locks and a permission it waits for, and can be undone meanwhile; but it can take long.
-2. **The name.** This text says "Stop". The lead asks whether "Disconnect" is better. "Stop" is also the name of the app's own button, which does something else: after that one, Claude isn't brought back by Rejoin. "Disconnect" sounds as if a connection were cut at once. Whatever is chosen, the timing is in the button ("… after turn").
+When an agent **works outside a turn** (it reported "working", as while building or testing), should **Stop** end its session **at once**, or **at its next `wait_for_turn`**? Proposed, and written above: at its next wait, shown as **Stop after this work**. It keeps its locks and a permission it waits for, and can be undone meanwhile; but it can take long.
