@@ -265,7 +265,7 @@ describe("the Telegram client", () => {
       expect(await keychain.read({ slot: "own", item })).toEqual({
         state: "unknown",
       });
-      expect(keychain.storeByHand(item)).toBe(false);
+      expect(await keychain.storeByHand(item)).toBe(false);
     }
     expect(started).toBe(0);
   });
@@ -1039,7 +1039,7 @@ describe("phone notices", () => {
     await later(11, look);
     await later(5, look);
     expect(reads).toBe(1);
-    expect(look.view().problem).toBe("macOS didn't give the bot token.");
+    expect(look.view().problem).toBe("The stored bot token couldn't be read.");
     expect(telegram.calls).toEqual([]);
     state = "found";
     await later(6, look);

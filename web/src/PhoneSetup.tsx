@@ -4,6 +4,7 @@ import {
   usePhone,
   type PhoneSetupView,
   type PhoneView,
+  keptIn,
 } from "./PhoneNotices";
 
 export const REMOVE_QUESTION =
@@ -89,10 +90,10 @@ export function PhoneSetup() {
       {view.left_over?.map((left) => (
         <p key={left.item} className="muted left-over">
           {left.old
-            ? "An earlier token may still be in your Keychain. Another Konfab folder of yours may use it."
+            ? `An earlier token may still be ${keptIn(view.kept)}. Another Konfab folder of yours may use it.`
             : left.unsure
-              ? "It isn't known whether a token that isn't used is in your Keychain."
-              : "A token that isn't used may still be in your Keychain."}{" "}
+              ? `It isn't known whether a token that isn't used is ${keptIn(view.kept)}.`
+              : `A token that isn't used may still be ${keptIn(view.kept)}.`}{" "}
           <code>{left.item}</code>{" "}
           <button
             type="button"
@@ -147,7 +148,7 @@ function Start({
         <p className="muted">
           {way === "env"
             ? "Konfab uses the token from KONFAB_TELEGRAM_TOKEN. "
-            : "The token goes from a terminal to your Keychain, and never through this page. "}
+            : `The token goes from a terminal ${view.kept === "file" ? "to Konfab's private token folder" : "to your Keychain"}, and never through this page. `}
           Konfab then contacts Telegram to check the bot.
           {view.state !== "not_set_up" &&
             " Your present setup goes on working until the last step."}
@@ -263,8 +264,10 @@ function Steps({ phone, setup }: { phone: Phone; setup: PhoneSetupView }) {
               <p>Run this in a terminal, in Konfab&apos;s folder:</p>
               <CopyCommand command={setup.command} />
               <p className="muted">
-                macOS asks for the bot&apos;s token and keeps it in your
-                Keychain. Then this page goes on by itself.
+                {phone.view?.kept === "file"
+                  ? "It asks for the bot's token and keeps it in Konfab's private token folder."
+                  : "macOS asks for the bot's token and keeps it in your Keychain."}{" "}
+                Then this page goes on by itself.
               </p>
             </>
           )}

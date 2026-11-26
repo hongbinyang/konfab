@@ -155,7 +155,7 @@ export class TelegramNotices {
     if (read.state === "unknown") {
       // A locked Keychain, for example. Not asked again and again.
       this.retryAt = this.now() + UNKNOWN_MS;
-      this.fail("macOS didn't give the bot token.");
+      this.fail("The stored bot token couldn't be read.");
       return;
     }
     // Never with a token that isn't this setup's own.

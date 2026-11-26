@@ -12,6 +12,7 @@ export class FakeKeychain {
   reads: string[] = [];
   usable = true;
   fromEnvironment = false;
+  kept: "keychain" | "file" | null = "keychain";
   /** What it does with the next calls. */
   refuses = false;
   breaks = false;
@@ -43,7 +44,7 @@ export class FakeKeychain {
     return this.items.delete(item) ? "deleted" : "none";
   }
 
-  storeByHand(item: string): boolean {
+  async storeByHand(item: string): Promise<boolean> {
     if (this.breaks) throw new Error("broken");
     if (this.refuses || this.items.has(item)) return false;
     this.items.set(item, this.token);

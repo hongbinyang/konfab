@@ -37,6 +37,7 @@ export function phoneRoutes(
       ? {
           setup: deps.setup.view(),
           ways: deps.setup.ways(),
+          kept: deps.setup.kept(),
           left_over: deps.setup.leftOvers(),
         }
       : {}),

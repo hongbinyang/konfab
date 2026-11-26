@@ -31,6 +31,7 @@ import {
   isOldItem,
   itemOf,
   Keychain,
+  keptIn,
 } from "../server/telegram/token.js";
 
 export { newCode };
@@ -41,7 +42,7 @@ export type SetupDeps = {
   ask: (question: string) => Promise<string>;
   keychain: Pick<
     Keychain,
-    "usable" | "fromEnvironment" | "read" | "remove" | "storeByHand"
+    "usable" | "kept" | "fromEnvironment" | "read" | "remove" | "storeByHand"
   >;
   client: (
     token: string,
@@ -69,11 +70,11 @@ async function storeNew(
   const { home, say, keychain } = deps;
   const item = await beginItem(home, code, deps.now(), claimed);
   say(
-    "Paste the token from @BotFather (it isn't shown). It is kept in your Keychain.",
+    `Paste the token from @BotFather (it isn't shown). It is kept ${keptIn(keychain.kept)}.`,
   );
   let stored = false;
   try {
-    stored = keychain.storeByHand(item);
+    stored = await keychain.storeByHand(item);
   } catch {
     // What became of it is seen below.
   }
@@ -95,7 +96,7 @@ async function storeNew(
   await noteUnknown(home, item);
   say(
     stored
-      ? "That isn't a bot token, or macOS didn't give it back."
+      ? "That isn't a bot token, or it wasn't given back."
       : "It isn't known whether the token was saved.",
   );
   return null;
@@ -118,7 +119,7 @@ async function forget(deps: SetupDeps, item: string): Promise<void> {
   }
   if (!removed)
     deps.say(
-      `A token that isn't used may still be in your Keychain (${item}). Settings in the page shows it.`,
+      `A token that isn't used may still be kept ${keptIn(deps.keychain.kept)} (${item}). Settings in the page shows it.`,
     );
 }
 
@@ -294,11 +295,11 @@ export function status(deps: SetupDeps): void {
   deps.say(
     !settings
       ? "Phone notices: not set up."
-      : `Phone notices: ${settings.enabled ? "on" : "off"}, to ${settings.chat_name}. The token is ${settings.slot === "env" ? "from KONFAB_TELEGRAM_TOKEN" : `in your Keychain (${itemOf(settings)})`}.`,
+      : `Phone notices: ${settings.enabled ? "on" : "off"}, to ${settings.chat_name}. The token is ${settings.slot === "env" ? "from KONFAB_TELEGRAM_TOKEN" : `kept ${keptIn(deps.keychain.kept)} (${itemOf(settings)})`}.`,
   );
   for (const note of leftOver(deps.home, deps.now(), null))
     deps.say(
-      `Not used, and may still be in your Keychain: ${note.item}${isOldItem(note.item) ? " (another Konfab folder of yours may use it)" : ""}`,
+      `Not used, and may still be kept ${keptIn(deps.keychain.kept)}: ${note.item}${isOldItem(note.item) ? " (another Konfab folder of yours may use it)" : ""}`,
     );
 }
 
@@ -327,7 +328,7 @@ export async function testNotices(deps: SetupDeps): Promise<boolean> {
   if (read.state !== "found" || botId(read.token) !== settings.bot_id) {
     deps.say(
       read.state === "unknown"
-        ? "macOS didn't give the bot token."
+        ? "The stored bot token couldn't be read."
         : "The bot token isn't stored any more, or is for another bot. Run setup again.",
     );
     return false;
@@ -407,7 +408,9 @@ export async function runTelegramSetup(args: string[]): Promise<boolean> {
         reader.close();
       }
     },
-    keychain: new Keychain(),
+    keychain: new Keychain(process.env, process.platform, undefined, {
+      home: konfabHome(),
+    }),
     client: (token) => new TelegramClient(token, standIn),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     now: Date.now,

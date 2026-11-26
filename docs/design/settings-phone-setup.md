@@ -33,11 +33,11 @@ Later: on and off (as now), **Send a test**, **Set up again**, **Remove**. The c
 
 Step 1 always has two ways; step 2 to 4 are the same:
 
-| Way                      | When                                                                                                                               |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **Paste here**           | macOS, if the trials below pass                                                                                                    |
-| **In the terminal**      | always on macOS: `npm run setup -- --telegram --token-only`. macOS asks for the token; the page waits for it and goes on by itself |
-| **From the environment** | `KONFAB_TELEGRAM_TOKEN` is set for the server; the only way on other systems                                                       |
+| Way                      | When                                                                                                                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Paste here**           | macOS, if the trials below pass; Linux                                                                                                                                                 |
+| **In the terminal**      | always on macOS and Linux: `npm run setup -- --telegram --token-only`. macOS (or, on Linux, Konfab) asks for the token without showing it; the page waits for it and goes on by itself |
+| **From the environment** | `KONFAB_TELEGRAM_TOKEN` is set for the server; the only way on other systems; when it is set, a new setup uses it everywhere                                                           |
 
 If a trial fails, **Paste here** isn't built, and everything else is. If storing fails on somebody's computer (locked, refused, a limit, an unknown result), step 4 says so, with **Try again** and **In the terminal**, and the earlier setup works on.
 
@@ -52,6 +52,18 @@ If a trial fails, **Paste here** isn't built, and everything else is. If storing
 | unused  | left over, or replaced                       | **never again**    |
 
 Cancel, the end of the setup's time, or a restart make a ready or claimed note a left-over: shown, with **Remove it**. Nothing is deleted by itself but the item of a setup that was just replaced or removed by the lead.
+
+## On Linux: a private file instead of the Keychain
+
+The lead chose this (B): the Keychain on macOS, and on Linux, which has no Keychain, a private file. Everything else is the same: the same item names, notes, claims, commit and deletion rules, because only the place where an item is kept differs.
+
+- **Where:** `<Konfab folder>/tokens/<item>`, one file per setup. The folder is made `0700`, each file `0600`. Nothing else is in the folder, and Konfab never copies it (the settings' earlier copies are only of `config.yaml`).
+- **Never replaced:** a file is made new (`O_CREAT|O_EXCL`), so one that exists is refused, as an item without "replace" is in the Keychain.
+- **Nothing private is followed elsewhere:** the folder must be a real folder, not a link; a file is opened with `O_NOFOLLOW`. Both must belong to this user and be open to nobody else. Otherwise the answer is _unknown_, so nothing is used, stored or deleted.
+- **Not there** is only a missing folder or file; every other failure is unknown, as with macOS's code 44.
+- **The terminal asks** without showing what is typed (no system program does this on Linux). What isn't a token is refused before anything is written.
+- **What it doesn't do:** the file is plain text on disk, and in backups of the home folder. Programs that run as the lead can read it, as they can ask macOS for the Keychain item. The guide says so.
+- **Other systems** (Windows) have no place: the token comes from the environment, as before.
 
 ## The Keychain: what is known, and what isn't
 
@@ -91,7 +103,7 @@ Cancel, the end of the setup's time, or a restart make a ready or claimed note a
 
 ### Reading, for a notice
 
-Today it is read in a way that the whole server waits for. Changed to one that doesn't, with the same 10 seconds, one at a time, and not again for 10 minutes after a limit; the page says "macOS didn't give the bot token." This also concerns setups of today.
+Today it is read in a way that the whole server waits for. Changed to one that doesn't, with the same 10 seconds, one at a time, and not again for 10 minutes after a limit; the page says "The stored bot token couldn't be read." This also concerns setups of today.
 
 ### Deleting
 

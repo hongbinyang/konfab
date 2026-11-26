@@ -23,8 +23,14 @@ export type PhoneView = {
   /** Absent from older servers. */
   setup?: PhoneSetupView | null;
   ways?: ("terminal" | "env")[];
+  /** Where tokens are kept here. Absent from older servers. */
+  kept?: "keychain" | "file" | null;
   left_over?: { item: string; at: number; unsure: boolean; old: boolean }[];
 };
+
+/** As the terminal says it. */
+export const keptIn = (kept: PhoneView["kept"]): string =>
+  kept === "file" ? "in Konfab's private token folder" : "in your Keychain";
 
 /** Tells Konfab that someone is really using the page, at most once a minute. */
 export function useActivity(): void {

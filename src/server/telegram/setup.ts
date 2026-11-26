@@ -22,7 +22,7 @@ import {
   SetupProblem,
 } from "./steps.js";
 import { readSettings } from "./store.js";
-import { botId, isOldItem, isOwnItem, type Keychain } from "./token.js";
+import { botId, isOldItem, isOwnItem, keptIn, type Keychain } from "./token.js";
 
 /**
  * Setting up phone notices from the page, one at a time, and only in memory:
@@ -147,6 +147,11 @@ export class PhoneSetup {
       : this.deps.keychain.usable
         ? ["terminal"]
         : [];
+  }
+
+  /** Where a token is kept on this computer. */
+  kept() {
+    return this.deps.keychain.kept;
   }
 
   view(): SetupView | null {
@@ -300,7 +305,7 @@ export class PhoneSetup {
     )
       throw new SetupProblem(
         read.state === "unknown"
-          ? "macOS didn't give the bot token."
+          ? "The stored bot token couldn't be read."
           : "The stored bot token isn't there, or isn't the one for this setup. Start again.",
       );
     await this.take(current, read.token);
@@ -491,7 +496,7 @@ export class PhoneSetup {
     if (!(await this.forget(item)))
       return refuse(
         "left_over_unknown",
-        `It isn't known whether it was removed. Its name in Keychain Access is ${item}.`,
+        `It isn't known whether it was removed. It is kept ${keptIn(this.deps.keychain.kept)}, named ${item}.`,
       );
   }
 
@@ -517,7 +522,7 @@ export class PhoneSetup {
       return refuse(
         "no_token",
         read.state === "unknown"
-          ? "macOS didn't give the bot token."
+          ? "The stored bot token couldn't be read."
           : "The bot token isn't stored any more, or is for another bot. Set it up again.",
       );
     if (readSettings(this.deps.home)?.setup_id !== settings.setup_id)

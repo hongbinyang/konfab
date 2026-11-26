@@ -117,6 +117,25 @@ describe("setting up phone notices in the page", () => {
     expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
   });
 
+  it("says where the token is kept: the Keychain, or Konfab's own folder", async () => {
+    await at({});
+    expect(document.body.textContent).toContain("keeps it in your Keychain");
+    cleanup();
+    view = {
+      ...none,
+      kept: "file",
+      setup: step(),
+      left_over: [
+        { item: "konfab-telegram-token-x", at: 1, unsure: false, old: false },
+      ],
+    };
+    await open();
+    expect(document.body.textContent).toContain(
+      "Konfab's private token folder",
+    );
+    expect(document.body.textContent).not.toContain("Keychain");
+  });
+
   it.each([
     [{ step: "token", again: true, command: null }, "Try again", "again", {}],
     [{ step: "bot", bot: "b" }, "Show a code", "code", {}],
@@ -277,10 +296,10 @@ describe("setting up phone notices in the page", () => {
       "goes on working until the last step",
     );
     cleanup();
-    answer = () => [409, { message: "macOS didn't give the bot token." }];
+    answer = () => [409, { message: "The stored bot token couldn't be read." }];
     await open();
     await press("Send a test");
-    expect(screen.getByRole("alert").textContent).toContain("macOS didn't");
+    expect(screen.getByRole("alert").textContent).toContain("couldn't be read");
     expect(screen.queryByText("Sent “Konfab: test”.")).toBeNull();
   });
 

@@ -506,7 +506,7 @@ Not yet verified: a real macOS login item.
 | PN4 | MUST | Limits per room and day, quiet hours, pauses and breaks are respected. What the lead has seen while active, answered or decided, and anything from while notices were off, isn't sent. |
 | PN5 | MUST | A notice that may have arrived is not sent again. After a refusal nothing is sent until the lead acts, and the page says why without secrets. |
 | PN6 | MUST | Replacing a setup takes effect in one step after everything is confirmed. Cancelling, any failure, or a crash at any point leaves the earlier setup working or sends nothing; a token is only used for its own bot, chat and setup. |
-| PN7 | MUST | The token is in the Keychain (or an environment variable), and Konfab gives it to no agent tool, page, export, database, backup or log. Programs running as the lead may still reach it; the documentation says so. |
+| PN7 | MUST | The token is in the Keychain, on Linux in a private file (or an environment variable), and Konfab gives it to no agent tool, page, export, database, backup or log. Programs running as the lead may still reach it; the documentation says so. |
 | PN8 | MUST | One way: after setup Konfab reads nothing from Telegram. Agents have no route to setup or sending. |
 | PN9 | MUST | Automated tests use a local stand-in and never contact Telegram. |
 
@@ -609,3 +609,4 @@ Not yet verified by hand: opening each app from the page, the agent's own answer
 | SE12 | MUST | An item is deleted only if it can't come into use again, and never while it can't be told what is in use. Only macOS's own "not found" means that nothing is there. What isn't known is shown, and nothing is deleted or asked of the Keychain by itself at a start. |
 | SE13 | MUST | Tokens of earlier versions, which another Konfab folder may use, are never deleted without a question. |
 | SE14 | MUST | A notice or test is sent with the chat, bot and token of one setup that is still the current one and on, or not at all. Reading a token never holds up the server. |
+| SE15 | MUST | On Linux each setup's token is in a file of its own, only for this user, in a folder only for this user, never replaced and never reached through a link; anything else counts as unknown. Other systems use the environment. |

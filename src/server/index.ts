@@ -126,7 +126,9 @@ watchers.enabled = watches(config.rejoin);
 service.rejoin.watchers = watchers.enabled ? wakes : null;
 watchers.tidy();
 
-const keychain = new Keychain();
+const keychain = new Keychain(process.env, process.platform, undefined, {
+  home,
+});
 // Only for an isolated server's own tests, and only on this computer.
 const telegramStandIn =
   process.env.KONFAB_ISOLATED === "1" &&

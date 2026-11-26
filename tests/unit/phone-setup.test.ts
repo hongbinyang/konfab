@@ -568,7 +568,7 @@ describe("setting up in the page", () => {
       step: "token",
       again: true,
       command: null,
-      problem: "macOS didn't give the bot token.",
+      problem: "The stored bot token couldn't be read.",
     });
     const reads = keychain.reads.length;
     for (let i = 0; i < 5; i += 1) view();
@@ -1048,7 +1048,7 @@ describe("setting up in the page", () => {
     keychain.fromEnvironment = true;
     await expect(setup.test()).rejects.toThrow(/another bot/);
     keychain.unknown = true;
-    await expect(setup.test()).rejects.toThrow(/didn't give/);
+    await expect(setup.test()).rejects.toThrow(/couldn't be read/);
     await expect(setup.test()).rejects.toThrow();
     await expect(setup.test()).rejects.toThrow(/enough tests/);
     now += 3_600_000;
