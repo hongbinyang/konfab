@@ -148,6 +148,27 @@ agents:
     expect(ask().state).toBe("pending");
   });
 
+  it("keeps a rename in the page when something else changes, and after a restart", async () => {
+    runtime.service.renameAppAgent("claude", "Mine");
+    const named = () =>
+      runtime.service.roomState("plain").agents[0]!.display_name;
+    change("phone_notices:\n  away_minutes: 3\n");
+    expect(named()).toBe("Mine");
+    // A restart with the same file.
+    await runtime.sources.close();
+    runtime.db.close();
+    runtime = createRuntime(join(home, "konfab.db"), inUse, noNetwork);
+    expect(named()).toBe("Mine");
+    // A new name in the file is used, and then a rename again.
+    change("agents:\n  claude:\n    display_name: From the file\n");
+    expect(named()).toBe("From the file");
+    runtime.service.renameAppAgent("claude", "Mine again");
+    change(
+      "phone_notices:\n  away_minutes: 4\nagents:\n  claude:\n    display_name: From the file\n",
+    );
+    expect(named()).toBe("Mine again");
+  });
+
   it("shows the new streak limit in a room", () => {
     change("defaults:\n  max_consecutive_agent_messages: 7\n");
     expect(runtime.service.roomState("plain").room.streak_limit).toBe(7);

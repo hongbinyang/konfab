@@ -936,8 +936,16 @@ export class KonfabService {
 
   // Agents and authentication
 
+  /**
+   * An agent of the file. Its name there is used when it is new or when it
+   * changed in the file; a rename in the page stays otherwise, also after a
+   * restart. The app keeps the name from the file that was used last.
+   */
   ensureAgent(id: string, displayName: string): void {
     this.db.transaction(() => {
+      const app = this.db
+        .prepare("SELECT display_name FROM apps WHERE id=?")
+        .get(id) as { display_name: string } | undefined;
       this.db
         .prepare(
           "INSERT INTO apps(id,display_name,default_agent_id) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name",
@@ -945,9 +953,13 @@ export class KonfabService {
         .run(id, displayName, id);
       this.db
         .prepare(
-          `INSERT INTO agents (id, display_name, created_at, app_id) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name`,
+          "INSERT INTO agents (id, display_name, created_at, app_id) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
         )
         .run(id, displayName, this.now(), id);
+      if (app && app.display_name !== displayName)
+        this.db
+          .prepare("UPDATE agents SET display_name=? WHERE id=?")
+          .run(displayName, id);
     })();
   }
 

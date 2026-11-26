@@ -67,6 +67,7 @@ export function createRuntime(
   const useConfig = (next: Config) => {
     current = next;
     service.useSettings(serviceSettings(next));
+    // A rename in the page stays unless the name in the file changed.
     for (const [id, agent] of Object.entries(next.agents))
       service.ensureAgent(id, agent.display_name);
   };
