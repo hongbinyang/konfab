@@ -1,6 +1,6 @@
 # Settings in the page and on the command line
 
-**Status:** accepted by the lead (2026-11-25); phases 1 and 2 are in use; [phase 3](settings-phase3.md) is planned. The lead asked for it on 2026-11-25: "configs should be supported by both commandline and UI", for example turning on Rejoin for Claude agents and phone notices; `npm run setup` stays.
+**Status:** accepted by the lead (2026-11-25); phases 1 to 3 are in use; [phase 4](settings-phase4.md) is planned. The lead asked for it on 2026-11-25: "configs should be supported by both commandline and UI", for example turning on Rejoin for Claude agents and phone notices; `npm run setup` stays.
 
 ## Today: every setting and every action of setup
 
