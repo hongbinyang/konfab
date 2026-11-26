@@ -183,16 +183,20 @@ export function settingsRoutes(
     },
   );
 
-  // Keys that nothing reads, as they are in the file then; after the page's
-  // question.
+  // Exactly the keys the lead was shown, in exactly the file they were
+  // shown with; anything newer is refused and shown again.
   app.post(
     "/api/settings/clean",
-    { onRequest: fromPage, bodyLimit: 1024 },
+    { onRequest: fromPage, bodyLimit: 16 * 1024 },
     async (request) => {
-      z.object({})
+      const body = z
+        .object({
+          hash: z.string().length(64),
+          keys: z.array(z.string().max(1000)).min(1).max(200),
+        })
         .strict()
-        .parse(request.body ?? {});
-      return save({ drop: "unused" }, undefined);
+        .parse(request.body);
+      return save({ drop: body.keys }, body.hash);
     },
   );
 

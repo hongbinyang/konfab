@@ -110,7 +110,7 @@ export async function runConfig(
       const unused = unusedKeys(parse(read().text));
       if (unused.length)
         say(
-          `\nNot used any more: ${unused.join(", ")}. \`npm run config -- clean\` removes them.`,
+          `\nNot read by this version: ${unused.join(", ")}. \`npm run config -- clean\` removes them.`,
         );
       if (note === "unsure")
         say("\nWhat the running Konfab uses isn't known now.");
@@ -119,13 +119,14 @@ export async function runConfig(
       return 0;
     }
     if (action === "clean" && key === undefined) {
-      const unused = unusedKeys(parse(read().text));
+      const shown = read();
+      const unused = unusedKeys(parse(shown.text));
       if (!unused.length) {
         say("Nothing to clean up.");
         return 0;
       }
       say(
-        `Not used any more: ${unused.join(", ")}. A copy of the file is kept in backups/config.`,
+        `Not read by this version: ${unused.join(", ")}. Older versions used some of them; a newer one or another program might. A copy of the file is kept in backups/config.`,
       );
       if (!yes) {
         if (!deps.ask) {
@@ -137,7 +138,8 @@ export async function runConfig(
           return 1;
         }
       }
-      const done = await changeSettings(home, { drop: "unused" });
+      // Exactly these, in the file as it was shown.
+      const done = await changeSettings(home, { drop: unused }, shown.hash);
       say(done.changed ? "Removed." : "Nothing to clean up.");
       return 0;
     }

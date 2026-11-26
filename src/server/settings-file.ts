@@ -42,11 +42,8 @@ export type Read = { text: string; hash: string; stat: Stats };
 export type Change = {
   set?: Record<string, Value>;
   reset?: string[];
-  /**
-   * Keys that nothing reads; only those that are unused when it is saved.
-   * "unused": all of them, as they are then.
-   */
-  drop?: string[] | "unused";
+  /** Keys that this version doesn't read; only while that is still so. */
+  drop?: string[];
 };
 
 const KEPT = 5;
@@ -335,7 +332,7 @@ export async function changeSettings(
       typeof wanted === "function" ? wanted(checked(before.text)) : wanted;
     known(asked);
     const unused = unusedKeys(parsed(before.text).toJS());
-    const drop = asked.drop === "unused" ? unused : (asked.drop ?? []);
+    const drop = asked.drop ?? [];
     for (const key of drop)
       if (!unused.includes(key))
         throw new SettingsError("unknown", `${key} is in use`, key);

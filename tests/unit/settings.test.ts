@@ -853,7 +853,7 @@ ui:
     ]);
     expect((await run())[0]).toBe(0);
     expect(said.join("\n")).toContain(
-      "Not used any more: defaults.hours, agents.claude.hours, room, ui",
+      "Not read by this version: defaults.hours, agents.claude.hours, room, ui",
     );
     deps.ask = null;
     expect((await run("clean"))[0]).toBe(1);
@@ -865,6 +865,15 @@ ui:
     });
     expect(text()).toContain("# mine");
     expect(await run("clean")).toEqual([0, "Nothing to clean up."]);
+    // A key that comes after the question isn't removed along.
+    put("ui:\n  x: 1\n");
+    deps.ask = async () => {
+      put("ui:\n  x: 1\nfuture:\n  y: 2\n");
+      return "y";
+    };
+    expect((await run("clean"))[0]).toBe(1);
+    expect(said.join(" ")).toContain("changed meanwhile");
+    expect(parse(text())).toEqual({ ui: { x: 1 }, future: { y: 2 } });
     // Only what is unused then: a key in use is never dropped.
     await expect(
       changeSettings(home, { drop: ["defaults.run_hours"] }),

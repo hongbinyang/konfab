@@ -338,7 +338,7 @@ export function Settings({
         {section === "phone" && <PhoneSetup />}
         {section === "advanced" && (view.unused?.length ?? 0) > 0 && (
           <p className="settings-unused">
-            Not used any more, in your file:{" "}
+            Not read by this version, in your file:{" "}
             <code>{view.unused!.join(", ")}</code>.{" "}
             <button
               type="button"
@@ -347,14 +347,14 @@ export function Settings({
               onClick={() => {
                 if (
                   !window.confirm(
-                    `Remove ${view.unused!.join(", ")} from config.yaml? Nothing reads them; a copy of the file is kept in backups/config.`,
+                    `Remove ${view.unused!.join(", ")} from config.yaml? This version doesn't read them; older versions used some of them, and a newer one or another program might. A copy of the file is kept in backups/config.`,
                   )
                 )
                   return;
                 setBusy(true);
                 void request<View>("/api/settings/clean", {
                   method: "POST",
-                  body: {},
+                  body: { hash: view.hash, keys: view.unused },
                 })
                   .then(
                     (next) => {
@@ -362,12 +362,18 @@ export function Settings({
                       setView(next);
                       setSaved("Removed what isn't used any more.");
                     },
-                    (caught: unknown) =>
+                    (caught: unknown) => {
                       setError(
-                        caught instanceof Error
-                          ? `Not removed: ${caught.message}`
-                          : "Not removed.",
-                      ),
+                        caught instanceof RequestError &&
+                          caught.code === "settings_changed"
+                          ? "The file has changed meanwhile. Nothing was removed; here is what is in it now."
+                          : caught instanceof Error
+                            ? `Not removed: ${caught.message}`
+                            : "Not removed.",
+                      );
+                      saves.current += 1;
+                      void load();
+                    },
                   )
                   .finally(() => setBusy(false));
               }}

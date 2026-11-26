@@ -278,8 +278,38 @@ describe("the settings routes", () => {
         )
       ).statusCode,
     ).toBe(403);
-    const done = await call("POST", "/api/settings/clean", {});
-    expect(done.json().unused).toEqual([]);
+    const seen = await view();
+    // Another writer adds a key after the lead was shown the list.
+    writeFileSync(configPath(home), `${text()}future:\n  y: 2\n`);
+    const late = await call("POST", "/api/settings/clean", {
+      hash: seen.hash,
+      keys: seen.unused,
+    });
+    expect([late.statusCode, late.json().code]).toEqual([
+      409,
+      "settings_changed",
+    ]);
+    expect(text()).toContain("future:");
+    const again = await view();
+    expect(again.unused).toEqual(["defaults.hours", "ui", "future"]);
+    // Only what was shown, never a key in use.
+    expect(
+      (
+        await call("POST", "/api/settings/clean", {
+          hash: again.hash,
+          keys: ["server.port"],
+        })
+      ).statusCode,
+    ).toBe(400);
+    const done = await call("POST", "/api/settings/clean", {
+      hash: again.hash,
+      keys: ["defaults.hours", "ui"],
+    });
+    expect(done.json().unused).toEqual(["future"]);
+    await call("POST", "/api/settings/clean", {
+      hash: done.json().hash,
+      keys: ["future"],
+    });
     expect(text()).toBe(
       "# mine\nserver:\n  port: 9000\nrejoin:\n  wanted_minutes: 5\n",
     );

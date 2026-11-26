@@ -353,6 +353,7 @@ describe("the Settings page", () => {
     expect(calls.at(-1)).toMatchObject({
       method: "POST",
       url: "/api/settings/clean",
+      body: { hash: "h1", keys: ["defaults.hours", "ui"] },
     });
   });
 
