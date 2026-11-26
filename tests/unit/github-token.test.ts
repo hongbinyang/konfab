@@ -223,6 +223,37 @@ describe("the GitHub token", () => {
     expect(store.source).toBe("stored");
   });
 
+  it.each(["store", "remove"] as const)(
+    "doesn't take its own %s for one that another program wrote right after it",
+    async (what) => {
+      await store.store(TOKEN);
+      const theirs = `konfab-github-token-${"9".repeat(32)}`;
+      keychain.items.set(theirs, OTHER);
+      // Another program writes its pointer right after this one's lock.
+      store = new GithubToken({
+        home,
+        keychain: keychain as never,
+        env,
+        accepts: async () => true,
+        changed: (token) => void changes.push(token),
+        committed: () =>
+          writeFileSync(
+            join(home, "github-token.json"),
+            JSON.stringify({ item: theirs }),
+          ),
+      });
+      await store.load();
+      if (what === "store") await store.store(TOKEN);
+      else await store.remove(false);
+      expect([store.source, store.token]).toEqual(["stored", OTHER]);
+      // And a later look has nothing to correct.
+      const reads = keychain.reads.length;
+      await store.look();
+      expect(keychain.reads).toHaveLength(reads);
+      expect(store.token).toBe(OTHER);
+    },
+  );
+
   it("takes a change by another program at its next look", async () => {
     await store.store(TOKEN);
     const other = make();

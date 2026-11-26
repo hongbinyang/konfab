@@ -116,6 +116,8 @@ export class GithubToken {
       /** Whether GitHub takes the token. A stand-in in tests. */
       accepts: (token: string) => Promise<boolean>;
       changed: (token: string | undefined) => void;
+      /** Test seam: right after a commit, outside the lock. */
+      committed?: () => void;
     },
   ) {}
 
@@ -249,7 +251,8 @@ export class GithubToken {
       if (before && !notes.some((one) => one.item === before))
         notes.push({ item: before, state: "unused" });
       writeNotes(home, notes);
-      return before ?? null;
+      // Exactly what this wrote, before another writer can.
+      return { before: before ?? null, written: stampOf(home) };
     });
     if (old === false) {
       await note(home, item, "unused");
@@ -257,11 +260,11 @@ export class GithubToken {
         "The GitHub token was changed meanwhile. Nothing was changed here.",
       );
     }
-    this.stamp = stampOf(home);
+    this.deps.committed?.();
     this.readable = true;
-    this.set(typed, "stored");
+    await this.settle(old.written, typed, "stored");
     // Searches hold the token itself, so deleting the old place can't fail one.
-    if (old) await this.forget(old);
+    if (old.before) await this.forget(old.before);
   }
 
   /**
@@ -278,11 +281,12 @@ export class GithubToken {
           ...readNotes(home).filter((one) => one.item !== before),
           { item: before, state: "unused" },
         ]);
-      return before;
+      return { before, written: stampOf(home) };
     });
-    this.stamp = stampOf(home);
-    if (this.source !== "environment") this.set(undefined, "none");
-    if (old) await this.forget(old);
+    this.deps.committed?.();
+    if (this.source === "environment") this.stamp = old.written;
+    else await this.settle(old.written, undefined, "none");
+    if (old.before) await this.forget(old.before);
     if (earlier) await this.removeEarlier();
   }
 
@@ -302,6 +306,20 @@ export class GithubToken {
       throw new GithubTokenError(
         `It isn't known whether the earlier token was removed. Its name in Keychain Access is ${EARLIER}.`,
       );
+  }
+
+  /**
+   * What this process wrote becomes the token in memory only while the
+   * pointer is still that; a later writer's pointer is read instead.
+   */
+  private async settle(
+    written: string,
+    token: string | undefined,
+    source: GithubSource,
+  ): Promise<void> {
+    if (stampOf(this.deps.home) !== written) return this.load();
+    this.stamp = written;
+    this.set(token, source);
   }
 
   /** Only a place this folder made, and only once it is unused. */
