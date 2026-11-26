@@ -102,6 +102,7 @@ export class GithubToken {
   token: string | undefined;
   source: GithubSource = "none";
   readable = true;
+  /** The pointer as the token in memory belongs to it. */
   private stamp: string | null = null;
 
   constructor(
@@ -128,12 +129,16 @@ export class GithubToken {
   /** At the start, and when the pointer changed, also by another program. */
   async load(): Promise<void> {
     const { home, keychain, env } = this.deps;
-    this.stamp = stampOf(home);
+    const stamp = stampOf(home);
+    const done = (token: string | undefined, source: GithubSource) => {
+      this.stamp = stamp;
+      this.set(token, source);
+    };
     const fromEnv = env[GITHUB.env]?.trim();
-    if (fromEnv) return this.set(fromEnv, "environment");
-    if (!keychain.usable) return this.set(undefined, "none");
+    if (fromEnv) return done(fromEnv, "environment");
+    if (!keychain.usable) return done(undefined, "none");
     const pointer = readPointer(home);
-    if (pointer && pointer.item === null) return this.set(undefined, "none");
+    if (pointer && pointer.item === null) return done(undefined, "none");
     const item = pointer?.item ?? EARLIER;
     let read: TokenRead = { state: "unknown" };
     try {
@@ -141,13 +146,16 @@ export class GithubToken {
     } catch {
       // Unknown.
     }
-    // Changed again meanwhile: the next look reads it.
-    if (stampOf(home) !== this.stamp) return;
+    // The pointer moved meanwhile (a store, a removal, another program): this
+    // answer is old, and a later load or look decides. Each load compares its
+    // own stamp, never one that a later load set.
+    if (stampOf(home) !== stamp) return;
     this.readable = read.state !== "unknown";
     if (read.state === "found")
-      return this.set(read.token, pointer ? "stored" : "earlier");
-    // A place that can't be read now keeps the token that searches have.
-    if (read.state === "none") this.set(undefined, "none");
+      return done(read.token, pointer ? "stored" : "earlier");
+    // A place that can't be read now keeps the token that searches have, and
+    // is read again at the next look.
+    if (read.state === "none") done(undefined, "none");
   }
 
   /** Cheap; done every few seconds. */

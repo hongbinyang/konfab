@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { githubTokenCommand } from "../../src/server/github-token.js";
 import {
   GithubToken,
@@ -174,6 +174,53 @@ describe("the GitHub token", () => {
     for (let i = 0; i < 5; i += 1) void store.token;
     await store.look();
     expect(keychain.reads.length - reads).toBe(1);
+  });
+
+  it("never lets an older read put back an older token", async () => {
+    // Each read waits until it is let go, in any order.
+    const waiting: (() => void)[] = [];
+    const read = keychain.read.bind(keychain);
+    vi.spyOn(keychain, "read").mockImplementation(
+      (place) =>
+        new Promise((done) => waiting.push(() => void read(place).then(done))),
+    );
+    const other = make();
+    const settle = () => new Promise((done) => setTimeout(done, 5));
+    const pointTo = (item: string, token: string) => {
+      keychain.items.set(item, token);
+      writeFileSync(join(home, "github-token.json"), JSON.stringify({ item }));
+    };
+    const first = `konfab-github-token-${"1".repeat(32)}`;
+    const second = `konfab-github-token-${"2".repeat(32)}`;
+    pointTo(first, TOKEN);
+    const a = store.load();
+    // Another program (such as the command line) replaces it meanwhile.
+    pointTo(second, OTHER);
+    const b = store.load();
+    await settle();
+    waiting[1]!();
+    await b;
+    expect(store.token).toBe(OTHER);
+    waiting[0]!();
+    await a;
+    expect(store.token).toBe(OTHER);
+    // And removed meanwhile: the older answer doesn't bring it back.
+    const c = store.look();
+    writeFileSync(join(home, "github-token.json"), '{"item":null}');
+    await other.load();
+    const d = store.load();
+    await settle();
+    for (const go of waiting.splice(0)) go();
+    await Promise.all([c, d]);
+    expect([store.source, store.token]).toEqual(["none", undefined]);
+    // A store in the page wins over a read that began before it.
+    vi.restoreAllMocks();
+    keychain.token = TOKEN;
+    const e = store.load();
+    await store.store(TOKEN);
+    await e;
+    expect(store.token).toBe(TOKEN);
+    expect(store.source).toBe("stored");
   });
 
   it("takes a change by another program at its next look", async () => {
