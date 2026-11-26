@@ -1917,6 +1917,27 @@ input.switch[type="checkbox"]:disabled {
   font-size: 13px;
 }
 
+.phone-paste {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.phone-paste label {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.phone-paste input {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .phone-setup .left-over {
   font-size: 13px;
   overflow-wrap: anywhere;

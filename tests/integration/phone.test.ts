@@ -26,6 +26,7 @@ const CHAT = 987654321;
 const CODE = "KONFAB-ABCDE-23456";
 const ROUTES = [
   "setup",
+  "setup/paste",
   "setup/again",
   "setup/code",
   "setup/test",
@@ -195,7 +196,7 @@ describe("phone notices over the page's routes", () => {
     expect(await view()).toMatchObject({
       state: "not_set_up",
       setup: null,
-      ways: ["terminal"],
+      ways: ["paste", "terminal"],
       left_over: [],
     });
     const id = await begin();
@@ -234,6 +235,46 @@ describe("phone notices over the page's routes", () => {
     });
     expect(keychain.removed).toEqual([item]);
     expect(everywhere()).not.toContain(SECRET);
+  });
+
+  it("takes a pasted token once, stores it at the end, and gives it back nowhere", async () => {
+    const { setup } = (await post("setup", { way: "paste" })).json();
+    expect(setup).toMatchObject({ way: "paste", step: "token", command: null });
+    const { id } = setup;
+    for (const token of [`${TOKEN} x`, "", "1:2", TOKEN.repeat(10)]) {
+      const refused = await post("setup/paste", { id, token });
+      expect(refused.statusCode).toBe(token.length > 200 ? 400 : 409);
+      expect(refused.json().code).toBe("not_a_token");
+    }
+    const pasted = await post("setup/paste", { id, token: ` ${TOKEN}\n` });
+    expect(pasted.json().setup).toMatchObject({
+      step: "bot",
+      bot: expect.any(String),
+    });
+    expect(keychain.items.size).toBe(0);
+    expect((await post("setup/code", { id })).statusCode).toBe(200);
+    found = true;
+    await until("chat");
+    await post("setup/confirm", { id, arrived: true });
+    expect(keychain.items.size).toBe(0);
+    const done = await post("setup/finish", { id, enabled: true });
+    expect(done.json()).toMatchObject({
+      state: "on",
+      setup: null,
+      left_over: [],
+    });
+    const { item } = readSettings(home)!;
+    expect(keychain.items.get(item!)).toBe(TOKEN);
+    expect(
+      [
+        logs,
+        ...answers,
+        db.serialize().toString("latin1"),
+        ...readdirSync(home).map((name) =>
+          readFileSync(join(home, name)).toString("latin1"),
+        ),
+      ].join("\n"),
+    ).not.toContain(SECRET);
   });
 
   it.each(ROUTES)(

@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { newCode, setupTelegram } from "../../src/cli/telegram-setup.js";
@@ -29,7 +29,11 @@ import {
   writeSettings,
 } from "../../src/server/telegram/store.js";
 import { readNotes } from "../../src/server/telegram/places.js";
-import { Keychain, type TokenRead } from "../../src/server/telegram/token.js";
+import {
+  Keychain,
+  newItem,
+  type TokenRead,
+} from "../../src/server/telegram/token.js";
 import { FakeKeychain } from "./fake-keychain.js";
 
 // Made up; no test contacts Telegram.
@@ -245,6 +249,48 @@ describe("the Telegram client", () => {
           "konfab-telegram-token-b",
         ),
       ).toBe(result);
+  });
+
+  it("stores a pasted token through the input of macOS's command, never its arguments", async () => {
+    const lines: [string, number][] = [];
+    let started = 0;
+    const of = (env: NodeJS.ProcessEnv = {}, platform = "darwin", code = 0) =>
+      new Keychain(
+        env,
+        platform as NodeJS.Platform,
+        async () => {
+          started += 1;
+          return { code: 0, out: "" };
+        },
+        {
+          input: async (line, limit) => {
+            lines.push([line, limit]);
+            return code;
+          },
+        },
+      );
+    const item = newItem();
+    expect(await of().store(item, TOKEN)).toBe(true);
+    expect(lines).toEqual([
+      [
+        `add-generic-password -a ${userInfo().username} -s ${item} -w ${TOKEN}\n`,
+        60_000,
+      ],
+    ]);
+    // Never "replace" (-U): an item that is there is refused.
+    expect(lines[0]![0]).not.toContain(" -U");
+    expect(await of({}, "darwin", 45).store(item, TOKEN)).toBe(false);
+    lines.length = 0;
+    for (const [keychain, name, token] of [
+      [of({ KONFAB_ISOLATED: "1" }), item, TOKEN],
+      [of({}, "win32"), item, TOKEN],
+      [of(), "login", TOKEN],
+      [of(), item, `${TOKEN} -U`],
+      [of(), item, "not a token"],
+    ] as const)
+      expect(await keychain.store(name, token)).toBe(false);
+    expect(lines).toEqual([]);
+    expect(started).toBe(0);
   });
 
   it("asks macOS only for names that Konfab makes", async () => {

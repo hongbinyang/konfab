@@ -93,6 +93,16 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
       expect(started).toBe(0);
     });
 
+    it("keeps a pasted token the same way, and never replaces one", async () => {
+      const item = newItem();
+      expect(await files().store(item, TOKEN)).toBe(true);
+      expect(statSync(join(folder, item)).mode & 0o777).toBe(0o600);
+      expect(await files().store(item, OTHER)).toBe(false);
+      expect(await files().store(newItem(), "not a token")).toBe(false);
+      expect(await files().read(own(item))).toMatchObject({ token: TOKEN });
+      expect(readdirSync(folder)).toEqual([item]);
+    });
+
     it("stores nothing that isn't a token, or when nothing was typed", async () => {
       for (const answer of [null, "", "not a token", `${TOKEN} more`]) {
         typed = [answer];

@@ -3,7 +3,7 @@ import { request } from "./api";
 
 export type PhoneSetupView = {
   id: string;
-  way: "terminal" | "env";
+  way: "paste" | "terminal" | "env";
   step: "token" | "bot" | "code" | "chat" | "test" | "finish";
   command: string | null;
   busy: boolean;
@@ -22,7 +22,7 @@ export type PhoneView = {
   problem: string | null;
   /** Absent from older servers. */
   setup?: PhoneSetupView | null;
-  ways?: ("terminal" | "env")[];
+  ways?: ("paste" | "terminal" | "env")[];
   /** Where tokens are kept here. Absent from older servers. */
   kept?: "keychain" | "file" | null;
   left_over?: { item: string; at: number; unsure: boolean; old: boolean }[];

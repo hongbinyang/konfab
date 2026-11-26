@@ -421,7 +421,7 @@ describe("setting up in the page", () => {
   });
 
   it("goes from the terminal's token to a working setup, each step by the lead", async () => {
-    expect(setup.ways()).toEqual(["terminal"]);
+    expect(setup.ways()).toEqual(["paste", "terminal"]);
     const started = await setup.start("terminal");
     expect(started).toMatchObject({ step: "token", way: "terminal" });
     expect(bot.calls).toEqual([]);
@@ -647,6 +647,151 @@ describe("setting up in the page", () => {
     await look();
     expect(view()).toMatchObject({ step: "bot" });
     expect(view().problem).toContain("Something else is reading this bot");
+  });
+
+  describe("with the token pasted in the page", () => {
+    const pasteToFinish = async () => {
+      const { id } = await setup.start("paste");
+      expect(view()).toMatchObject({ way: "paste", command: null });
+      await setup.paste(id, TOKEN);
+      expect(view()).toMatchObject({ step: "bot", bot: "konfab_bot" });
+      await setup.code(id);
+      bot.messages = [message()];
+      await look();
+      setup.confirm(id, true);
+      expect(view().step).toBe("finish");
+      return id;
+    };
+    const nothingStored = () => {
+      expect(keychain.items.size).toBe(0);
+      expect(readNotes(home)).toEqual([]);
+    };
+
+    it("stores it only at the last step, in a new place, and never shows it", async () => {
+      const id = await pasteToFinish();
+      expect(JSON.stringify(setup.view())).not.toContain(TOKEN.split(":")[1]);
+      nothingStored();
+      await setup.finish(id, true);
+      const { item } = readSettings(home)!;
+      expect(keychain.items.get(item!)).toBe(TOKEN);
+      expect(keychain.stores).toEqual([item]);
+      expect(readNotes(home)).toEqual([]);
+      expect(setup.view()).toBeNull();
+    });
+
+    it("leaves nothing stored when cancelled, out of time or restarted before the end", async () => {
+      for (const stop of [
+        (id: string) => setup.cancel(id),
+        () => void (now += WANTED_MS + 6 * 60_000),
+        () => void (setup = make()),
+      ]) {
+        bot.messages = [];
+        stop(await pasteToFinish());
+        expect(setup.view()).toBeNull();
+        nothingStored();
+        expect(setup.leftOvers()).toEqual([]);
+      }
+    });
+
+    it("takes only a bot token, and only in its own way and step", async () => {
+      const { id } = await setup.start("paste");
+      for (const odd of ["", "token", `${TOKEN} ${TOKEN}`, "1234:ab cd"])
+        await expect(setup.paste(id, odd)).rejects.toMatchObject({
+          code: "not_a_token",
+        });
+      expect(bot.calls).toEqual([]);
+      await setup.paste(id, TOKEN);
+      await expect(setup.paste(id, TOKEN)).rejects.toMatchObject({
+        code: "setup_step",
+      });
+      setup.cancel(id);
+      const { id: other } = await setup.start("terminal");
+      await expect(setup.paste(other, TOKEN)).rejects.toMatchObject({
+        code: "setup_step",
+      });
+    });
+
+    it.each<[string, () => void, RegExp, number]>([
+      [
+        "nothing is stored",
+        () => (keychain.pasted = "nothing"),
+        /wasn't saved/,
+        0,
+      ],
+      ["storing breaks", () => (keychain.breaks = true), /wasn't saved/, 0],
+      [
+        "reading it back isn't sure",
+        () => (keychain.pasted = "unknown"),
+        /isn't known/,
+        1,
+      ],
+      [
+        "something else is read back",
+        () => (keychain.pasted = "another"),
+        /isn't known/,
+        1,
+      ],
+    ])(
+      "changes nothing when %s, says so, and tries again in a new place",
+      async (_name, spoil, said, left) => {
+        await setup.finish(await toFinish(), true);
+        const before = readFileSync(settingsPath(home), "utf8");
+        bot.messages = [];
+        const id = await pasteToFinish();
+        spoil();
+        await expect(setup.finish(id, true)).rejects.toThrow(said);
+        expect(view()).toMatchObject({ step: "finish" });
+        expect(view().problem).toMatch(
+          /macOS window is still open, press Cancel/,
+        );
+        expect(readFileSync(settingsPath(home), "utf8")).toBe(before);
+        expect(readNotes(home)).toHaveLength(left);
+        expect(keychain.removed).toEqual([]);
+        keychain.pasted = "stored";
+        keychain.breaks = false;
+        keychain.unknown = false;
+        await setup.finish(id, true);
+        const { item } = readSettings(home)!;
+        expect(keychain.stores.at(-1)).toBe(item);
+        expect(new Set(keychain.stores).size).toBe(keychain.stores.length);
+      },
+    );
+
+    it("doesn't ask macOS when it ends while waiting to note the new place", async () => {
+      const id = await pasteToFinish();
+      const lock = new Database(join(home, "config.lock"));
+      lock.exec("BEGIN IMMEDIATE");
+      const saving = setup.finish(id, true).catch((error: Error) => error);
+      await settle();
+      setup.cancel(id);
+      lock.exec("ROLLBACK");
+      lock.close();
+      expect(await saving).toMatchObject({ code: "setup_ended" });
+      expect(keychain.stores).toEqual([]);
+      expect(readNotes(home)).toEqual([]);
+    });
+
+    it("says nothing of macOS where tokens are kept in a file", async () => {
+      keychain.kept = "file";
+      const id = await pasteToFinish();
+      keychain.pasted = "nothing";
+      await expect(setup.finish(id, true)).rejects.toThrow(/wasn't saved/);
+      expect(view().problem).not.toMatch(/macOS/);
+    });
+
+    it("saves nothing when cancelled while it is being stored, and shows what may be left", async () => {
+      const id = await pasteToFinish();
+      let go!: () => void;
+      keychain.hold = new Promise((done) => (go = done));
+      const saving = setup.finish(id, true).catch((error: Error) => error);
+      await settle();
+      setup.cancel(id);
+      go();
+      expect(await saving).toMatchObject({ code: "setup_ended" });
+      expect(readSettings(home)).toBeNull();
+      expect(keychain.removed).toEqual([]);
+      expect(setup.leftOvers()).toHaveLength(1);
+    });
   });
 
   it("doesn't go on after it is cancelled in the middle of anything", async () => {

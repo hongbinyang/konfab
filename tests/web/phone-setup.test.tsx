@@ -102,6 +102,59 @@ describe("setting up phone notices in the page", () => {
     expect(document.querySelector("input, textarea")).toBeNull();
   });
 
+  it("takes the token in the page, or leads to the terminal", async () => {
+    view = { ...none, ways: ["paste", "terminal"] };
+    await open();
+    await press("Set up…");
+    expect(document.body.textContent).toContain("only when you finish");
+    await press("Use a terminal instead");
+    expect(sent()).toEqual([["/setup", { way: "terminal" }]]);
+    cleanup();
+    calls = [];
+    await open();
+    await press("Set up…");
+    await press("Start");
+    expect(sent()).toEqual([["/setup", { way: "paste" }]]);
+  });
+
+  it("sends a pasted token once, empties the field and never shows it", async () => {
+    const TOKEN = "1234567890:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQr";
+    await at({ way: "paste", command: null });
+    const field = screen.getByLabelText(/token, from @BotFather/);
+    expect(field).toHaveProperty("type", "password");
+    expect(field.getAttribute("autocomplete")).toBe("off");
+    const check = screen.getByRole("button", { name: "Check the bot" });
+    expect(check).toHaveProperty("disabled", true);
+    await userEvent.type(field, TOKEN);
+    await userEvent.click(check);
+    expect(sent()).toEqual([["/setup/paste", { id: ID, token: TOKEN }]]);
+    expect(field).toHaveProperty("value", "");
+    expect(document.body.textContent).not.toContain(TOKEN);
+  });
+
+  it("says at the end where it is kept, and that macOS may ask", async () => {
+    await at({
+      way: "paste",
+      step: "finish",
+      chat_name: "Lead",
+      arrived: true,
+    });
+    expect(document.body.textContent).toContain(
+      "macOS may ask for your keychain password",
+    );
+    cleanup();
+    view = {
+      ...none,
+      kept: "file",
+      setup: step({ way: "paste", step: "finish", chat_name: "Lead" }),
+    };
+    await open();
+    expect(document.body.textContent).toContain(
+      "Konfab's private token folder",
+    );
+    expect(document.body.textContent).not.toContain("macOS");
+  });
+
   it("says where the token comes from on this computer", async () => {
     view = { ...none, ways: ["env"] };
     await open();

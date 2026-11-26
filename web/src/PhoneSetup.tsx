@@ -123,10 +123,13 @@ function Start({
 }: {
   view: PhoneView;
   busy: boolean;
-  onStart: (way: "terminal" | "env") => void;
+  onStart: (way: "paste" | "terminal" | "env") => void;
   onCancel: () => void;
 }) {
   const way = view.ways?.[0];
+  const terminal = way === "paste" && view.ways?.includes("terminal");
+  const kept =
+    view.kept === "file" ? "Konfab's private token folder" : "your Keychain";
   return (
     <Card title="Set up phone notices" step={0}>
       <p>
@@ -148,7 +151,9 @@ function Start({
         <p className="muted">
           {way === "env"
             ? "Konfab uses the token from KONFAB_TELEGRAM_TOKEN. "
-            : `The token goes from a terminal ${view.kept === "file" ? "to Konfab's private token folder" : "to your Keychain"}, and never through this page. `}
+            : way === "paste"
+              ? `You paste the bot's token here; it is kept in ${kept} only when you finish, and never shown again. `
+              : `The token goes from a terminal to ${kept}, and never through this page. `}
           Konfab then contacts Telegram to check the bot.
           {view.state !== "not_set_up" &&
             " Your present setup goes on working until the last step."}
@@ -158,6 +163,16 @@ function Start({
         <button type="button" className="secondary" onClick={onCancel}>
           Cancel
         </button>
+        {terminal && (
+          <button
+            type="button"
+            className="link"
+            disabled={busy}
+            onClick={() => onStart("terminal")}
+          >
+            Use a terminal instead
+          </button>
+        )}
         {way && (
           <button type="button" disabled={busy} onClick={() => onStart(way)}>
             Start
@@ -204,6 +219,46 @@ function Card({
       )}
       {children}
     </div>
+  );
+}
+
+/** Sent once; the field is emptied at once, whatever the answer. */
+function PasteToken({
+  off,
+  onPaste,
+}: {
+  off: boolean;
+  onPaste: (token: string) => Promise<unknown>;
+}) {
+  const [token, setToken] = useState("");
+  return (
+    <form
+      className="phone-paste"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const typed = token;
+        setToken("");
+        void onPaste(typed);
+      }}
+    >
+      <label>
+        Your bot&apos;s token, from @BotFather
+        <input
+          type="password"
+          value={token}
+          autoComplete="off"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          maxLength={200}
+          placeholder="1234567890:AA…"
+          onChange={(event) => setToken(event.target.value)}
+        />
+      </label>
+      <button type="submit" disabled={off || !token.trim()}>
+        Check the bot
+      </button>
+    </form>
   );
 }
 
@@ -271,6 +326,12 @@ function Steps({ phone, setup }: { phone: Phone; setup: PhoneSetupView }) {
               </p>
             </>
           )}
+          {setup.way === "paste" && (
+            <PasteToken
+              off={off}
+              onPaste={(token) => send("/setup/paste", { id, token })}
+            />
+          )}
           {setup.busy && <p className="muted">Checking the bot…</p>}
         </>
       )}
@@ -318,6 +379,15 @@ function Steps({ phone, setup }: { phone: Phone; setup: PhoneSetupView }) {
           Notices will go to <strong>{setup.chat_name}</strong>
           {setup.arrived ? "" : ", without a test"}. Until now nothing was
           changed.
+          {setup.way === "paste" &&
+            (phone.view?.kept === "file"
+              ? " When you finish, the token is kept in Konfab's private token folder."
+              : " When you finish, the token is kept in your Keychain; macOS may ask for your keychain password.")}
+        </p>
+      )}
+      {setup.step === "finish" && setup.busy && (
+        <p className="muted" role="status">
+          Saving…
         </p>
       )}
       {setup.problem && (

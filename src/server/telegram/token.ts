@@ -18,6 +18,8 @@ import { TOKEN_PATTERN } from "./client.js";
 
 const security = "/usr/bin/security";
 const LIMIT_MS = 10_000;
+/** Storing may wait for the lead to answer a macOS window. */
+const STORE_LIMIT_MS = 60_000;
 const MAX_BYTES = 8192;
 /** macOS's own answer for "there is none". Nothing else means that. */
 const NOT_FOUND = 44;
@@ -58,6 +60,36 @@ export type Removed = "deleted" | "none" | "unknown";
 
 export type Ran = { code: number | null; out: string };
 export type Run = (args: string[]) => Promise<Ran>;
+
+/**
+ * `security -i`: the command, with the token, goes in through its input, so
+ * that it is in no process list. Its output is dropped unread.
+ */
+const runWithInput = (line: string, limit: number): Promise<number | null> =>
+  new Promise((done) => {
+    let finished = false;
+    const child = spawn(security, ["-i"], {
+      shell: false,
+      stdio: ["pipe", "ignore", "ignore"],
+      env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME ?? "" },
+    });
+    const finish = (code: number | null) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      child.unref();
+      done(code);
+    };
+    // A window left open by macOS stays; the page says to press Cancel.
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(null);
+    }, limit);
+    child.once("error", () => finish(null));
+    child.once("close", (code) => finish(code));
+    child.stdin.once("error", () => undefined);
+    child.stdin.end(line);
+  });
 
 /** Without a shell, and without holding up the server. */
 const run: Run = (args) =>
@@ -231,15 +263,19 @@ export const askHidden: AskHidden = (question) =>
     input.on("data", key);
   });
 
+export type Store = (line: string, limit: number) => Promise<number | null>;
+
 export class Keychain {
   private readonly files: TokenFiles | null;
+  private readonly input: Store;
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly start: Run = run,
-    options: { home?: string; ask?: AskHidden } = {},
+    options: { home?: string; ask?: AskHidden; input?: Store } = {},
   ) {
+    this.input = options.input ?? runWithInput;
     this.files =
       platform === "linux" && options.home
         ? new TokenFiles(join(options.home, "tokens"))
@@ -294,6 +330,32 @@ export class Keychain {
     return ran.code === 0 && TOKEN_PATTERN.test(token)
       ? { state: "found", token }
       : { state: "unknown" };
+  }
+
+  /**
+   * A token from the page, in a new item that is never replaced. What became
+   * of it is only known by reading it back, whatever this says.
+   */
+  async store(item: string, token: string): Promise<boolean> {
+    const account = userInfo().username;
+    if (
+      !this.usable ||
+      !isOwnItem(item) ||
+      !TOKEN_PATTERN.test(token) ||
+      // Nothing in the line needs quoting.
+      !/^[A-Za-z0-9._-]+$/.test(account)
+    )
+      return false;
+    if (this.files) return this.files.store(item, token);
+    try {
+      const code = await this.input(
+        `add-generic-password -a ${account} -s ${item} -w ${token}\n`,
+        STORE_LIMIT_MS,
+      );
+      return code === 0;
+    } catch {
+      return false;
+    }
   }
 
   /** Only names that Konfab makes. */

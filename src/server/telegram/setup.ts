@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { KonfabError } from "../domain/errors.js";
-import type { Chat, TelegramClient } from "./client.js";
+import { TOKEN_PATTERN, type Chat, type TelegramClient } from "./client.js";
 import {
+  beginItem,
   claim,
   commit,
   dropNote,
@@ -9,6 +10,8 @@ import {
   leftOver,
   newPairing,
   newSetupId,
+  noteReady,
+  noteUnknown,
   readNotes,
   removeSetup,
   WANTED_MS,
@@ -22,14 +25,21 @@ import {
   SetupProblem,
 } from "./steps.js";
 import { readSettings } from "./store.js";
-import { botId, isOldItem, isOwnItem, keptIn, type Keychain } from "./token.js";
+import {
+  botId,
+  isOldItem,
+  isOwnItem,
+  keptIn,
+  type Keychain,
+  type TokenRead,
+} from "./token.js";
 
 /**
  * Setting up phone notices from the page, one at a time, and only in memory:
- * until the last step nothing of the earlier setup is touched. The token
- * never comes from or goes to the page.
+ * until the last step nothing of the earlier setup is touched. A pasted
+ * token comes from the page once and never goes back to it.
  */
-export type Way = "terminal" | "env";
+export type Way = "paste" | "terminal" | "env";
 type Client = Pick<
   TelegramClient,
   "botName" | "hasWebhook" | "waitingMessages" | "send"
@@ -145,7 +155,7 @@ export class PhoneSetup {
     return this.deps.keychain.fromEnvironment
       ? ["env"]
       : this.deps.keychain.usable
-        ? ["terminal"]
+        ? ["paste", "terminal"]
         : [];
   }
 
@@ -311,6 +321,65 @@ export class PhoneSetup {
     await this.take(current, read.token);
   }
 
+  /**
+   * The token from the page. Kept only in memory until the last step, so
+   * that cancel, a closed page or a restart leave nothing stored.
+   */
+  async paste(id: string, token: string): Promise<SetupView> {
+    const current = this.named(id);
+    if (current.way !== "paste" || current.step !== "token")
+      return refuse("setup_step", "That isn't the next step");
+    if (!TOKEN_PATTERN.test(token.trim()))
+      return refuse("not_a_token", "That isn't a bot token");
+    await this.step(current, () => this.take(current, token.trim()));
+    return this.view()!;
+  }
+
+  /**
+   * At the last step, the pasted token goes into a new item. Only reading it
+   * back says whether it is there.
+   */
+  private async storePasted(current: Current): Promise<void> {
+    const { home, keychain } = this.deps;
+    const token = current.token!;
+    const item = await beginItem(home, "", this.now(), current.setup);
+    // Ended while it waited for the lock: macOS isn't asked at all.
+    if (!this.goesOn(current)) {
+      await dropNote(home, item);
+      this.still(current);
+    }
+    try {
+      await keychain.store(item, token);
+    } catch {
+      // Reading it back says what became of it.
+    }
+    let read: TokenRead = { state: "unknown" };
+    try {
+      read = await keychain.read({ slot: "own", item });
+    } catch {
+      // Unknown.
+    }
+    const open =
+      keychain.kept === "keychain"
+        ? " If a macOS window is still open, press Cancel there."
+        : "";
+    if (read.state === "found" && read.token === token) {
+      await noteReady(home, item, botId(token));
+      current.item = item;
+      return;
+    }
+    if (read.state === "none") {
+      await dropNote(home, item);
+      throw new SetupProblem(
+        `The token wasn't saved.${open} Nothing was changed; try again.`,
+      );
+    }
+    await noteUnknown(home, item);
+    throw new SetupProblem(
+      `It isn't known whether the token was saved.${open} Nothing was changed; trying again uses a new place, and what may be left is shown below.`,
+    );
+  }
+
   /** After a problem in the first step, by the lead's click. */
   async again(id: string): Promise<SetupView> {
     const current = this.named(id);
@@ -421,6 +490,8 @@ export class PhoneSetup {
     let old: string | null = null;
     let done = false;
     await this.step(current, async () => {
+      if (current.way === "paste" && !current.item)
+        await this.storePasted(current);
       const next = {
         chat_id: current.chat!.id,
         chat_name: current.chat!.name,

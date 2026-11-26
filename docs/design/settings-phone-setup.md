@@ -1,6 +1,6 @@
 # Settings, phase 2: setting up phone notices in the page
 
-**Status:** reviewed; parts A and B are built, with stand-ins only; Paste here (C and D) isn't. No Keychain test was run for it, and K1 to K7 wait for the lead. It makes the part "Phone notices in the page" of [Settings](settings.md) concrete, and changes three things there (marked **Changed**).
+**Status:** reviewed; parts A and B are built and reviewed; the Linux private file (B of the lead's choice) is built and reviewed; K1 to K7 were run with the lead on 2026-11-26, all as expected, so **Paste here** (D) is built. It makes the part "Phone notices in the page" of [Settings](settings.md) concrete, and changes three things there (marked **Changed**).
 
 ## What the lead gets
 
@@ -35,7 +35,7 @@ Step 1 always has two ways; step 2 to 4 are the same:
 
 | Way                      | When                                                                                                                                                                                   |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Paste here**           | macOS, if the trials below pass; Linux                                                                                                                                                 |
+| **Paste here**           | macOS (the trials below passed) and Linux                                                                                                                                              |
 | **In the terminal**      | always on macOS and Linux: `npm run setup -- --telegram --token-only`. macOS (or, on Linux, Konfab) asks for the token without showing it; the page waits for it and goes on by itself |
 | **From the environment** | `KONFAB_TELEGRAM_TOKEN` is set for the server; the only way on other systems; when it is set, a new setup uses it everywhere                                                           |
 
@@ -67,23 +67,22 @@ The lead chose this (B): the Keychain on macOS, and on Linux, which has no Keych
 
 ## The Keychain: what is known, and what isn't
 
-| Question                                                                                                 | State                                                           | Needed for                      |
-| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------- |
-| `security -i` stores, reads back equal, prints nothing, isn't in the process list (11 looks)             | **seen** (2026-11-25, throwaway keychain)                       | Paste here                      |
-| a wrong option: refused, the token not printed                                                           | **seen**                                                        | Paste here                      |
-| a locked keychain waits with a window                                                                    | **seen**                                                        | the limit, the words            |
-| K1 the window is refused: code, output, nothing stored                                                   | not known                                                       | Paste here                      |
-| K2 ended by the limit while the window is open: does it stay, is something stored, can it be tried again | not known                                                       | Paste here                      |
-| K3 the window is answered: stored, read back                                                             | not known                                                       | Paste here                      |
-| K4 an item that exists, without "replace": refused, unchanged                                            | not known                                                       | Changed 2                       |
-| K5 the token isn't in the process list or output in K1 to K4                                             | not known                                                       | Paste here                      |
-| K6 reading a locked one later (a notice): window, limit                                                  | not known; today it can hold up the whole server for 10 seconds | all ways                        |
-| K7 the login keychain in its usual state: no window at all                                               | as the terminal way today; not tried with `security -i`         | Paste here                      |
-| other macOS versions                                                                                     | not known                                                       | said in the guide; the fallback |
+| Question                                                                          | Result (2026-11-26, macOS 26.7.3, one Mac)                                                                               |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `security -i` stores, reads back equal, prints nothing, isn't in the process list | **seen**                                                                                                                 |
+| a wrong option: refused, the token not printed                                    | **seen**                                                                                                                 |
+| K1 the window is refused                                                          | code 128 "User canceled", **nothing stored** (a first run stored, most likely because the window was answered; repeated) |
+| K2 ended by the limit while the window is open                                    | nothing stored; trying again works; **the window stays open** after the end                                              |
+| K3 the window is answered                                                         | stored, read back equal                                                                                                  |
+| K4 an item that exists, without "replace"                                         | refused (code 45), the first one unchanged, no window                                                                    |
+| K5 the token in the process list or output                                        | **never**, in about 280 looks and every output                                                                           |
+| K6 reading a locked one                                                           | waits for the window until the limit; the window stays open after                                                        |
+| K7 the login keychain in its usual state                                          | no window; stored, read, deleted, then "not found"                                                                       |
+| other macOS versions, a locked login keychain                                     | not tried                                                                                                                |
 
 **K1 to K7 are done only with the lead at the computer,** who says when. Each uses a made-up token. K1 to K6 use a throwaway keychain in a temporary folder that is deleted afterwards and never joins the search list. K7 is the only one that touches the login keychain: one item with a made-up value and its own name, deleted at once; it is done only if the lead agrees to it by itself. Before each the lead is told: what opens, what to press, what is expected. A script does one test at a time and stops after it. About 10 minutes.
 
-**What decides:** K1 to K5 and K7 as expected: Paste here is built. Any other result: it isn't, and the result is written here. K6 only decides how reading is done (below).
+**What decided:** K1 to K5 and K7 were as expected, so Paste here is built. Because a window can stay open after the limit (K2, K6), a store that isn't confirmed says "If a macOS window is still open, press Cancel there." The script is outside the repository; its results are in this table.
 
 **K4 can be done without a window** (an unlocked throwaway keychain, as in the first trial), but also waits for the lead, as agreed.
 
@@ -92,8 +91,9 @@ The lead chose this (B): the Keychain on macOS, and on Linux, which has no Keych
 1. The form is checked again (digits, a colon, letters, digits, `-`, `_`), and the name is ours; nothing needs quoting.
 2. The note is written first: item, bot number, "unfinished".
 3. `security -i` with the command in its input, no shell, its own small environment, no inherited files. Output is matched and dropped, never logged.
-4. Limit 60 seconds, then it is ended. The page says before: "macOS may ask for your keychain password."
-5. Whatever the result, the item is read once, with the same limit:
+4. Limit 60 seconds, then it is ended. The page says before: "macOS may ask for your keychain password." On Linux the token goes into its private file instead.
+
+It happens only at **Finish**: until then the pasted token is in the server's memory only, so cancel, the end of the time or a restart leave nothing stored. The field in the page is emptied when it is sent, and the token is in no answer, not even an error about it. 5. Whatever the result, the item is read once, with the same limit:
 
 | Read                      | Then                                                                                                                             |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |

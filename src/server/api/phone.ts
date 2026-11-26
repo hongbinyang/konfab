@@ -82,11 +82,21 @@ export function phoneRoutes(
   post("setup", (body) =>
     setup().start(
       z
-        .object({ way: z.enum(["terminal", "env"]) })
+        .object({ way: z.enum(["paste", "terminal", "env"]) })
         .strict()
         .parse(body).way,
     ),
   );
+  // The token is never quoted back, also not in an error.
+  post("setup/paste", (body) => {
+    const read = z
+      .object({ id, token: z.string().max(200) })
+      .strict()
+      .safeParse(body);
+    if (!read.success)
+      throw new KonfabError("not_a_token", 400, "That isn't a bot token");
+    return setup().paste(read.data.id, read.data.token);
+  });
   post("setup/again", (body) => setup().again(named.parse(body).id));
   post("setup/code", (body) => setup().code(named.parse(body).id));
   post("setup/test", (body) => setup().sendTest(named.parse(body).id));
