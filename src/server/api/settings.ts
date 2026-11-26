@@ -4,6 +4,7 @@ import { KonfabError } from "../domain/errors.js";
 import type { LiveSettings } from "../live-settings.js";
 import { agree, isAgreed, lookAtOwn } from "../rejoin/own-command.js";
 import { lookAtCommand } from "../rejoin/codex.js";
+import { GithubTokenError, type GithubToken } from "../github/token-store.js";
 import { parse } from "yaml";
 import {
   changeSettings,
@@ -32,6 +33,8 @@ export type SettingsAccess = {
   live: LiveSettings;
   /** The Codex command may be another one now. */
   recheck: () => void;
+  /** The GitHub token for the skill search, where there is one. */
+  github?: GithubToken;
   /** Test seam: what starts codesign. */
   run?: Parameters<typeof lookAtOwn>[2];
 };
@@ -113,6 +116,8 @@ export function settingsRoutes(
           };
         }),
       ].map(shownOf),
+      /** Never the token: where it comes from, and what is left. */
+      github: access.github?.view() ?? null,
       /** Keys in the file that nothing reads any more. */
       unused: (() => {
         try {
@@ -197,6 +202,65 @@ export function settingsRoutes(
         .strict()
         .parse(request.body);
       return save({ drop: body.keys }, body.hash);
+    },
+  );
+
+  // The token comes once and is never sent back, also not in an error.
+  const github = () => {
+    if (!access.github)
+      throw new KonfabError("not_available", 409, "Not available here");
+    return access.github;
+  };
+  const tokenStep = async (step: () => Promise<void>) => {
+    try {
+      await step();
+    } catch (error) {
+      if (error instanceof GithubTokenError)
+        throw new KonfabError("github_token", 409, error.message);
+      throw new KonfabError(
+        "github_token",
+        409,
+        "That didn't work. Nothing was changed.",
+      );
+    }
+    return view();
+  };
+  app.post(
+    "/api/settings/github-token",
+    { onRequest: fromPage, bodyLimit: 4 * 1024 },
+    async (request) => {
+      const body = z
+        .object({ token: z.string().max(300) })
+        .strict()
+        .safeParse(request.body);
+      if (!body.success)
+        throw new KonfabError(
+          "github_token",
+          400,
+          "That isn't a GitHub token.",
+        );
+      return tokenStep(() => github().store(body.data.token));
+    },
+  );
+  app.post(
+    "/api/settings/github-token/remove",
+    { onRequest: fromPage, bodyLimit: 1024 },
+    async (request) => {
+      const body = z
+        .object({ earlier: z.boolean().default(false) })
+        .strict()
+        .parse(request.body ?? {});
+      return tokenStep(() => github().remove(body.earlier));
+    },
+  );
+  app.post(
+    "/api/settings/github-token/remove-earlier",
+    { onRequest: fromPage, bodyLimit: 1024 },
+    async (request) => {
+      z.object({})
+        .strict()
+        .parse(request.body ?? {});
+      return tokenStep(() => github().removeEarlier());
     },
   );
 

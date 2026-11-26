@@ -39,6 +39,29 @@ export const isOldItem = (item: unknown): item is string =>
 /** Never made twice, and never replaced. */
 export const newItem = (): string =>
   `konfab-telegram-token-${randomBytes(16).toString("hex")}`;
+
+/** A kind of token: its names, its form and its environment variable. */
+export type TokenKind = {
+  own: RegExp;
+  old: RegExp;
+  env: string;
+  pattern: RegExp;
+};
+export const TELEGRAM: TokenKind = {
+  own: OWN,
+  old: OLD,
+  env: "KONFAB_TELEGRAM_TOKEN",
+  pattern: TOKEN_PATTERN,
+};
+/** Classic and fine-grained tokens; nothing in them needs quoting. */
+export const GITHUB: TokenKind = {
+  own: /^konfab-github-token-[0-9a-f]{32}$/,
+  old: /^konfab-github-token$/,
+  env: "KONFAB_GITHUB_TOKEN",
+  pattern: /^[A-Za-z0-9_]{20,255}$/,
+};
+export const newGithubItem = (): string =>
+  `konfab-github-token-${randomBytes(16).toString("hex")}`;
 /** Null: the environment. */
 export const itemOf = (place: {
   slot: TokenSlot;
@@ -160,7 +183,7 @@ class TokenFiles {
     return this.folder;
   }
 
-  read(item: string): TokenRead {
+  read(item: string, pattern: RegExp): TokenRead {
     let file: number | null = null;
     try {
       const folder = this.checkedFolder();
@@ -179,7 +202,7 @@ class TokenFiles {
       )
         return { state: "unknown" };
       const token = readFileSync(file, "utf8").trim();
-      return TOKEN_PATTERN.test(token)
+      return pattern.test(token)
         ? { state: "found", token }
         : { state: "unknown" };
     } catch (error) {
@@ -273,8 +296,14 @@ export class Keychain {
     private readonly env: NodeJS.ProcessEnv = process.env,
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly start: Run = run,
-    options: { home?: string; ask?: AskHidden; input?: Store } = {},
+    options: {
+      home?: string;
+      ask?: AskHidden;
+      input?: Store;
+      kind?: TokenKind;
+    } = {},
   ) {
+    this.kind = options.kind ?? TELEGRAM;
     this.input = options.input ?? runWithInput;
     this.files =
       platform === "linux" && options.home
@@ -284,6 +313,9 @@ export class Keychain {
   }
 
   private readonly ask: AskHidden;
+  private readonly kind: TokenKind;
+  private named = (item: string) =>
+    this.kind.own.test(item) || this.kind.old.test(item);
 
   /** Where tokens are kept here; null where there is no such place. */
   get kept(): Kept | null {
@@ -296,21 +328,21 @@ export class Keychain {
   }
 
   get fromEnvironment(): boolean {
-    return Boolean(this.env.KONFAB_TELEGRAM_TOKEN);
+    return Boolean(this.env[this.kind.env]);
   }
 
   /** Of this place only. Never logged, shown or given to an agent. */
   async read(place: { slot: TokenSlot; item?: string }): Promise<TokenRead> {
     const item = itemOf(place);
     if (item === null) {
-      const token = this.env.KONFAB_TELEGRAM_TOKEN?.trim();
-      return token && TOKEN_PATTERN.test(token)
+      const token = this.env[this.kind.env]?.trim();
+      return token && this.kind.pattern.test(token)
         ? { state: "found", token }
         : { state: "none" };
     }
     if (!this.usable) return { state: "none" };
-    if (!isOwnItem(item) && !isOldItem(item)) return { state: "unknown" };
-    if (this.files) return this.files.read(item);
+    if (!this.named(item)) return { state: "unknown" };
+    if (this.files) return this.files.read(item, this.kind.pattern);
     let ran: Ran;
     try {
       ran = await this.start([
@@ -327,7 +359,7 @@ export class Keychain {
     if (ran.code === NOT_FOUND) return { state: "none" };
     const token = ran.out.trim();
     // Output is never shown.
-    return ran.code === 0 && TOKEN_PATTERN.test(token)
+    return ran.code === 0 && this.kind.pattern.test(token)
       ? { state: "found", token }
       : { state: "unknown" };
   }
@@ -340,8 +372,8 @@ export class Keychain {
     const account = userInfo().username;
     if (
       !this.usable ||
-      !isOwnItem(item) ||
-      !TOKEN_PATTERN.test(token) ||
+      !this.kind.own.test(item) ||
+      !this.kind.pattern.test(token) ||
       // Nothing in the line needs quoting.
       !/^[A-Za-z0-9._-]+$/.test(account)
     )
@@ -360,8 +392,7 @@ export class Keychain {
 
   /** Only names that Konfab makes. */
   async remove(item: string): Promise<Removed> {
-    if (!this.usable || (!isOwnItem(item) && !isOldItem(item)))
-      return "unknown";
+    if (!this.usable || !this.named(item)) return "unknown";
     if (this.files) return this.files.remove(item);
     try {
       const { code } = await this.start([
@@ -382,10 +413,10 @@ export class Keychain {
    * "replace", so that nothing that is there is changed. On Linux Konfab asks.
    */
   async storeByHand(item: string): Promise<boolean> {
-    if (!this.usable || !isOwnItem(item)) return false;
+    if (!this.usable || !this.kind.own.test(item)) return false;
     if (this.files) {
       const token = (await this.ask("Bot token: "))?.trim() ?? "";
-      return TOKEN_PATTERN.test(token) && this.files.store(item, token);
+      return this.kind.pattern.test(token) && this.files.store(item, token);
     }
     return (
       spawnSync(

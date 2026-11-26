@@ -45,6 +45,14 @@ type View = {
   platform: string;
   settings: Setting[];
   command_to_agree: boolean;
+  /** Absent from older servers. Never the token. */
+  github?: {
+    source: "environment" | "stored" | "earlier" | "none";
+    kept: "keychain" | "file" | null;
+    readable: boolean;
+    earlier_left: boolean;
+    left_over: string[];
+  } | null;
   /** Keys in the file that nothing reads any more. Absent from older servers. */
   unused?: string[];
 };
@@ -72,6 +80,12 @@ const SECTIONS = [
     name: "Pre-approvals",
     about:
       "What agents may send to whom without asking you, in every room. Each use is still logged. Everything else still asks.",
+  },
+  {
+    id: "github",
+    name: "GitHub token",
+    about:
+      "Optional. The skill search works without one; with one, GitHub allows many more searches an hour.",
   },
   {
     id: "advanced",
@@ -336,6 +350,17 @@ export function Settings({
           {saved}
         </p>
         {section === "phone" && <PhoneSetup />}
+        {section === "github" && view.github && (
+          <GithubToken
+            github={view.github}
+            off={off}
+            onSaved={(next, what) => {
+              saves.current += 1;
+              setView(next);
+              setSaved(what);
+            }}
+          />
+        )}
         {section === "advanced" && (view.unused?.length ?? 0) > 0 && (
           <p className="settings-unused">
             Not read by this version, in your file:{" "}
@@ -641,6 +666,148 @@ function Row({
             </button>
           )}
       </div>
+    </div>
+  );
+}
+
+/** The token is sent once, and the field is emptied at once. */
+function GithubToken({
+  github,
+  off,
+  onSaved,
+}: {
+  github: NonNullable<View["github"]>;
+  off: boolean;
+  onSaved: (view: View, what: string) => void;
+}) {
+  const [token, setToken] = useState("");
+  const [problem, setProblem] = useState("");
+  const [busy, setBusy] = useState(false);
+  const kept =
+    github.kept === "file" ? "Konfab's private token folder" : "your Keychain";
+  const send = async (path: string, body: object, what: string) => {
+    setBusy(true);
+    setProblem("");
+    try {
+      onSaved(
+        await request<View>(`/api/settings/github-token${path}`, {
+          method: "POST",
+          body,
+        }),
+        what,
+      );
+    } catch (caught) {
+      setProblem(caught instanceof Error ? caught.message : "Not saved.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const state =
+    github.source === "environment"
+      ? "In use: from KONFAB_GITHUB_TOKEN, which comes first. Change it there."
+      : github.source === "stored"
+        ? `In use: stored in ${kept}.`
+        : github.source === "earlier"
+          ? "In use: stored in your Keychain by an earlier version."
+          : "None. The skill search works without one.";
+  return (
+    <div className="github-token">
+      <p>
+        {state}
+        {!github.readable &&
+          " It couldn't be read the last time; the one read before is used."}
+      </p>
+      {github.source !== "environment" && github.kept && (
+        <form
+          className="phone-paste"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const typed = token;
+            setToken("");
+            void send("", { token: typed }, "Saved: GitHub token.");
+          }}
+        >
+          <label>
+            {github.source === "none"
+              ? "A GitHub token"
+              : "Another GitHub token"}
+            <input
+              type="password"
+              value={token}
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={300}
+              onChange={(event) => setToken(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={off || busy || !token.trim()}>
+            Check and save
+          </button>
+        </form>
+      )}
+      <p className="muted">
+        Konfab asks GitHub whether the token works, then keeps it in {kept}
+        {github.kept === "keychain"
+          ? "; macOS may ask for your keychain password"
+          : ""}
+        . It is used at once, and never shown again.
+      </p>
+      {(github.source === "stored" || github.source === "earlier") && (
+        <p>
+          <button
+            type="button"
+            className="link"
+            disabled={off || busy}
+            onClick={() =>
+              void send(
+                "/remove",
+                {
+                  earlier:
+                    github.source === "earlier" &&
+                    window.confirm(
+                      "Also delete it from your Keychain? Another Konfab folder of yours may use it. Cancel keeps it there, unused.",
+                    ),
+                },
+                "Removed: GitHub token.",
+              )
+            }
+          >
+            Remove
+          </button>
+        </p>
+      )}
+      {github.earlier_left && github.source !== "earlier" && (
+        <p className="muted">
+          An earlier token may still be in your Keychain (
+          <code>konfab-github-token</code>); it isn't used.{" "}
+          <button
+            type="button"
+            className="link"
+            disabled={off || busy}
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Delete the earlier token from your Keychain? Another Konfab folder of yours may use it.",
+                )
+              )
+                void send("/remove-earlier", {}, "Removed the earlier token.");
+            }}
+          >
+            Remove it
+          </button>
+        </p>
+      )}
+      {github.left_over.length > 0 && (
+        <p className="muted">
+          Not used, and may still be stored:{" "}
+          <code>{github.left_over.join(", ")}</code>
+        </p>
+      )}
+      {problem && (
+        <p className="attachment-error" role="alert">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

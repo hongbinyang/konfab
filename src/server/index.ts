@@ -14,13 +14,13 @@ import { LogFile, logDirectory } from "./log-file.js";
 import { TelegramNotices } from "./telegram/notices.js";
 import { TelegramClient } from "./telegram/client.js";
 import { PhoneSetup } from "./telegram/setup.js";
-import { Keychain } from "./telegram/token.js";
+import { GITHUB, Keychain } from "./telegram/token.js";
 import { checkCommand, sendRejoin } from "./rejoin/codex.js";
 import { canOpen, openApp } from "./rejoin/open.js";
 import { macProcesses } from "./rejoin/processes.js";
 import { Watchers } from "./rejoin/watchers.js";
 import { createRuntime } from "./runtime.js";
-import { resolveGithubToken } from "./github-token.js";
+import { GithubToken, githubAccepts } from "./github/token-store.js";
 
 const home = konfabHome();
 ensureHome(home);
@@ -29,14 +29,34 @@ const config = loadConfig(home);
 const { db, service, skills, sources, useConfig } = createRuntime(
   databasePath(home),
   config,
-  (() => {
-    // An isolated run (the get-started check) never reads stored credentials.
-    if (process.env.KONFAB_ISOLATED === "1")
-      return { token: undefined, tokenSource: "unavailable" as const };
-    const resolved = resolveGithubToken(process.env.KONFAB_GITHUB_TOKEN);
-    return { token: resolved.token, tokenSource: resolved.source };
-  })(),
 );
+// The GitHub token for the skill search, which can change while Konfab runs.
+// An isolated run (the get-started check) never reads stored credentials.
+const isolated = process.env.KONFAB_ISOLATED === "1";
+const githubKeychain = new Keychain(process.env, process.platform, undefined, {
+  home,
+  kind: GITHUB,
+});
+const githubToken = new GithubToken({
+  home,
+  keychain: githubKeychain,
+  env: isolated ? {} : process.env,
+  accepts: githubAccepts,
+  changed: (token) =>
+    sources.setToken(
+      token,
+      githubToken.source === "environment"
+        ? "environment"
+        : githubKeychain.kept === "file"
+          ? "file"
+          : "keychain",
+    ),
+});
+await githubToken.load();
+setInterval(
+  () => void githubToken.look().catch(() => undefined),
+  2_000,
+).unref();
 service.recoverAfterRestart();
 service.recoverDeletedRooms();
 
@@ -184,7 +204,12 @@ const app = await buildApp({
     return result;
   },
   openApp: async (app) => opensApps() && (await openApp(app)),
-  settings: { home, live, recheck: () => void checkRejoin() },
+  settings: {
+    home,
+    live,
+    recheck: () => void checkRejoin(),
+    github: githubToken,
+  },
   watchers,
   service,
   skills,

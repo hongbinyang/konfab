@@ -17,6 +17,11 @@ import {
   KonfabService,
 } from "../../src/server/domain/service.js";
 import { LiveSettings } from "../../src/server/live-settings.js";
+import { GithubToken } from "../../src/server/github/token-store.js";
+import { FakeKeychain } from "../unit/fake-keychain.js";
+
+// Made up; GitHub is a stand-in.
+const GITHUB_TOKEN = "ghp_cccccccccccccccccccccccccccccccccccc";
 import { checked, readSettingsFile } from "../../src/server/settings-file.js";
 
 const PORT = 18797;
@@ -30,6 +35,7 @@ describe("the settings routes", () => {
   let app: FastifyInstance;
   let cookie: string;
   let token: string;
+  let keychain: FakeKeychain;
   let applied: number[];
   let rechecks: number;
 
@@ -66,6 +72,7 @@ describe("the settings routes", () => {
     );
     applied = [];
     rechecks = 0;
+    keychain = new FakeKeychain(GITHUB_TOKEN);
     db = openDatabase(":memory:");
     service = new KonfabService(db, {
       waitTimeoutSeconds: 1,
@@ -88,7 +95,18 @@ describe("the settings routes", () => {
     app = await buildApp({
       service,
       port: PORT,
-      settings: { home, live, recheck: () => (rechecks += 1) },
+      settings: {
+        home,
+        live,
+        recheck: () => (rechecks += 1),
+        github: new GithubToken({
+          home,
+          keychain: keychain as never,
+          env: {},
+          accepts: async (given) => given === GITHUB_TOKEN,
+          changed: () => undefined,
+        }),
+      },
     });
     const login = await app.inject({
       method: "GET",
@@ -313,6 +331,58 @@ describe("the settings routes", () => {
     expect(text()).toBe(
       "# mine\nserver:\n  port: 9000\nrejoin:\n  wanted_minutes: 5\n",
     );
+  });
+
+  it("takes a GitHub token once, from this page only, and never gives it back", async () => {
+    const answers: string[] = [];
+    const post = async (path: string, body: object, headers = {}) => {
+      const answer = await call(
+        "POST",
+        `/api/settings/github-token${path}`,
+        body,
+        headers,
+      );
+      answers.push(answer.body);
+      return answer;
+    };
+    expect((await view()).github).toMatchObject({
+      source: "none",
+      kept: "keychain",
+    });
+    for (const body of [
+      { token: "ghp_ x" },
+      { token: GITHUB_TOKEN.replace("c", "d") },
+      { token: 5 },
+      { token: GITHUB_TOKEN, more: GITHUB_TOKEN },
+    ])
+      expect((await post("", body)).statusCode).toBeGreaterThanOrEqual(400);
+    expect(keychain.stores).toEqual([]);
+    expect(
+      (
+        await post(
+          "",
+          { token: GITHUB_TOKEN },
+          { cookie: "", authorization: `Bearer ${token}` },
+        )
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await post(
+          "",
+          { token: GITHUB_TOKEN },
+          { origin: "http://evil.example" },
+        )
+      ).statusCode,
+    ).toBe(403);
+    const stored = await post("", { token: ` ${GITHUB_TOKEN} ` });
+    expect(stored.json().github).toMatchObject({ source: "stored" });
+    expect((await post("/remove-earlier", {})).statusCode).toBe(200);
+    expect((await post("/remove", {})).json().github).toMatchObject({
+      source: "none",
+    });
+    answers.push(JSON.stringify(await view()));
+    expect(answers.join("\n")).not.toContain(GITHUB_TOKEN.slice(4));
   });
 
   it("says what is wrong with a broken file, and saves nothing over it", async () => {

@@ -21,7 +21,7 @@ export class FakeKeychain {
   /** Held back until it is let go. */
   hold: Promise<void> | null = null;
 
-  constructor(readonly token: string) {}
+  constructor(public token: string) {}
 
   async read(place: { slot: TokenSlot; item?: string }): Promise<TokenRead> {
     const item = itemOf(place) ?? "env";

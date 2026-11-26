@@ -893,7 +893,12 @@ function PublicSources() {
             }}
           />
           Use the GitHub token for API requests (
-          {token.source === "keychain" ? "macOS Keychain" : "environment"})
+          {token.source === "keychain"
+            ? "macOS Keychain"
+            : token.source === "file"
+              ? "private file"
+              : "environment"}
+          )
         </label>
       )}
       <section aria-label="GitHub status">

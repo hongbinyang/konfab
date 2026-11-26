@@ -28,8 +28,8 @@ export class SkillSources {
   private readonly github: GitHubClient;
   readonly live: LiveSources;
   private readonly now: () => number;
-  private readonly token: string | undefined;
-  private readonly tokenSource: TokenSource;
+  private token: string | undefined;
+  private tokenSource: TokenSource;
   private readonly notify: () => void;
   constructor(
     private readonly db: Db,
@@ -120,12 +120,18 @@ export class SkillSources {
       throw new SkillError("source_missing", 404, "Source not found");
     this.notify();
   }
+  /** A new token, or none, for the next request. */
+  setToken(token: string | undefined, source: TokenSource): void {
+    this.token = token;
+    this.tokenSource = token ? source : "unavailable";
+    this.notify();
+  }
   setTokenEnabled(enabled: boolean): void {
     if (enabled && !this.token)
       throw new SkillError(
         "token_missing",
         400,
-        "Set KONFAB_GITHUB_TOKEN before enabling authenticated access",
+        "Set a GitHub token in Settings first, or KONFAB_GITHUB_TOKEN",
       );
     this.db
       .prepare(
@@ -159,7 +165,7 @@ export class SkillSources {
       throw new SkillError(
         "token_missing",
         400,
-        "The enabled GitHub token is unavailable; restart with it or disable token use.",
+        "The enabled GitHub token is unavailable; set one in Settings, or turn token use off.",
       );
     return this.token;
   }

@@ -357,6 +357,55 @@ describe("the Settings page", () => {
     });
   });
 
+  it("takes a GitHub token once, empties the field, and never shows it", async () => {
+    const TOKEN = "ghp_dddddddddddddddddddddddddddddddddddd";
+    view.github = {
+      source: "none",
+      kept: "keychain",
+      readable: true,
+      earlier_left: true,
+      left_over: [],
+    };
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "GitHub token" }));
+    expect(document.body.textContent).toContain(
+      "None. The skill search works without one.",
+    );
+    const field = screen.getByLabelText("A GitHub token");
+    expect(field).toHaveProperty("type", "password");
+    await userEvent.type(field, TOKEN);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Check and save" }),
+    );
+    expect(calls.at(-1)).toMatchObject({
+      url: "/api/settings/github-token",
+      body: { token: TOKEN },
+    });
+    expect(field).toHaveProperty("value", "");
+    expect(document.body.textContent).not.toContain(TOKEN);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(calls.at(-1)!.url).toBe("/api/settings/github-token");
+    confirm.mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(calls.at(-1)!.url).toBe("/api/settings/github-token/remove-earlier");
+  });
+
+  it("offers no field while the environment's token comes first", async () => {
+    view.github = {
+      source: "environment",
+      kept: "keychain",
+      readable: true,
+      earlier_left: false,
+      left_over: [],
+    };
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "GitHub token" }));
+    expect(document.body.textContent).toContain("from KONFAB_GITHUB_TOKEN");
+    expect(screen.queryByRole("button", { name: "Check and save" })).toBeNull();
+  });
+
   it("says beside its field what is wrong, and saves nothing", async () => {
     await open("phone");
     const minutes = screen.getByLabelText("phone_notices.away_minutes");

@@ -1,6 +1,6 @@
 # Settings, phase 3: every other setting in the page
 
-**Status:** reviewed; the lead answered the questions (2026-11-26: GitHub token in the page, `approve` and `unapprove`, restart settings only say so, rooms stay in the page, unused settings cleaned up). Parts (a), live values with the Agents and Advanced sections, (b) pre-approvals and (d) the clean-up of unused settings are built; (c) the GitHub token follows. It continues [Settings](settings.md) (phases 1 and 2 are in use) and uses what they built.
+**Status:** reviewed; the lead answered the questions (2026-11-26: GitHub token in the page, `approve` and `unapprove`, restart settings only say so, rooms stay in the page, unused settings cleaned up). All four parts are built: (a) live values with the Agents and Advanced sections, (b) pre-approvals, (c) the GitHub token and (d) the clean-up of unused settings. It continues [Settings](settings.md) (phases 1 and 2 are in use) and uses what they built.
 
 ## What the lead gets
 
@@ -51,10 +51,10 @@ The same mechanics as the bot's token: an item of its own for every store, never
 - **Store:** a note first (in the lock), then a new item `konfab-github-token-<random>` (macOS: through the input of `security -i`, without "replace"; Linux: a new private file), then it is **read back**; only an equal read counts.
 - **Commit:** in the lock, `github-token.json` in Konfab's folder is changed to name the new item. Before that, the token in use is untouched. After it, the replaced item is given up (unused in the lock) and deleted outside it; an unsure deletion is shown, as for the bot.
 - **Interrupted** at any point: either the old pointer or the new one, each naming an item that is there. A store that wasn't confirmed is a left-over, shown with **Remove it**.
-- **Searches** read the pointer and the token once per search, so a search that runs while it changes uses one token, the old or the new.
+- **Searches** use the token that the server holds in memory. It changes only after a commit, or when the server sees within a few seconds that another program moved the pointer and the new place could be read. Searches never read the Keychain, so deleting a replaced place can't fail one that runs.
 - **The place of before** (`konfab-github-token`, the fixed item of today) stays usable while no pointer exists, as today. It may be used by another Konfab folder of the same user, so it is never deleted without a question, as the bot's places `a` and `b`. Two Konfab folders never share a new item.
 - **Environment:** `KONFAB_GITHUB_TOKEN` comes first, as now. The page says so and offers no store; one that is stored anyway isn't used while the variable is set.
-- **Remove:** the pointer first (in the lock), then the item. "Not found" is the only "not there"; anything else is said.
+- **Remove:** the pointer first (in the lock), set to name nothing, which never falls back to the place of before; then the item. "Not found" is the only "not there"; anything else is said.
 - **Going back** to an earlier Konfab: it reads only the place of before, so it searches without a token (fewer searches an hour) until `--github-token` is run there. The guide says so.
 - **Status** in the page and with `--github-token --status`: where it comes from (environment, this folder's item, the place of before, none) and whether GitHub accepted it at the last search. Never the token.
 

@@ -41,7 +41,7 @@ Setup's backups contain your agent tokens, so keep them private and delete them 
 | `--migrate <folder>`      | Removes an old Konfab entry from that project folder's `.mcp.json` (one folder per run, with a backup); see below.                                                                                                                                                     |
 | `--allow-room-posts`      | Turns room posts without asking back on for Codex after you turned it off.                                                                                                                                                                                             |
 | `--ask-before-room-posts` | Turns off Konfab's default, remembered by later runs. It removes the setting only where Konfab can tell it set it; otherwise it leaves the existing setting and says so. Whether Codex then asks is decided by Codex's own settings.                                   |
-| `--github-token`          | Stores an optional GitHub token in the macOS Keychain (see [section 15](#15-github-token-optional)); `--github-token --remove` deletes it.                                                                                                                             |
+| `--github-token`          | Stores an optional GitHub token (see [section 15](#15-github-token-optional)); with `--status`, `--remove`, or `--remove --earlier`.                                                                                                                                   |
 
 `npm run doctor` shows what is set up, and changes nothing.
 
@@ -349,26 +349,20 @@ Public skill search works without a token, but GitHub then allows only 60 reques
 
 Copy the token (it starts with `github_pat_`). Don't paste it into a Konfab room or a chat with an agent.
 
-**2. Store it in your Mac's Keychain (once).**
+**2. Give it to Konfab.** In **⚙ Settings → GitHub token**, paste it and select **Check and save**. Konfab asks GitHub whether the token works, then keeps it in your Keychain on macOS (macOS may ask for your keychain password; type it only in a window that names the keychain), or in a private file in Konfab's folder on Linux. It is used at once, without a restart, and never shown again. In a terminal, `npm run setup -- --github-token` does the same; it asks for the token without showing it.
 
-```bash
-npm run setup -- --github-token
-```
+**3. Turn it on.** In **⚙ Manage library → Public**, tick **Use the GitHub token for API requests** and confirm, then select **Check GitHub status**.
 
-macOS asks twice for **"password data for new item"**. Paste the **GitHub token** there, not your Mac password. Running the command again replaces the stored token.
+| Status line says                                 | Meaning and what to do                                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| **using your token · 4,99x of 5,000 left**       | Working.                                                                                      |
+| **Token rejected by GitHub**                     | The token isn't valid any more: expired or deleted on GitHub. Give Konfab a new one (step 2). |
+| **token enabled but unavailable in this server** | Konfab has no token, or couldn't read it. Run step 2.                                         |
+| **no token · … of 60 left**                      | The token option is off; Konfab uses anonymous requests.                                      |
 
-**3. Restart Konfab and turn it on.** Restart Konfab; it reads the token once at startup (if macOS asks whether `node` may use the item, choose **Always Allow**). In **⚙ Manage library → Public**, tick **Use the GitHub token for API requests (macOS Keychain)** and confirm, then select **Check GitHub status**.
+When the token expires, create a new one and repeat step 2; the old one is replaced only once the new one is saved. To stop using it, untick the option; to remove it, use **Remove** in **⚙ Settings → GitHub token**, or `npm run setup -- --github-token --remove`. `--status` says where it comes from. A token that an earlier version stored (`konfab-github-token` in the Keychain) is used until you give Konfab a new one; it is deleted only when you say so, because another Konfab folder of yours may use it. An earlier Konfab doesn't see a token stored by this one.
 
-| Status line says                                 | Meaning and what to do                                                                                                                                           |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **using your token · 4,99x of 5,000 left**       | Working.                                                                                                                                                         |
-| **Token rejected by GitHub**                     | The stored value isn't a valid token: expired, deleted on GitHub, or your Mac password was entered at the prompt. Run step 2 with the current token and restart. |
-| **token enabled but unavailable in this server** | Konfab found no token at startup. Run step 2, then restart.                                                                                                      |
-| **no token · … of 60 left**                      | The token option is off; Konfab uses anonymous requests.                                                                                                         |
-
-When the token expires, create a new one and repeat steps 2 and 3. To stop using it, untick the option; to delete it, run `npm run setup -- --github-token --remove`.
-
-**Good to know:** the token is sent only to `api.github.com`, and never shown on the page, stored in Konfab's database or logged. Don't type it into a shell command such as `KONFAB_GITHUB_TOKEN=… npm start`, because your shell keeps a history; if that happened, delete the token on GitHub and create a new one. Deleting the Keychain item doesn't revoke a token. Not on macOS? Set `KONFAB_GITHUB_TOKEN` for the server from a file only you can read; if set, it takes priority over Keychain.
+**Good to know:** the token is sent only to `api.github.com`, and never shown on the page, stored in Konfab's database or logged. Don't type it into a shell command such as `KONFAB_GITHUB_TOKEN=… npm start`, because your shell keeps a history; if that happened, delete the token on GitHub and create a new one. Deleting it in Konfab doesn't revoke it; do that on GitHub. `KONFAB_GITHUB_TOKEN`, if set for the server, comes first.
 
 ## 16. Stop and uninstall
 
@@ -382,7 +376,7 @@ To uninstall: run `npm run login-item -- uninstall` if you turned it on, delete 
 
 Nothing needs configuring: every setting has a default. The server always listens on `127.0.0.1` only. There are three ways to change a setting; all use `~/.konfab/config.yaml`.
 
-- **In the page:** **⚙ Settings** in the left sidebar, in five sections: **Phone notices**, **Rejoin**, **Agents** (also the name and run window of each agent), **Pre-approvals** and **Advanced** (the port and the server's clock). Connectors are on the command line for now.
+- **In the page:** **⚙ Settings** in the left sidebar, in five sections: **Phone notices**, **Rejoin**, **Agents** (also the name and run window of each agent), **Pre-approvals**, **GitHub token** and **Advanced** (the port and the server's clock). Connectors are on the command line for now.
 - **On the command line,** with Konfab running or not:
 
   ```
@@ -411,7 +405,7 @@ Environment variables (all optional):
 | `KONFAB_HOME`           | `~/.konfab`      | Where rooms, skills, the database and `config.yaml` live                                                             |
 | `CODEX_HOME`            | `~/.codex`       | Where setup finds Codex's `config.toml`                                                                              |
 | `CLAUDE_CONFIG_DIR`     | your home folder | Where setup finds Claude Code's `.claude.json`                                                                       |
-| `KONFAB_GITHUB_TOKEN`   | none             | GitHub token for public skill search (on macOS it can also be stored in the Keychain)                                |
+| `KONFAB_GITHUB_TOKEN`   | none             | GitHub token for public skill search; comes first, also before one stored in Settings                                |
 | `KONFAB_TELEGRAM_TOKEN` | none             | Bot token for [phone notices](#notices-on-your-phone-telegram); when set, a new setup uses it instead of storing one |
 
 Settings in `config.yaml`:

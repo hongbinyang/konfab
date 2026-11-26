@@ -72,7 +72,7 @@ if (args.includes("--telegram")) {
   }
 } else if (args.includes("--github-token")) {
   try {
-    setupGithubToken(args);
+    if (!(await setupGithubToken(args))) process.exitCode = 1;
   } catch (error) {
     console.error(
       error instanceof Error ? error.message : "Keychain setup failed.",

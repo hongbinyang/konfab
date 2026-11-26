@@ -1,81 +1,100 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { userInfo } from "node:os";
+import { konfabHome } from "./config.js";
+import {
+  GithubToken,
+  GithubTokenError,
+  githubAccepts,
+} from "./github/token-store.js";
+import { askHidden, GITHUB, Keychain } from "./telegram/token.js";
 
-const security = "/usr/bin/security";
-const service = "konfab-github-token";
-export type TokenSource = "environment" | "keychain" | "unavailable";
+/** Where the skill search's token comes from, as the page shows it. */
+export type TokenSource = "environment" | "keychain" | "file" | "unavailable";
 
-type Dependencies = {
-  platform: NodeJS.Platform;
-  username: () => string;
-  read: (args: string[]) => string;
-};
-const defaults: Dependencies = {
-  platform: process.platform,
-  username: () => userInfo().username,
-  read: (args) =>
-    execFileSync(security, args, {
-      encoding: "utf8",
-      timeout: 10_000,
-      maxBuffer: 8192,
-      stdio: ["ignore", "pipe", "ignore"],
-    }),
+export type GithubTokenDeps = {
+  home: string;
+  say: (line: string) => void;
+  ask: ((question: string) => Promise<string | null>) | null;
+  store: GithubToken;
 };
 
-export function resolveGithubToken(
-  envToken: string | undefined,
-  deps: Dependencies = defaults,
-): { token: string | undefined; source: TokenSource } {
-  if (envToken) return { token: envToken, source: "environment" };
-  if (deps.platform === "darwin") {
-    try {
-      const token = deps
-        .read([
-          "find-generic-password",
-          "-a",
-          deps.username(),
-          "-s",
-          service,
-          "-w",
-        ])
-        .replace(/\r?\n$/, "");
-      if (token) return { token, source: "keychain" };
-    } catch {
-      /* Missing item or inaccessible Keychain; never log command output. */
-    }
-  }
-  return { token: undefined, source: "unavailable" };
-}
-
-export function setupGithubToken(args: string[]): void {
-  if (process.platform !== "darwin")
-    throw new Error("GitHub token setup requires macOS Keychain.");
+/**
+ * `npm run setup -- --github-token`, with `--status` or `--remove`: the same
+ * store and the same rules as the page.
+ */
+export async function githubTokenCommand(
+  args: string[],
+  deps: GithubTokenDeps,
+): Promise<boolean> {
+  const rest = args.filter((arg) => arg !== "--github-token");
+  const known = ["--status", "--remove", "--earlier"];
   if (
-    args.filter((a) => a === "--github-token").length !== 1 ||
-    args.some((a) => a !== "--github-token" && a !== "--remove") ||
-    args.filter((a) => a === "--remove").length > 1
+    args.length - rest.length !== 1 ||
+    rest.some((arg) => !known.includes(arg)) ||
+    new Set(rest).size !== rest.length ||
+    (rest.includes("--earlier") && !rest.includes("--remove")) ||
+    (rest.includes("--status") && rest.length > 1)
   )
     throw new Error(
-      "Use --github-token, optionally with --remove, on its own.",
+      "Use --github-token on its own, or with --status, --remove, or --remove --earlier.",
     );
-  const remove = args.includes("--remove");
-  if (!remove && !process.stdin.isTTY)
-    throw new Error("Run token setup in an interactive terminal.");
-  const account = userInfo().username;
-  const command = remove
-    ? ["delete-generic-password", "-a", account, "-s", service]
-    : ["add-generic-password", "-a", account, "-s", service, "-U", "-w"];
-  const result = spawnSync(security, command, {
-    stdio: remove ? "ignore" : "inherit",
-  });
-  if (remove && result.status === 44) {
-    console.log("No stored GitHub token; nothing to remove.");
-    return;
+  const { say, store } = deps;
+  await store.load();
+  if (rest.includes("--status")) {
+    say(store.where());
+    const view = store.view();
+    for (const item of view.left_over)
+      say(`Not used, and may still be stored: ${item}`);
+    return true;
   }
-  if (result.status !== 0) throw new Error("Keychain operation failed.");
-  console.log(
-    remove
-      ? "Removed the stored GitHub token."
-      : "Saved or updated the stored GitHub token.",
-  );
+  try {
+    if (rest.includes("--remove")) {
+      await store.remove(rest.includes("--earlier"));
+      say(
+        "The GitHub token isn't used any more." +
+          (store.source === "environment"
+            ? " KONFAB_GITHUB_TOKEN is still set, and comes first."
+            : ""),
+      );
+      return true;
+    }
+    if (!deps.ask) throw new GithubTokenError("Run this in a terminal.");
+    say(
+      "Paste a GitHub token (it isn't shown). Konfab checks it with GitHub, then keeps it.",
+    );
+    const token = await deps.ask("GitHub token: ");
+    if (!token) {
+      say("Nothing was changed.");
+      return false;
+    }
+    await store.store(token);
+    say(`Saved. ${store.where()} In use at once.`);
+    return true;
+  } catch (error) {
+    say(
+      error instanceof GithubTokenError
+        ? error.message
+        : "That didn't work. Nothing was changed.",
+    );
+    return false;
+  }
+}
+
+export async function setupGithubToken(args: string[]): Promise<boolean> {
+  const home = konfabHome();
+  const keychain = new Keychain(process.env, process.platform, undefined, {
+    home,
+    kind: GITHUB,
+  });
+  const person = process.stdin.isTTY && process.stdout.isTTY;
+  return githubTokenCommand(args, {
+    home,
+    say: console.log,
+    ask: person ? askHidden : null,
+    store: new GithubToken({
+      home,
+      keychain,
+      env: process.env,
+      accepts: githubAccepts,
+      changed: () => undefined,
+    }),
+  });
 }
