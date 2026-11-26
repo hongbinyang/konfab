@@ -479,6 +479,17 @@ export class Connectors {
       if (!check.ok)
         throw new ConnectorError(check.note ?? "There is nothing to undo.");
       undo = check.path;
+      // What is put back is bound too: a backup changed after the preview
+      // makes apply refuse. Never shown.
+      const backup = readChanges(paths.changes)[check.path]?.backup;
+      if (backup) {
+        const fact = factOf(backup);
+        if (fact.link)
+          throw new ConnectorError(
+            `${backup} is a link; Konfab doesn't put it back.`,
+          );
+        files.push(fact);
+      }
       touch(check.path, [
         check.contents === null
           ? "removes the file Konfab made"

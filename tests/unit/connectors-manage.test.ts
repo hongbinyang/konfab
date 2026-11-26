@@ -231,6 +231,28 @@ describe("connectors in the page", () => {
     );
   });
 
+  it.each(["changed", "replaced"])(
+    "puts back nothing when the backup is %s after the preview",
+    async (how) => {
+      await run({ kind: "setup", app: "codex" });
+      const written = readFileSync(codexFile(), "utf8");
+      const backup = JSON.parse(readFileSync(context.paths.changes, "utf8"))[
+        codexFile()
+      ].backup as string;
+      const preview = connectors.preview({ kind: "undo", app: "codex" });
+      const text = readFileSync(backup, "utf8");
+      if (how === "changed") writeFileSync(backup, `${text}# other\n`);
+      else {
+        rmSync(backup);
+        writeFileSync(backup, text);
+      }
+      await expect(connectors.apply(preview.id)).rejects.toThrow(
+        /Nothing was written/,
+      );
+      expect(readFileSync(codexFile(), "utf8")).toBe(written);
+    },
+  );
+
   it("turns Codex's posting without asking on and off, and leaves a value of its own alone", async () => {
     await run({ kind: "setup", app: "codex" });
     expect(connectors.view().posts_on).toBe(false);
