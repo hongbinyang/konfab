@@ -45,7 +45,8 @@ Design notes for each feature are in [docs/design](design/).
 
 ## Open items
 
-- **GitHub token:** the lead's stored token was last reported as rejected. Re-save it with `npm run setup -- --github-token` (paste the `github_pat_…` token at the "password data" prompts), restart, then **Check GitHub status**.
+- **GitHub token:** the lead's stored token was last reported as rejected. Give Konfab a new one in **⚙ Settings → GitHub token** (or `npm run setup -- --github-token`); it is used at once. Then **Check GitHub status**.
+- **Not tried for real yet:** phone notices with a real Telegram bot, a real GitHub token through the page, Linux on x86-64 (Debian arm64 was tried in a container).
 - **Parallel lead mentions:** measured in real use: a waiting agent's turn starts within milliseconds; a busy agent acknowledged a mention about 3 minutes later via its status. Next possible steps: reply-to links in the timeline, and deciding whether to turn the setting on by default.
 - **Project folder:** set the room's project folder (room **Edit**) so project skills and the suggested lock key work.
 - **Pending decisions** in the old room were never confirmed; re-propose the list above instead.
@@ -56,4 +57,10 @@ Design notes for each feature are in [docs/design](design/).
 - **Faster first public search:** more concurrent description reads, after measuring GitHub's raw host limits.
 - **Smaller page bundle:** load the skill picker and Team on demand.
 - **Delete from the sidebar:** a ⋯ menu on archived rooms, since the delete button inside the room is easy to miss.
+- **Settings, still to come** (details in [settings, phase 4](design/settings-phase4.md#for-later)):
+  - **Start at login in the page:** designed; needs a short launchd trial with the lead (a throwaway job) first. Today: `npm run login-item -- install` / `uninstall`.
+  - **Start at login on Linux:** not built; start Konfab with your own service manager.
+  - **Moving an old project connector in the page:** the lead chose command line only (`npm run setup -- --migrate <folder>`).
+  - **A room's own settings on the command line:** skipped for now; they are in the room's **Edit**.
+  - **Claude Code posting without asking:** its rule isn't verified; only Codex's is offered.
 - From [REQUIREMENTS.md](../REQUIREMENTS.md) (LATER): scheduled rejoin (A14), per-agent modes (M4), Mac notifications (U7), threads and reactions (R11).
