@@ -925,6 +925,11 @@ export class KonfabService {
       }
   }
 
+  /** Settings that the running server takes on; read where they are used. */
+  useSettings(settings: Partial<ServiceOptions>): void {
+    Object.assign(this.options, settings);
+  }
+
   get waitSeconds(): number {
     return this.options.waitTimeoutSeconds;
   }

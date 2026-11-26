@@ -184,6 +184,104 @@ describe("the Settings page", () => {
     ]);
   });
 
+  it("has Agents and Advanced, with lists, an agent's own values and a question first", async () => {
+    view.settings.push(
+      row("defaults.run_warnings_minutes", {
+        section: "agents",
+        control: { type: "minutes", max: 1440, most: 20 },
+        saved: [30, 10, 5],
+        in_use: [30, 10, 5],
+        default: [30, 10, 5],
+      }),
+      {
+        ...number("agents.claude.run_hours", 0),
+        section: "agents",
+        saved: null,
+        in_use: null,
+        default: null,
+        control: { type: "number", min: 1, max: 24, unit: "h", decimal: true },
+      },
+      { ...number("defaults.turn_timeout_minutes", 30), section: "agents" },
+    );
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Agents" }));
+    const warnings = screen.getByLabelText("defaults.run_warnings_minutes");
+    expect((warnings as HTMLInputElement).value).toBe("30, 10, 5");
+    // Lists are compared by what is in them: nothing to save, no Reset.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset defaults.run_warnings_minutes",
+      }),
+    ).toBeNull();
+    await userEvent.clear(warnings);
+    await userEvent.type(warnings, "15, x");
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /separated by commas/,
+    );
+    await userEvent.clear(warnings);
+    await userEvent.type(warnings, "15,5");
+    const hours = screen.getByLabelText("agents.claude.run_hours");
+    await userEvent.type(hours, "2.5");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(writes()).toEqual([
+      {
+        hash: "h1",
+        set: {
+          "defaults.run_warnings_minutes": [15, 5],
+          "agents.claude.run_hours": 2.5,
+        },
+      },
+    ]);
+  });
+
+  it("asks the server's question before saving, and saves nothing without a yes", async () => {
+    view.settings.push({
+      ...number("defaults.turn_timeout_minutes", 30),
+      section: "agents",
+    });
+    const question =
+      "A silent turn that is already longer than 5 minutes is ended at the next look. Shorten it?";
+    answer = () => {
+      const last = calls.at(-1)!.body as { confirmed?: string[] };
+      return last.confirmed
+        ? [200, view]
+        : [409, { code: "settings_confirm", message: question }];
+    };
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Agents" }));
+    const limit = screen.getByLabelText("defaults.turn_timeout_minutes");
+    await userEvent.clear(limit);
+    await userEvent.type(limit, "5");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(confirm).toHaveBeenCalledWith(question);
+    expect(writes()).toHaveLength(1);
+    confirm.mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(writes().at(-1)).toEqual({
+      hash: "h1",
+      set: { "defaults.turn_timeout_minutes": 5 },
+      confirmed: ["defaults.turn_timeout_minutes"],
+    });
+  });
+
+  it("takes an empty value of an agent's own as the default", async () => {
+    view.settings.push({
+      ...number("agents.claude.run_hours", 3),
+      section: "agents",
+      default: null,
+      control: { type: "number", min: 1, max: 24, decimal: true },
+    });
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Agents" }));
+    await userEvent.clear(screen.getByLabelText("agents.claude.run_hours"));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(writes()).toEqual([
+      { hash: "h1", set: {}, reset: ["agents.claude.run_hours"] },
+    ]);
+  });
+
   it("says beside its field what is wrong, and saves nothing", async () => {
     await open("phone");
     const minutes = screen.getByLabelText("phone_notices.away_minutes");

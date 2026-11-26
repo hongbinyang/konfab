@@ -13,10 +13,12 @@ import {
 import {
   defaultOf,
   EFFECT,
+  questionFor,
   SETTINGS,
   settingFor,
   shown,
   valueAt,
+  withName,
   type Setting,
   type Value,
 } from "../server/settings.js";
@@ -25,7 +27,8 @@ const USAGE = `Usage:
   npm run config                         all settings
   npm run config -- get <setting>
   npm run config -- set <setting> <value>
-  npm run config -- reset <setting>`;
+  npm run config -- reset <setting>
+  --yes                                  says yes to a question, without a terminal`;
 const COMMAND = "rejoin.codex_command";
 
 export type ConfigDeps = {
@@ -85,7 +88,8 @@ export async function runConfig(
   deps: ConfigDeps,
 ): Promise<number> {
   const { home, say } = deps;
-  const [action = "list", key, ...rest] = args;
+  const yes = args.includes("--yes");
+  const [action = "list", key, ...rest] = args.filter((arg) => arg !== "--yes");
   const read = () => {
     const file = readSettingsFile(home);
     return { ...file, config: checked(file.text) };
@@ -134,6 +138,11 @@ export async function runConfig(
       // A time such as 22:00 is text; YAML may read it as something else.
       if (setting.control.type === "time" || setting.control.type === "command")
         value = /^(none|null)$/.test(rest[0]!) ? null : rest[0]!;
+      // Such as 30,10,5 or "30, 10, 5".
+      if (setting.control.type === "minutes" && typeof value !== "object")
+        value = String(rest[0])
+          .split(",")
+          .map((part) => (/^\s*\d+\s*$/.test(part) ? Number(part) : part));
       if (key === COMMAND && typeof value === "string") {
         const look = await deps.look(value, home);
         if (!look.ok) {
@@ -155,9 +164,27 @@ export async function runConfig(
         agreed = { path: look.path, stamp: look.stamp };
       }
     }
+    const question = questionFor(
+      key,
+      at(before.config, key),
+      action === "set" ? value : defaultOf(key),
+    );
+    if (question && !yes) {
+      say(question.replace(/\?$/, "."));
+      if (!deps.ask) {
+        say("Not changed: this needs your yes in a terminal, or --yes.");
+        return 1;
+      }
+      if (!/^y(es)?$/i.test((await deps.ask("Go on? [y/N] ")).trim())) {
+        say("Not changed.");
+        return 1;
+      }
+    }
     const done = await changeSettings(
       home,
-      action === "set" ? { set: { [key]: value! } } : { reset: [key] },
+      action === "set"
+        ? { set: withName({ [key]: value! }, before.config) }
+        : { reset: [key] },
       before.hash,
     );
     if (key === COMMAND) agree(home, agreed);

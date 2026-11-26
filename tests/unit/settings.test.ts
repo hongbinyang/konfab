@@ -34,6 +34,7 @@ import {
 } from "../../src/server/settings-file.js";
 import {
   defaultOf,
+  EFFECT,
   SETTINGS,
   settingFor,
   shown,
@@ -101,14 +102,14 @@ describe("the one list", () => {
           false,
           false,
         ]);
-      } else if (control.type === "number" && page === "edit") {
+      } else if (control.type === "number" && page !== "later") {
+        // The page may be stricter than the file, never looser.
         const { min, max } = control;
-        expect([min, max, min - 1, max + 1, min + 0.5].map(fits), key).toEqual([
+        expect([min, max, min - 1, min + 0.5].map(fits), key).toEqual([
           true,
           true,
           false,
-          false,
-          false,
+          control.decimal === true,
         ]);
       }
     }
@@ -116,12 +117,18 @@ describe("the one list", () => {
 
   it("is the table in the user guide", () => {
     const guide = readFileSync("docs/user-guide.md", "utf8");
-    for (const { key, effect } of SETTINGS) {
+    for (const { key, effect, page } of SETTINGS) {
       if (effect === "never") continue;
       const row = guide
         .split("\n")
         .find((line) => line.startsWith(`| \`${key}\``));
       expect(row, `${key} in the guide`).toBeTruthy();
+      // In the page, and in use.
+      const cells = row!.split("|").map((cell) => cell.trim());
+      expect(cells[3], key).toBe(
+        page === "edit" ? "yes" : page === "ask" ? "with a question" : "no",
+      );
+      expect(cells[4], key).toBe(EFFECT[effect]);
       const usual = defaultOf(key);
       if (key !== "agents" && key !== "pre_approvals")
         expect(row, key).toContain(
@@ -131,7 +138,16 @@ describe("the one list", () => {
   });
 
   it("knows a single agent's settings, and nothing else", () => {
-    expect(settingFor("agents.claude.run_hours")?.effect).toBe("restart");
+    expect(settingFor("agents.claude.run_hours")).toMatchObject({
+      effect: "next_join",
+      page: "edit",
+      control: { type: "number", min: 1, max: 24, decimal: true },
+    });
+    expect(settingFor("agents.claude.display_name")).toMatchObject({
+      effect: "now",
+      page: "edit",
+    });
+    expect(settingFor("agents.claude.hours")?.effect).toBe("never");
     for (const key of [
       "agents.Claude",
       "agents.a.token",
@@ -686,6 +702,45 @@ describe("npm run config", () => {
     expect(config.agents.claude?.run_hours).toBe(8);
     expect(config.pre_approvals).toHaveLength(1);
     expect((await run("set", "agents.nobody.run_hours", "8"))[0]).toBe(1);
+  });
+
+  it("takes warning minutes with commas too", async () => {
+    await run("set", "defaults.run_warnings_minutes", "15, 5");
+    expect(checked(text()).defaults.run_warnings_minutes).toEqual([15, 5]);
+    expect(
+      (await run("set", "defaults.run_warnings_minutes", "15, x"))[0],
+    ).toBe(1);
+  });
+
+  it.each<[string, string, string]>([
+    ["a shorter silent-turn limit", "defaults.turn_timeout_minutes", "10"],
+    ["another port", "server.port", "9123"],
+  ])("asks before %s, in a terminal or by --yes", async (_name, key, value) => {
+    const before = text();
+    deps.ask = async (question) => {
+      asked.push(question);
+      return "n";
+    };
+    expect((await run("set", key, value))[0]).toBe(1);
+    expect(said.join(" ")).toMatch(/ended at the next look|next restart/);
+    expect(text()).toBe(before);
+    deps.ask = null;
+    expect(await run("set", key, value)).toEqual([
+      1,
+      expect.any(String),
+      "Not changed: this needs your yes in a terminal, or --yes.",
+    ]);
+    expect(text()).toBe(before);
+    expect((await run("set", key, value, "--yes"))[0]).toBe(0);
+    expect(valueAt(checked(text()), key)).toBe(Number(value));
+  });
+
+  it("asks nothing for a longer silent-turn limit, or the same port", async () => {
+    deps.ask = null;
+    expect((await run("set", "defaults.turn_timeout_minutes", "60"))[0]).toBe(
+      0,
+    );
+    expect((await run("set", "server.port", "8787"))[0]).toBe(0);
   });
 
   it("uses another command only after a yes, in a terminal", async () => {

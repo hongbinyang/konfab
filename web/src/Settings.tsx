@@ -10,7 +10,7 @@ import { Modal } from "./Modal";
 import { PhoneSetup } from "./PhoneSetup";
 import { request, RequestError } from "./api";
 
-type Value = string | number | boolean | null;
+type Value = string | number | boolean | null | number[];
 type Setting = {
   key: string;
   section: "phone" | "rejoin" | "agents" | "advanced";
@@ -18,9 +18,17 @@ type Setting = {
   help: string;
   control:
     | { type: "switch" }
-    | { type: "number"; min: number; max: number; unit?: string }
+    | {
+        type: "number";
+        min: number;
+        max: number;
+        unit?: string;
+        decimal?: boolean;
+      }
     | { type: "time" }
     | { type: "command" }
+    | { type: "name" }
+    | { type: "minutes"; max: number; most: number }
     | { type: "text" };
   effect: "now" | "next_join" | "restart" | "next_setup" | "never";
   effect_text: string;
@@ -49,7 +57,19 @@ const SECTIONS = [
     name: "Rejoin",
     about: "Brings agents back with one click. Experimental, macOS.",
   },
+  {
+    id: "agents",
+    name: "Agents",
+    about:
+      "How agents take turns, wait and report, for all rooms. A room's own check-in, set in its Edit, comes first.",
+  },
+  {
+    id: "advanced",
+    name: "Advanced",
+    about: "The server itself. These are used after a restart of Konfab.",
+  },
 ] as const;
+type Section = (typeof SECTIONS)[number]["id"];
 
 /** Said before it is done; nothing is saved without a yes. */
 export const QUESTIONS: Record<string, { on: string; off?: string }> = {
@@ -77,7 +97,7 @@ const text = (value: Value): string =>
 
 /** Null if it can't be saved, with a reason for the lead. */
 export function fromField(
-  setting: Pick<Setting, "control">,
+  setting: Pick<Setting, "control"> & { default?: Value },
   field: string,
 ): { value: Value } | { wrong: string } {
   const { control } = setting;
@@ -90,17 +110,43 @@ export function fromField(
         : { wrong: "Use a time like 22:00, or leave it empty" };
   if (control.type === "number") {
     const number = Number(typed);
-    return /^\d+$/.test(typed) && number >= control.min && number <= control.max
+    const form = control.decimal ? /^\d+(\.\d+)?$/ : /^\d+$/;
+    // An agent's own: empty means the default.
+    if (typed === "" && setting.default === null) return { value: null };
+    return form.test(typed) && number >= control.min && number <= control.max
       ? { value: number }
-      : { wrong: `A whole number from ${control.min} to ${control.max}` };
+      : {
+          wrong: `A ${control.decimal ? "number" : "whole number"} from ${control.min} to ${control.max}`,
+        };
   }
+  if (control.type === "minutes") {
+    const parts =
+      typed === "" ? [] : typed.split(",").map((part) => part.trim());
+    const numbers = parts.map(Number);
+    return parts.length <= control.most &&
+      parts.every((part) => /^\d+$/.test(part)) &&
+      numbers.every((number) => number >= 1 && number <= control.max)
+      ? { value: numbers }
+      : {
+          wrong: `Whole minutes from 1 to ${control.max}, separated by commas, at most ${control.most}`,
+        };
+  }
+  if (control.type === "name")
+    return typed.length >= 1 && typed.length <= 60
+      ? { value: typed }
+      : { wrong: "A name of 1 to 60 characters" };
   return { value: typed };
 }
 
 /** What was typed, and the saved value that it was typed over. */
 type Draft = { field: string; base: Value };
 
-const toField = (value: Value) => (value === null ? "" : String(value));
+/** Lists are compared by what is in them. */
+const same = (one: Value, other: Value) =>
+  JSON.stringify(one) === JSON.stringify(other);
+
+const toField = (value: Value) =>
+  value === null ? "" : Array.isArray(value) ? value.join(", ") : String(value);
 
 const FIRST = { section: "phone" } as const;
 
@@ -108,11 +154,11 @@ export function Settings({
   at = FIRST,
   onDirtyChange,
 }: {
-  at?: { section: "phone" | "rejoin" };
+  at?: { section: Section };
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const [view, setView] = useState<View | null>(null);
-  const [section, setSection] = useState<"phone" | "rejoin">(at.section);
+  const [section, setSection] = useState<Section>(at.section);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
@@ -167,10 +213,28 @@ export function Settings({
     const keys = [...Object.keys(change.set ?? {}), ...(change.reset ?? [])];
     const sent = drafts;
     try {
-      const next = await request<View>("/api/settings", {
-        method: "PATCH",
-        body: { hash: view.hash, ...change },
-      });
+      const send = (confirmed: string[]) =>
+        request<View>("/api/settings", {
+          method: "PATCH",
+          body: {
+            hash: view.hash,
+            ...change,
+            ...(confirmed.length ? { confirmed } : {}),
+          },
+        });
+      let next: View;
+      try {
+        next = await send([]);
+      } catch (caught) {
+        // The same question as on the command line; nothing without a yes.
+        if (
+          !(caught instanceof RequestError) ||
+          caught.code !== "settings_confirm"
+        )
+          throw caught;
+        if (!window.confirm(caught.message)) return;
+        next = await send(keys);
+      }
       saves.current += 1;
       setView(next);
       // What was typed after the click stays, over the value just saved.
@@ -211,7 +275,7 @@ export function Settings({
   /** Changed elsewhere since the lead began to type; they decide. */
   const conflicts = changed.filter(([key, { base }]) => {
     const setting = view.settings.find((item) => item.key === key)!;
-    return setting.saved !== base;
+    return !same(setting.saved, base);
   });
   const wrong = changed.filter(([key, { field }]) => {
     const setting = view.settings.find((item) => item.key === key)!;
@@ -235,7 +299,7 @@ export function Settings({
           </button>
         ))}
         <p className="muted">
-          All other settings: <code>npm run config</code>
+          Also on the command line: <code>npm run config</code>
         </p>
       </nav>
       <div className="settings-main">
@@ -362,13 +426,18 @@ export function Settings({
               aria-disabled={busy}
               onClick={() => {
                 const set: Record<string, Value> = {};
+                const reset: string[] = [];
                 for (const [key, { field }] of mine) {
                   const setting = rows.find((row) => row.key === key)!;
                   const read = fromField(setting, field);
-                  if ("value" in read) set[key] = read.value;
+                  if (!("value" in read)) continue;
+                  // Empty: an agent's own is taken away, and the default counts.
+                  if (read.value === null && setting.default === null)
+                    reset.push(key);
+                  else set[key] = read.value;
                 }
                 void save(
-                  { set },
+                  { set, ...(reset.length ? { reset } : {}) },
                   mine
                     .map(([key]) => rows.find((row) => row.key === key)!.name)
                     .join(", "),
@@ -414,7 +483,7 @@ function Row({
   const field = draft ?? toField(setting.saved);
   const read = fromField(setting, field);
   const wrong = draft !== undefined && "wrong" in read ? read.wrong : "";
-  const differs = setting.saved !== setting.in_use;
+  const differs = !same(setting.saved, setting.in_use);
   return (
     <div className="setting">
       <div className="setting-text">
@@ -484,7 +553,7 @@ function Row({
             </>
           ))}
         {!command &&
-          setting.saved !== setting.default &&
+          !same(setting.saved, setting.default) &&
           draft === undefined && (
             <button
               type="button"

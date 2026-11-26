@@ -11,9 +11,20 @@ export type Value = string | number | boolean | null | object;
 
 export type Control =
   | { type: "switch" }
-  | { type: "number"; min: number; max: number; unit?: string }
+  | {
+      type: "number";
+      min: number;
+      max: number;
+      unit?: string;
+      /** Not only whole numbers, such as 1.5 hours. */
+      decimal?: boolean;
+    }
   | { type: "time" }
   | { type: "command" }
+  /** A short name. */
+  | { type: "name" }
+  /** Minutes, such as "30, 10, 5". */
+  | { type: "minutes"; max: number; most: number }
   /** Only on the command line, as YAML. */
   | { type: "text" };
 
@@ -29,11 +40,17 @@ export type Setting = {
   page: "edit" | "ask" | "later" | "no";
 };
 
-const whole = (min: number, max: number, unit?: string): Control => ({
+const whole = (
+  min: number,
+  max: number,
+  unit?: string,
+  decimal?: boolean,
+): Control => ({
   type: "number",
   min,
   max,
   ...(unit ? { unit } : {}),
+  ...(decimal ? { decimal } : {}),
 });
 const on: Control = { type: "switch" };
 const text: Control = { type: "text" };
@@ -145,18 +162,19 @@ export const SETTINGS: Setting[] = [
       "ask",
     ],
   ]),
-  ...group("agents", "defaults", "restart", "later", [
+  ...group("agents", "defaults", "now", "edit", [
     [
       "run_hours",
       "Run window",
-      "Usable hours per agent session (also per agent under agents)",
-      whole(0, 24, "h"),
+      "Usable hours per agent session; an agent's own comes first",
+      whole(1, 24, "h", true),
+      "next_join",
     ],
     [
       "run_warnings_minutes",
       "Run-window warnings",
-      "When run-window warnings appear",
-      text,
+      "Minutes before the end of a run window when a warning appears",
+      { type: "minutes", max: 1440, most: 20 },
     ],
     [
       "max_consecutive_agent_messages",
@@ -179,13 +197,13 @@ export const SETTINGS: Setting[] = [
     [
       "checkin_minutes",
       "Check-in interval",
-      "Busy-agent check-in interval (1, 2, 5 or 10)",
+      "Busy-agent check-in interval (1, 2, 5 or 10); a room's own comes first",
       whole(1, 10, "min"),
     ],
     [
       "wait_timeout_seconds",
       "Wait call",
-      "How long a waiting agent's call lasts; longer uses less allowance",
+      "How long a waiting agent's call lasts; longer uses less allowance. Agents are told at their next join",
       whole(1, 100_000, "s"),
     ],
     [
@@ -217,17 +235,20 @@ export const SETTINGS: Setting[] = [
       "Largest attachment",
       "Largest attachment",
       whole(1, 100, "MB"),
+      "restart",
     ],
   ]),
-  ...group("agents", "multi_agent", "restart", "later", [
+  ...group("agents", "multi_agent", "now", "edit", [
     ["max_per_app", "Agents per app", "Agents per desktop app", whole(1, 100)],
   ]),
-  ...group("advanced", "server", "restart", "later", [
+  ...group("advanced", "server", "restart", "edit", [
     [
       "port",
       "Port",
       "Port for the page and the connectors; run setup again after a change",
       whole(1024, 65535),
+      "restart",
+      "ask",
     ],
     [
       "tick_seconds",
@@ -249,9 +270,9 @@ export const SETTINGS: Setting[] = [
     key: "agents",
     section: "advanced",
     name: "Agents",
-    help: "Agents that are made at the start, with their names and run hours",
+    help: "The apps that connectors join as, with their names and run hours",
     control: text,
-    effect: "restart",
+    effect: "now",
     page: "no",
   },
   {
@@ -284,7 +305,25 @@ export function settingFor(key: string): Setting | null {
   return {
     ...SETTINGS.find((setting) => setting.key === "agents")!,
     key,
-    effect: key.endsWith(".hours") ? "never" : "restart",
+    ...(key.endsWith(".run_hours")
+      ? {
+          name: "Run window",
+          help: "Usable hours per session of this agent; empty means the default",
+          control: whole(1, 24, "h", true),
+          effect: "next_join" as const,
+          page: "edit" as const,
+        }
+      : key.endsWith(".display_name")
+        ? {
+            name: "Name",
+            help: "Shown in the page",
+            control: { type: "name" as const },
+            effect: "now" as const,
+            page: "edit" as const,
+          }
+        : key.endsWith(".hours")
+          ? { effect: "never" as const }
+          : {}),
   };
 }
 
@@ -305,8 +344,48 @@ const DEFAULTS: Config = parseConfig("");
 export const defaultOf = (key: string): Value | undefined =>
   valueAt(DEFAULTS, key);
 
-/** The parts that a running server takes on by itself. */
-export const LIVE = ["phone_notices", "rejoin"] as const;
+/**
+ * An agent in the file needs its name; one that comes only from the defaults
+ * gets it written along, as it is.
+ */
+export function withName(
+  set: Record<string, Value>,
+  config: Config,
+): Record<string, Value> {
+  const more: Record<string, Value> = {};
+  for (const key of Object.keys(set)) {
+    const id = /^agents\.([^.]+)\.run_hours$/.exec(key)?.[1];
+    const name = id && config.agents[id]?.display_name;
+    if (name && !(`agents.${id}.display_name` in set))
+      more[`agents.${id}.display_name`] = name;
+  }
+  return { ...more, ...set };
+}
+
+/** Whether a running server takes it on by itself. */
+export const isLive = (setting: Pick<Setting, "effect">): boolean =>
+  setting.effect === "now" || setting.effect === "next_join";
+
+/**
+ * Asked before a change that can end something at once, or cut off the page.
+ * Null: nothing to ask.
+ */
+export function questionFor(
+  key: string,
+  saved: Value | undefined,
+  next: Value | undefined,
+): string | null {
+  if (
+    key === "defaults.turn_timeout_minutes" &&
+    typeof next === "number" &&
+    typeof saved === "number" &&
+    next < saved
+  )
+    return `A silent turn that is already longer than ${next} minutes is ended at the next look. Shorten it?`;
+  if (key === "server.port" && next !== saved)
+    return `Used after the next restart of Konfab. The page is then at http://127.0.0.1:${shown(next)}, and both apps need \`npm run setup\` once; until then their agents can't reach Konfab. Change it?`;
+  return null;
+}
 
 /** What differs between the file and what is in use. */
 export function notInUse(saved: Config, inUse: Config): string[] {

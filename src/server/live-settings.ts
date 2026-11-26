@@ -12,11 +12,30 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { configPath, type Config } from "./config.js";
 import { checked, readSettingsFile, SettingsError } from "./settings-file.js";
-import { LIVE, notInUse } from "./settings.js";
+import { isLive, notInUse, pathOf, SETTINGS, valueAt } from "./settings.js";
 
 const LOOK_MS = 2_000;
 const TOUCH_MS = 8_000;
 const FRESH_MS = 25_000;
+
+/** The values in use, with those that a running server takes on from the file. */
+export function takeOn(inUse: Config, saved: Config): Config {
+  const next = JSON.parse(JSON.stringify(inUse)) as Config;
+  for (const setting of SETTINGS) {
+    if (!isLive(setting) || setting.key === "agents") continue;
+    const path = pathOf(setting.key);
+    let at = next as unknown as Record<string, unknown>;
+    for (const part of path.slice(0, -1))
+      at = at[part] as Record<string, unknown>;
+    const value = valueAt(saved, setting.key);
+    if (value === undefined) delete at[path.at(-1)!];
+    else at[path.at(-1)!] = value;
+  }
+  // Names and run hours; a new one is made at once, but only joins by its
+  // connector.
+  next.agents = JSON.parse(JSON.stringify(saved.agents)) as Config["agents"];
+  return next;
+}
 
 /** What the running server says about itself, for the command line. */
 export type InUse = {
@@ -97,8 +116,7 @@ export class LiveSettings {
       const config = checked(text);
       this.problem = null;
       this.saved = config;
-      const next = { ...this.inUse };
-      for (const part of LIVE) Object.assign(next, { [part]: config[part] });
+      const next = takeOn(this.inUse, config);
       if (!isDeepStrictEqual(next, this.inUse)) {
         const old = this.inUse;
         this.inUse = next;

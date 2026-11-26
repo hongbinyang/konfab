@@ -164,19 +164,59 @@ describe("the settings routes", () => {
   it.each([
     [{ set: { "rejoin.wanted_minutes": 0 } }, "settings_invalid"],
     [{ set: { "rejoin.enabled": "yes" } }, "settings_invalid"],
-    [{ set: { "server.port": 9001 } }, "settings_unknown"],
+    [{ set: { "server.port": 9001 } }, "settings_confirm"],
+    [{ set: { "defaults.turn_timeout_minutes": 1 } }, "settings_confirm"],
     [{ set: { pre_approvals: "x" } }, "settings_unknown"],
     [{ set: { "rejoin.codex_command": "/opt/x" } }, "settings_unknown"],
     [{ reset: ["rejoin.codex_command"] }, "settings_unknown"],
-    [{ set: { "agents.claude.run_hours": 3 } }, "settings_unknown"],
+    [{ set: { "agents.nobody.run_hours": 3 } }, "settings_unknown"],
+    [{ set: { "agents.claude.token": "x" } }, "settings_unknown"],
     [{ set: { __proto__x: 1 } }, "settings_unknown"],
     [{ set: { "rejoin.enabled": { a: 1 } } }, "invalid_request"],
     [{ everything: true }, "invalid_request"],
   ])("writes nothing for what it doesn't take (%#)", async (body, code) => {
     const before = text();
     const answer = await patch(body);
-    expect([answer.statusCode, answer.json().code]).toEqual([400, code]);
+    expect([answer.statusCode, answer.json().code]).toEqual([
+      code === "settings_confirm" ? 409 : 400,
+      code,
+    ]);
     expect(text()).toBe(before);
+  });
+
+  it("asks first where a change can end something, and takes an agent's own values", async () => {
+    const shorter = { set: { "defaults.turn_timeout_minutes": 5 } };
+    const asked = await patch(shorter);
+    expect(asked.json()).toMatchObject({
+      code: "settings_confirm",
+      message: expect.stringContaining("ended at the next look"),
+    });
+    expect(
+      (
+        await patch({
+          ...shorter,
+          confirmed: ["defaults.turn_timeout_minutes"],
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(text()).toContain("turn_timeout_minutes: 5");
+    const seen = await view();
+    expect(of(seen, "agents.claude.run_hours")).toMatchObject({
+      section: "agents",
+      name: "Claude · Run window",
+      saved: null,
+    });
+    const set = await patch({ set: { "agents.claude.run_hours": 2.5 } });
+    expect(set.statusCode, set.body).toBe(200);
+    expect(of(await view(), "agents.claude.run_hours")).toMatchObject({
+      saved: 2.5,
+    });
+    expect(
+      (await patch({ reset: ["agents.claude.run_hours"] })).statusCode,
+    ).toBe(200);
+    expect(of(await view(), "agents.claude.run_hours")).toMatchObject({
+      saved: null,
+    });
   });
 
   it("says what is wrong with a broken file, and saves nothing over it", async () => {

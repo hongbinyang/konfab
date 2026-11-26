@@ -12,8 +12,11 @@ import {
 import {
   defaultOf,
   EFFECT,
+  questionFor,
   SETTINGS,
+  settingFor,
   valueAt,
+  withName,
   type Setting,
   type Value,
 } from "../settings.js";
@@ -39,6 +42,8 @@ const patch = z
     hash: z.string().length(64),
     set: z.record(z.string(), value).default({}),
     reset: z.array(z.string()).max(50).default([]),
+    /** The lead said yes to the question of these. */
+    confirmed: z.array(z.string()).max(50).default([]),
   })
   .strict();
 const path = z.string().min(1).max(1000);
@@ -50,11 +55,18 @@ export function settingsRoutes(
   deps: { origins: Set<string>; changed: (keys: string[]) => void },
 ): void {
   const { home, live } = access;
-  const editable = new Map(
+  const fixed = new Set(
     SETTINGS.filter(
       ({ key, page }) => (page === "edit" || page === "ask") && key !== COMMAND,
-    ).map((setting) => [setting.key, setting]),
+    ).map((setting) => setting.key),
   );
+  /** An agent's own name and run hours, of the agents in the file. */
+  const agentKeys = () =>
+    Object.keys(live.saved.agents).flatMap((id) => [
+      `agents.${id}.display_name`,
+      `agents.${id}.run_hours`,
+    ]);
+  const editable = (key: string) => fixed.has(key) || agentKeys().includes(key);
 
   /** A change comes from this page itself, and from no other program's call. */
   const fromPage = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -79,7 +91,18 @@ export function settingsRoutes(
       hash: live.hash,
       problem: live.problem,
       platform: process.platform,
-      settings: SETTINGS.filter(({ page }) => page !== "no").map(shownOf),
+      settings: [
+        ...SETTINGS.filter(({ page }) => page !== "no"),
+        ...agentKeys().map((key) => {
+          const setting = settingFor(key)!;
+          const id = key.split(".")[1]!;
+          return {
+            ...setting,
+            section: "agents" as const,
+            name: `${live.saved.agents[id]?.display_name ?? id} · ${setting.name}`,
+          };
+        }),
+      ].map(shownOf),
       /** The lead has to agree to the file that is there now. */
       command_to_agree: look?.ok
         ? !isAgreed(home, look.path, look.stamp)
@@ -114,15 +137,27 @@ export function settingsRoutes(
     "/api/settings",
     { onRequest: fromPage, bodyLimit: 16 * 1024 },
     async (request) => {
-      const { hash, set, reset } = patch.parse(request.body);
+      const { hash, set, reset, confirmed } = patch.parse(request.body);
       for (const key of [...Object.keys(set), ...reset])
-        if (!editable.has(key))
+        if (!editable(key))
           throw new KonfabError(
             "settings_unknown",
             400,
             `${key} can't be changed here`,
           );
-      return save({ set: set as Record<string, Value>, reset }, hash);
+      // Asked in the page first; the same question as on the command line.
+      for (const [key, next] of [
+        ...Object.entries(set),
+        ...reset.map((key) => [key, defaultOf(key)] as const),
+      ]) {
+        const question = questionFor(key, valueAt(live.saved, key), next);
+        if (question && !confirmed.includes(key))
+          throw new KonfabError("settings_confirm", 409, question);
+      }
+      return save(
+        { set: withName(set as Record<string, Value>, live.saved), reset },
+        hash,
+      );
     },
   );
 

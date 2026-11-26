@@ -11,6 +11,27 @@ export interface Runtime {
   service: KonfabService;
   skills: SkillLibrary;
   sources: SkillSources;
+  /** The settings in use now; see serviceSettings. */
+  useConfig: (config: Config) => void;
+}
+
+/** What the service reads when it needs it, so that a change is in use at once. */
+export function serviceSettings(config: Config) {
+  const { defaults } = config;
+  return {
+    maxConsecutiveAgentMessages: defaults.max_consecutive_agent_messages,
+    parallelLeadMentions: defaults.parallel_lead_mentions,
+    maxParallelLeadTurns: defaults.max_parallel_lead_turns,
+    defaultCheckinMinutes: defaults.checkin_minutes,
+    waitTimeoutSeconds: defaults.wait_timeout_seconds,
+    turnTimeoutMs: defaults.turn_timeout_minutes * 60_000,
+    autoContinueDelayMs: defaults.auto_continue_delay_seconds * 1000,
+    maxMessageChars: defaults.max_message_chars,
+    maxDecisionChars: defaults.max_decision_chars,
+    runWarningsMinutes: defaults.run_warnings_minutes,
+    maxAgentsPerApp: config.multi_agent.max_per_app,
+    preApprovals: config.pre_approvals,
+  };
 }
 
 export function createRuntime(
@@ -26,32 +47,29 @@ export function createRuntime(
   ]) {
     if (existsSync(file)) chmodSync(file, 0o600);
   }
+  // The values that the running server takes on without a restart.
+  let current = config;
   const service = new KonfabService(db, {
-    maxConsecutiveAgentMessages: config.defaults.max_consecutive_agent_messages,
-    parallelLeadMentions: config.defaults.parallel_lead_mentions,
-    maxParallelLeadTurns: config.defaults.max_parallel_lead_turns,
-    defaultCheckinMinutes: config.defaults.checkin_minutes,
-    waitTimeoutSeconds: config.defaults.wait_timeout_seconds,
-    turnTimeoutMs: config.defaults.turn_timeout_minutes * 60_000,
-    autoContinueDelayMs: config.defaults.auto_continue_delay_seconds * 1000,
-    maxMessageChars: config.defaults.max_message_chars,
-    maxDecisionChars: config.defaults.max_decision_chars,
+    ...serviceSettings(config),
     maxAttachmentBytes: config.defaults.max_attachment_mb * 1024 * 1024,
     attachmentDir: join(dirname(databaseFile), "files"),
-    runWarningsMinutes: config.defaults.run_warnings_minutes,
     runHoursFor: (agentId) => {
       const owner = db
         .prepare("SELECT app_id FROM agents WHERE id=?")
         .get(agentId) as { app_id: string | null } | undefined;
       return (
-        config.agents[agentId]?.run_hours ??
-        config.agents[owner?.app_id ?? ""]?.run_hours ??
-        config.defaults.run_hours
+        current.agents[agentId]?.run_hours ??
+        current.agents[owner?.app_id ?? ""]?.run_hours ??
+        current.defaults.run_hours
       );
     },
-    maxAgentsPerApp: config.multi_agent.max_per_app,
-    preApprovals: config.pre_approvals,
   });
+  const useConfig = (next: Config) => {
+    current = next;
+    service.useSettings(serviceSettings(next));
+    for (const [id, agent] of Object.entries(next.agents))
+      service.ensureAgent(id, agent.display_name);
+  };
   for (const [id, agent] of Object.entries(config.agents)) {
     service.ensureAgent(id, agent.display_name);
   }
@@ -65,6 +83,7 @@ export function createRuntime(
   return {
     db,
     service,
+    useConfig,
     skills,
     sources: new SkillSources(db, {
       token: process.env.KONFAB_GITHUB_TOKEN,

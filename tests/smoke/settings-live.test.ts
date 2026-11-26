@@ -136,12 +136,19 @@ describe.runIf(process.platform === "darwin")(
           (await api("GET", "/api/phone-notices")).body.away_minutes === 55,
       );
       const port = new URL(server.baseUrl).port;
+      // It asks first; without a terminal only --yes says yes.
       expect(await config("set", "server.port", "9009")).toMatchObject({
-        code: 0,
-        out: expect.stringContaining(
-          `The running Konfab (port ${port}) uses it after a restart.`,
-        ),
+        code: 1,
+        out: expect.stringContaining("or --yes"),
       });
+      expect(await config("set", "server.port", "9009", "--yes")).toMatchObject(
+        {
+          code: 0,
+          out: expect.stringContaining(
+            `The running Konfab (port ${port}) uses it after a restart.`,
+          ),
+        },
+      );
       expect(await value("server.port")).toMatchObject({
         saved: 9009,
         in_use: Number(port),
@@ -149,6 +156,31 @@ describe.runIf(process.platform === "darwin")(
       // It still answers where it did.
       expect((await settings()).problem).toBeNull();
       expect(statSync(join(home, "config.yaml")).mode & 0o777).toBe(0o600);
+    });
+
+    it("takes on the settings of agents without a restart", async () => {
+      const room = (
+        await api("POST", "/api/rooms", {
+          name: "limits",
+          topic: "",
+          members: ["claude"],
+        })
+      ).body.id as number;
+      const say = (body: string) =>
+        api("POST", `/api/rooms/${room}/messages`, { body });
+      expect((await say("x".repeat(80))).status).toBe(200);
+      expect(
+        await config("set", "defaults.max_message_chars", "50"),
+      ).toMatchObject({ code: 0, out: expect.stringContaining("In use.") });
+      expect((await say("x".repeat(80))).status).toBe(413);
+      expect(
+        (await patch({ "agents.claude.display_name": "Claudia" })).status,
+      ).toBe(200);
+      await until(async () =>
+        JSON.stringify((await api("GET", `/api/rooms/${room}`)).body).includes(
+          "Claudia",
+        ),
+      );
     });
 
     it("keeps the earlier values with a broken file, and takes the next good one", async () => {

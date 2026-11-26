@@ -1,6 +1,6 @@
 # Settings, phase 3: every other setting in the page
 
-**Status:** a plan for review; nothing is built. It continues [Settings](settings.md) (phases 1 and 2 are in use) and uses what they built: one list of settings, safe writing of `config.yaml`, saved and in use, conflicts while typing, and the token places of [phone setup](settings-phone-setup.md).
+**Status:** reviewed; the lead answered the questions (2026-11-26: GitHub token in the page, `approve` and `unapprove`, restart settings only say so, rooms stay in the page, unused settings cleaned up). Part (a), live values with the Agents and Advanced sections, is built; (b) pre-approvals, (c) the GitHub token and (d) the clean-up follow. It continues [Settings](settings.md) (phases 1 and 2 are in use) and uses what they built.
 
 ## What the lead gets
 

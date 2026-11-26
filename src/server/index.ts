@@ -26,7 +26,7 @@ const home = konfabHome();
 ensureHome(home);
 const logFile = new LogFile(logDirectory(home));
 const config = loadConfig(home);
-const { db, service, skills, sources } = createRuntime(
+const { db, service, skills, sources, useConfig } = createRuntime(
   databasePath(home),
   config,
   (() => {
@@ -153,6 +153,7 @@ const notices = new TelegramNotices({
 
 /** Settings that a running server takes on. Open requests and calls are told. */
 function applySettings(next: Config, before: Config): void {
+  useConfig(next);
   Object.assign(noticeOptions, next.phone_notices);
   service.rejoin.wantedMs = next.rejoin.wanted_minutes * 60_000;
   const on = watches(next.rejoin);
