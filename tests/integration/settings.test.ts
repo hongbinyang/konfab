@@ -260,6 +260,31 @@ describe("the settings routes", () => {
     expect(checked(text()).pre_approvals).toEqual([]);
   });
 
+  it("shows keys that nothing reads, and removes only them, from this page", async () => {
+    writeFileSync(
+      configPath(home),
+      `${text()}defaults:\n  hours: { start: "09:00", end: "18:00", days: [mon] }\nui:\n  x: 1\n`,
+    );
+    expect((await view()).unused).toEqual(["defaults.hours", "ui"]);
+    expect(
+      (
+        await call(
+          "POST",
+          "/api/settings/clean",
+          {},
+          {
+            origin: "http://evil.example",
+          },
+        )
+      ).statusCode,
+    ).toBe(403);
+    const done = await call("POST", "/api/settings/clean", {});
+    expect(done.json().unused).toEqual([]);
+    expect(text()).toBe(
+      "# mine\nserver:\n  port: 9000\nrejoin:\n  wanted_minutes: 5\n",
+    );
+  });
+
   it("says what is wrong with a broken file, and saves nothing over it", async () => {
     writeFileSync(configPath(home), "rejoin: {\n");
     const seen = await view();

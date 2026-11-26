@@ -400,6 +400,7 @@ Both the page and the command line say whether a change **is in use**: at once, 
 
 - **What is saved:** only what you change; the rest of the file, your comments and unknown keys stay. Adding a setting to a section can move blank lines there. The five versions before are in `~/.konfab/backups/config/`.
 - **Don't edit the file while you save in the page or on the command line.** Konfab looks whether it has changed, but an editor that saves in the very last moment loses its save, and an editor that has the old text open overwrites Konfab's change.
+- **Keys that nothing reads any more**, such as `hours` of earlier versions, are left in the file and don't stop it from being read. `npm run config` names them; `npm run config -- clean`, or **Remove them** in **⚙ Settings → Advanced**, removes them after a question (a copy of the file is kept).
 - **A link** instead of the file is used at a start, but isn't changed or followed while Konfab runs.
 - **Who can change settings:** you, in the page and on the command line. Agents have no way through Konfab. An agent that can run commands on your computer could edit the file, as before.
 

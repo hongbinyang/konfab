@@ -45,6 +45,8 @@ type View = {
   platform: string;
   settings: Setting[];
   command_to_agree: boolean;
+  /** Keys in the file that nothing reads any more. Absent from older servers. */
+  unused?: string[];
 };
 
 const SECTIONS = [
@@ -334,6 +336,46 @@ export function Settings({
           {saved}
         </p>
         {section === "phone" && <PhoneSetup />}
+        {section === "advanced" && (view.unused?.length ?? 0) > 0 && (
+          <p className="settings-unused">
+            Not used any more, in your file:{" "}
+            <code>{view.unused!.join(", ")}</code>.{" "}
+            <button
+              type="button"
+              className="link"
+              disabled={off || busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `Remove ${view.unused!.join(", ")} from config.yaml? Nothing reads them; a copy of the file is kept in backups/config.`,
+                  )
+                )
+                  return;
+                setBusy(true);
+                void request<View>("/api/settings/clean", {
+                  method: "POST",
+                  body: {},
+                })
+                  .then(
+                    (next) => {
+                      saves.current += 1;
+                      setView(next);
+                      setSaved("Removed what isn't used any more.");
+                    },
+                    (caught: unknown) =>
+                      setError(
+                        caught instanceof Error
+                          ? `Not removed: ${caught.message}`
+                          : "Not removed.",
+                      ),
+                  )
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Remove them
+            </button>
+          </p>
+        )}
         {section === "approvals" && approvals && (
           <Approvals
             list={(approvals.saved ?? []) as Approval[]}

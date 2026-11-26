@@ -34,6 +34,7 @@ import {
 } from "../../src/server/settings-file.js";
 import {
   approvalChange,
+  unusedKeys,
   defaultOf,
   EFFECT,
   SETTINGS,
@@ -71,7 +72,7 @@ const leaves = (value: object, at = ""): string[] =>
     return typeof inner === "object" &&
       inner !== null &&
       !Array.isArray(inner) &&
-      !["agents", "defaults.hours"].includes(path)
+      !["agents"].includes(path)
       ? leaves(inner as object, path)
       : [path];
   });
@@ -148,7 +149,8 @@ describe("the one list", () => {
       effect: "now",
       page: "edit",
     });
-    expect(settingFor("agents.claude.hours")?.effect).toBe("never");
+    expect(settingFor("agents.claude.hours")).toBeNull();
+    expect(settingFor("defaults.hours")).toBeNull();
     for (const key of [
       "agents.Claude",
       "agents.a.token",
@@ -825,6 +827,48 @@ describe("npm run config", () => {
         .pre_approvals.map((one) => one.recipient)
         .sort(),
     ).toEqual(["github.com/x/b", "github.com/x/c", "github.com/x/d"]);
+  });
+
+  it("reads a file of an earlier version, and cleans it up only after a yes", async () => {
+    const old = `# mine
+defaults:
+  hours: { start: "09:00", end: "18:00", days: [mon] }
+  run_hours: 4
+agents:
+  claude:
+    display_name: Claude
+    hours: { start: "10:00", end: "12:00", days: [mon] }
+room:
+  checkin: 2
+ui:
+  role_picker: true
+`;
+    put(old);
+    expect(checked(text()).defaults.run_hours).toBe(4);
+    expect(unusedKeys(parse(text()))).toEqual([
+      "defaults.hours",
+      "agents.claude.hours",
+      "room",
+      "ui",
+    ]);
+    expect((await run())[0]).toBe(0);
+    expect(said.join("\n")).toContain(
+      "Not used any more: defaults.hours, agents.claude.hours, room, ui",
+    );
+    deps.ask = null;
+    expect((await run("clean"))[0]).toBe(1);
+    expect(text()).toBe(old);
+    expect((await run("clean", "--yes"))[0]).toBe(0);
+    expect(parse(text())).toEqual({
+      defaults: { run_hours: 4 },
+      agents: { claude: { display_name: "Claude" } },
+    });
+    expect(text()).toContain("# mine");
+    expect(await run("clean")).toEqual([0, "Nothing to clean up."]);
+    // Only what is unused then: a key in use is never dropped.
+    await expect(
+      changeSettings(home, { drop: ["defaults.run_hours"] }),
+    ).rejects.toThrow("in use");
   });
 
   it("uses another command only after a yes, in a terminal", async () => {

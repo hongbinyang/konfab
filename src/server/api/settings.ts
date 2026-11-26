@@ -4,12 +4,15 @@ import { KonfabError } from "../domain/errors.js";
 import type { LiveSettings } from "../live-settings.js";
 import { agree, isAgreed, lookAtOwn } from "../rejoin/own-command.js";
 import { lookAtCommand } from "../rejoin/codex.js";
+import { parse } from "yaml";
 import {
   changeSettings,
+  readSettingsFile,
   SettingsError,
   type Change,
 } from "../settings-file.js";
 import {
+  unusedKeys,
   approvalChange,
   approvalProblem,
   approvalQuestion,
@@ -110,6 +113,14 @@ export function settingsRoutes(
           };
         }),
       ].map(shownOf),
+      /** Keys in the file that nothing reads any more. */
+      unused: (() => {
+        try {
+          return unusedKeys(parse(readSettingsFile(home).text));
+        } catch {
+          return [];
+        }
+      })(),
       /** The lead has to agree to the file that is there now. */
       command_to_agree: look?.ok
         ? !isAgreed(home, look.path, look.stamp)
@@ -169,6 +180,19 @@ export function settingsRoutes(
         { set: withName(set as Record<string, Value>, live.saved), reset },
         hash,
       );
+    },
+  );
+
+  // Keys that nothing reads, as they are in the file then; after the page's
+  // question.
+  app.post(
+    "/api/settings/clean",
+    { onRequest: fromPage, bodyLimit: 1024 },
+    async (request) => {
+      z.object({})
+        .strict()
+        .parse(request.body ?? {});
+      return save({ drop: "unused" }, undefined);
     },
   );
 

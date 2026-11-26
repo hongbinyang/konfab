@@ -81,22 +81,19 @@ pre_approvals:
   - recipient: github.com/me/repo
     data: code_push
 `);
-    expect(config.agents.claude?.hours?.start).toBe("10:00");
+    // Read as before; what nothing reads any more is left out.
+    expect(config.agents.claude).toEqual({ display_name: "Claude" });
     expect(config.pre_approvals[0]?.data).toBe("code_push");
   });
 
   it("rejects invalid values", () => {
     expect(() => parseConfig("server:\n  port: 80\n")).toThrow();
+    // Hours aren't read any more, so an odd value of them stops nothing.
     expect(() =>
       parseConfig(
-        'defaults:\n  hours: { start: "9am", end: "18:00", days: [mon] }\n',
+        'defaults:\n  hours: { start: "9am", end: "18:00", days: [] }\n',
       ),
-    ).toThrow();
-    expect(() =>
-      parseConfig(
-        'defaults:\n  hours: { start: "09:00", end: "18:00", days: [] }\n',
-      ),
-    ).toThrow();
+    ).not.toThrow();
   });
 });
 

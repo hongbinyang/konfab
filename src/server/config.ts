@@ -9,25 +9,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { DAY_NAMES } from "./domain/hours.js";
-
-const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM");
-
-const hoursSchema = z.object({
-  start: time,
-  end: time,
-  days: z.array(z.enum(DAY_NAMES)).min(1),
-});
-
-const ALL_DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
-const DEFAULT_HOURS = {
-  start: "09:00",
-  end: "18:00",
-  days: [...ALL_DAYS],
-};
-
+// Keys that nothing reads any more (such as hours) are dropped when the
+// file is read, and stay in the file until the lead cleans it up.
 const defaultsSchema = z.object({
-  hours: hoursSchema.default(DEFAULT_HOURS),
   run_hours: z.number().positive().max(24).default(5),
   run_warnings_minutes: z
     .array(z.number().positive().max(1440))
@@ -75,7 +59,6 @@ const configSchema = z.object({
         }),
       z.object({
         display_name: z.string().min(1),
-        hours: hoursSchema.optional(),
         run_hours: z.number().positive().max(24).optional(),
       }),
     )

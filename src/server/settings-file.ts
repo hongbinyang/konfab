@@ -20,7 +20,7 @@ import Database from "better-sqlite3";
 import { isMap, isScalar, parseDocument, stringify, type Document } from "yaml";
 import { ZodError } from "zod";
 import { configPath, parseConfig, type Config } from "./config.js";
-import { pathOf, settingFor, type Value } from "./settings.js";
+import { pathOf, settingFor, unusedKeys, type Value } from "./settings.js";
 
 /**
  * Changes named settings in config.yaml and nothing else in it. The page and
@@ -39,7 +39,15 @@ export class SettingsError extends Error {
 }
 
 export type Read = { text: string; hash: string; stat: Stats };
-export type Change = { set?: Record<string, Value>; reset?: string[] };
+export type Change = {
+  set?: Record<string, Value>;
+  reset?: string[];
+  /**
+   * Keys that nothing reads; only those that are unused when it is saved.
+   * "unused": all of them, as they are then.
+   */
+  drop?: string[] | "unused";
+};
 
 const KEPT = 5;
 const LOCK_MS = 5_000;
@@ -323,9 +331,18 @@ export async function changeSettings(
     const moved = () =>
       new SettingsError("changed", "The file has changed meanwhile");
     if (hash !== undefined && before.hash !== hash) throw moved();
-    const change =
+    const asked =
       typeof wanted === "function" ? wanted(checked(before.text)) : wanted;
-    known(change);
+    known(asked);
+    const unused = unusedKeys(parsed(before.text).toJS());
+    const drop = asked.drop === "unused" ? unused : (asked.drop ?? []);
+    for (const key of drop)
+      if (!unused.includes(key))
+        throw new SettingsError("unknown", `${key} is in use`, key);
+    const change: Change = {
+      set: asked.set ?? {},
+      reset: [...(asked.reset ?? []), ...drop],
+    };
     writable(home, before.stat);
     const text = edited(before.text, change);
     const config = checked(text);

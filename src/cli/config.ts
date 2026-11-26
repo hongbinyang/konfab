@@ -20,6 +20,7 @@ import {
   SETTINGS,
   settingFor,
   shown,
+  unusedKeys,
   valueAt,
   withName,
   type Setting,
@@ -33,6 +34,7 @@ const USAGE = `Usage:
   npm run config -- reset <setting>
   npm run config -- approve <recipient> <data>      agents may send it without asking
   npm run config -- unapprove <recipient> <data>
+  npm run config -- clean                removes keys that nothing reads any more
   --yes                                  says yes to a question, without a terminal`;
 const COMMAND = "rejoin.codex_command";
 
@@ -105,10 +107,38 @@ export async function runConfig(
       const note = deps.inUse(home);
       const waiting = typeof note === "string" ? [] : note.waiting;
       for (const setting of SETTINGS) say(row(config, setting, waiting));
+      const unused = unusedKeys(parse(read().text));
+      if (unused.length)
+        say(
+          `\nNot used any more: ${unused.join(", ")}. \`npm run config -- clean\` removes them.`,
+        );
       if (note === "unsure")
         say("\nWhat the running Konfab uses isn't known now.");
       else if (note !== "none" && note.problem)
         say(`\nNot in use: ${note.problem}`);
+      return 0;
+    }
+    if (action === "clean" && key === undefined) {
+      const unused = unusedKeys(parse(read().text));
+      if (!unused.length) {
+        say("Nothing to clean up.");
+        return 0;
+      }
+      say(
+        `Not used any more: ${unused.join(", ")}. A copy of the file is kept in backups/config.`,
+      );
+      if (!yes) {
+        if (!deps.ask) {
+          say("Not changed: this needs your yes in a terminal, or --yes.");
+          return 1;
+        }
+        if (!/^y(es)?$/i.test((await deps.ask("Remove them? [y/N] ")).trim())) {
+          say("Not changed.");
+          return 1;
+        }
+      }
+      const done = await changeSettings(home, { drop: "unused" });
+      say(done.changed ? "Removed." : "Nothing to clean up.");
       return 0;
     }
     if (action === "approve" || action === "unapprove")

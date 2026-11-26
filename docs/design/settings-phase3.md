@@ -1,6 +1,6 @@
 # Settings, phase 3: every other setting in the page
 
-**Status:** reviewed; the lead answered the questions (2026-11-26: GitHub token in the page, `approve` and `unapprove`, restart settings only say so, rooms stay in the page, unused settings cleaned up). Parts (a), live values with the Agents and Advanced sections, and (b), pre-approvals, are built; (c) the GitHub token and (d) the clean-up follow. It continues [Settings](settings.md) (phases 1 and 2 are in use) and uses what they built.
+**Status:** reviewed; the lead answered the questions (2026-11-26: GitHub token in the page, `approve` and `unapprove`, restart settings only say so, rooms stay in the page, unused settings cleaned up). Parts (a), live values with the Agents and Advanced sections, (b) pre-approvals and (d) the clean-up of unused settings are built; (c) the GitHub token follows. It continues [Settings](settings.md) (phases 1 and 2 are in use) and uses what they built.
 
 ## What the lead gets
 

@@ -286,18 +286,9 @@ export const SETTINGS: Setting[] = [
     effect: "now",
     page: "edit",
   },
-  {
-    key: "defaults.hours",
-    section: "advanced",
-    name: "Hours",
-    help: "Not used any more",
-    control: text,
-    effect: "never",
-    page: "no",
-  },
 ];
 
-const AGENT = /^agents\.([a-z][a-z0-9_-]*)(\.(display_name|run_hours|hours))?$/;
+const AGENT = /^agents\.([a-z][a-z0-9_-]*)(\.(display_name|run_hours))?$/;
 
 /** A setting, or one of a single agent's. */
 export function settingFor(key: string): Setting | null {
@@ -323,9 +314,7 @@ export function settingFor(key: string): Setting | null {
             effect: "now" as const,
             page: "edit" as const,
           }
-        : key.endsWith(".hours")
-          ? { effect: "never" as const }
-          : {}),
+        : {}),
   };
 }
 
@@ -414,6 +403,37 @@ export const approvalChange =
       },
     };
   };
+
+/**
+ * Keys in the file that nothing reads, such as those of earlier versions.
+ * They are left alone until the lead removes them.
+ */
+export function unusedKeys(file: unknown): string[] {
+  if (typeof file !== "object" || file === null || Array.isArray(file))
+    return [];
+  const known = SETTINGS.map(({ key }) => key);
+  const inside = (path: string) =>
+    known.some((key) => key.startsWith(`${path}.`));
+  const unused: string[] = [];
+  const walk = (value: unknown, at: string) => {
+    for (const [name, inner] of Object.entries(value as object)) {
+      const path = at ? `${at}.${name}` : name;
+      if (at === "agents") {
+        // An agent: its own keys only.
+        if (typeof inner !== "object" || inner === null) continue;
+        for (const field of Object.keys(inner))
+          if (!settingFor(`${path}.${field}`)) unused.push(`${path}.${field}`);
+      } else if (path === "agents") {
+        if (typeof inner === "object" && inner !== null) walk(inner, path);
+      } else if (known.includes(path)) continue;
+      else if (inside(path) && typeof inner === "object" && inner !== null)
+        walk(inner, path);
+      else if (!known.includes(path)) unused.push(path);
+    }
+  };
+  walk(file, "");
+  return unused;
+}
 
 /** Whether a running server takes it on by itself. */
 export const isLive = (setting: Pick<Setting, "effect">): boolean =>

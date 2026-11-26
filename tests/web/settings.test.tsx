@@ -340,6 +340,22 @@ describe("the Settings page", () => {
     );
   });
 
+  it("removes what isn't used any more, after a question", async () => {
+    view.unused = ["defaults.hours", "ui"];
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByText("defaults.hours, ui")).toBeTruthy();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("button", { name: "Remove them" }));
+    expect(writes()).toEqual([]);
+    confirm.mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Remove them" }));
+    expect(calls.at(-1)).toMatchObject({
+      method: "POST",
+      url: "/api/settings/clean",
+    });
+  });
+
   it("says beside its field what is wrong, and saves nothing", async () => {
     await open("phone");
     const minutes = screen.getByLabelText("phone_notices.away_minutes");
