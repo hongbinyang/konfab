@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  accessSync,
+  constants,
   existsSync,
   lstatSync,
+  realpathSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import {
   codexPostApproval,
   readClaude,
@@ -35,6 +38,25 @@ import { withLock } from "../settings-file.js";
  * and the contents of backups and the journal never leave this module. See
  * docs/design/settings-phase4.md.
  */
+/** The Node on PATH that is this one, as setup records it. */
+export function stableNode(env: NodeJS.ProcessEnv = process.env): string {
+  return (
+    (env.PATH ?? "")
+      .split(delimiter)
+      .map((part) =>
+        join(part || ".", process.platform === "win32" ? "node.exe" : "node"),
+      )
+      .find((candidate) => {
+        try {
+          accessSync(candidate, constants.X_OK);
+          return realpathSync(candidate) === realpathSync(process.execPath);
+        } catch {
+          return false;
+        }
+      }) ?? process.execPath
+  );
+}
+
 export type AppId = "codex" | "claude";
 export const APPS: AppId[] = ["codex", "claude"];
 const NAMES: Record<AppId, string> = { codex: "Codex", claude: "Claude Code" };

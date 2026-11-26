@@ -376,7 +376,7 @@ To uninstall: run `npm run login-item -- uninstall` if you turned it on, delete 
 
 Nothing needs configuring: every setting has a default. The server always listens on `127.0.0.1` only. There are three ways to change a setting; all use `~/.konfab/config.yaml`.
 
-- **In the page:** **⚙ Settings** in the left sidebar, in five sections: **Phone notices**, **Rejoin**, **Agents** (also the name and run window of each agent), **Pre-approvals**, **GitHub token** and **Advanced** (the port and the server's clock). Connectors are on the command line for now.
+- **In the page:** **⚙ Settings** in the left sidebar, in sections: **Phone notices**, **Rejoin**, **Agents** (also the name and run window of each agent), **Connectors**, **Pre-approvals**, **GitHub token** and **Advanced** (the port and the server's clock).
 - **On the command line,** with Konfab running or not:
 
   ```
@@ -387,6 +387,8 @@ Nothing needs configuring: every setting has a default. The server always listen
   ```
 
 - **In the file,** by hand.
+
+**Connectors** shows, for Codex and Claude Code, whether its connector reaches this Konfab, and offers **Set up**, **Repair**, **New token** and **Undo**, and adding or removing the app in Konfab. Every change to an app's file is shown first, exactly (the file, what is added or changed), and made only when you select **Apply**, and only if nothing changed since; restart the app afterwards. **Undo** puts back the file as it was before Konfab's last change, but only while the file is still what Konfab wrote and the earlier entry would still connect. If an app writes its file at the same moment, its write can be lost; the copy that Konfab keeps beside the file has the state before. Best set up Claude Code while it is closed. **Codex posts without asking** is changed there too. Two things stay on the command line: moving an old project connector (`npm run setup -- --migrate <folder>`) and start at login (`npm run login-item`), which comes to the page after a short trial.
 
 Two changes ask first, in the page and on the command line: a **shorter silent-turn limit** (a silent turn that is already longer is ended at the next look) and **another port** (used after a restart; both apps then need `npm run setup`). Without a terminal, `--yes` says yes. Run-window warnings are written as minutes with commas, such as `30, 10, 5`. A setting that needs a restart shows both values until then: "Saved: 20. In use: 10 until Konfab restarts."
 

@@ -21,6 +21,7 @@ import { macProcesses } from "./rejoin/processes.js";
 import { Watchers } from "./rejoin/watchers.js";
 import { createRuntime } from "./runtime.js";
 import { GithubToken, githubAccepts } from "./github/token-store.js";
+import { connectorPaths, Connectors, stableNode } from "./connectors/manage.js";
 
 const home = konfabHome();
 ensureHome(home);
@@ -209,6 +210,19 @@ const app = await buildApp({
     live,
     recheck: () => void checkRejoin(),
     github: githubToken,
+    connectors: new Connectors({
+      home,
+      paths: connectorPaths(home, process.env),
+      // What a connector must say to reach this very server.
+      facts: {
+        url: `http://127.0.0.1:${config.server.port}`,
+        node: stableNode(),
+        bridge: resolve(import.meta.dirname, "../bridge/index.js"),
+      },
+      service,
+      db,
+      config: () => live.inUse,
+    }),
   },
   watchers,
   service,

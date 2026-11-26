@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -18,6 +19,10 @@ import {
 } from "../../src/server/domain/service.js";
 import { LiveSettings } from "../../src/server/live-settings.js";
 import { GithubToken } from "../../src/server/github/token-store.js";
+import {
+  connectorPaths,
+  Connectors,
+} from "../../src/server/connectors/manage.js";
 import { FakeKeychain } from "../unit/fake-keychain.js";
 
 // Made up; GitHub is a stand-in.
@@ -99,6 +104,21 @@ describe("the settings routes", () => {
         home,
         live,
         recheck: () => (rechecks += 1),
+        connectors: new Connectors({
+          home,
+          paths: connectorPaths(home, {
+            CODEX_HOME: join(home, "codex"),
+            CLAUDE_CONFIG_DIR: join(home, "claude"),
+          }),
+          facts: {
+            url: `http://${HOST}`,
+            node: "/usr/bin/node",
+            bridge: "/k/bridge.js",
+          },
+          service,
+          db,
+          config: () => live.inUse,
+        }),
         github: new GithubToken({
           home,
           keychain: keychain as never,
@@ -383,6 +403,76 @@ describe("the settings routes", () => {
     });
     answers.push(JSON.stringify(await view()));
     expect(answers.join("\n")).not.toContain(GITHUB_TOKEN.slice(4));
+  });
+
+  it("changes an app's file only as previewed, and never gives a token back", async () => {
+    service.ensureAgent("codex", "Codex");
+    mkdirSync(join(home, "codex"));
+    writeFileSync(join(home, "codex", "config.toml"), "# mine\n");
+    const codex = (seen: { connectors: { apps: { id: string }[] } }) =>
+      seen.connectors.apps.find((one) => one.id === "codex");
+    expect(codex(await view())).toMatchObject({ state: "not_set_up" });
+    const preview = (
+      await call("POST", "/api/settings/connectors/preview", {
+        operation: { kind: "setup", app: "codex" },
+      })
+    ).json();
+    expect(preview.files[0].lines).toContain("adds Konfab's entry");
+    expect(
+      (
+        await call(
+          "POST",
+          "/api/settings/connectors/apply",
+          { id: preview.id },
+          { origin: "http://evil.example" },
+        )
+      ).statusCode,
+    ).toBe(403);
+    for (const body of [
+      { operation: { kind: "setup", app: "other" } },
+      { operation: { kind: "setup", app: "codex", path: "/etc/x" } },
+    ])
+      expect(
+        (await call("POST", "/api/settings/connectors/preview", body))
+          .statusCode,
+      ).toBe(400);
+    const done = await call("POST", "/api/settings/connectors/apply", {
+      id: preview.id,
+    });
+    expect(done.json().said[0]).toContain("written");
+    expect(codex(done.json())).toMatchObject({ state: "connected" });
+    expect(JSON.stringify([preview, done.json()])).not.toMatch(/kfb_/);
+    // Changed since its preview: nothing written.
+    const next = (
+      await call("POST", "/api/settings/connectors/preview", {
+        operation: { kind: "token", app: "codex" },
+      })
+    ).json();
+    writeFileSync(
+      join(home, "codex", "config.toml"),
+      `${readFileSync(join(home, "codex", "config.toml"), "utf8")}# edited\n`,
+    );
+    const late = await call("POST", "/api/settings/connectors/apply", {
+      id: next.id,
+    });
+    expect([late.statusCode, late.json().code]).toEqual([409, "connector"]);
+  });
+
+  it("adds and removes an app in config.yaml", async () => {
+    const removed = await call("POST", "/api/settings/apps", {
+      app: "codex",
+      add: false,
+      hash: (await view()).hash,
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(parseConfig(text()).agents.codex).toBeUndefined();
+    const added = await call("POST", "/api/settings/apps", {
+      app: "codex",
+      add: true,
+      hash: (await view()).hash,
+    });
+    expect(added.statusCode).toBe(200);
+    expect(parseConfig(text()).agents.codex).toEqual({ display_name: "Codex" });
   });
 
   it("says what is wrong with a broken file, and saves nothing over it", async () => {

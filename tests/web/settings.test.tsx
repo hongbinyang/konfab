@@ -406,6 +406,68 @@ describe("the Settings page", () => {
     expect(screen.queryByRole("button", { name: "Check and save" })).toBeNull();
   });
 
+  it("shows a connector change first, and applies only that, on Apply", async () => {
+    view.connectors = {
+      apps: [
+        {
+          id: "codex",
+          name: "Codex",
+          in_config: true,
+          state: "not_set_up",
+          path: "/h/.codex/config.toml",
+          can_undo: false,
+          undo_note: null,
+        },
+        {
+          id: "claude",
+          name: "Claude Code",
+          in_config: true,
+          state: "connected",
+          path: "/h/.claude.json",
+          can_undo: true,
+          undo_note: null,
+        },
+      ],
+      posts: "Codex follows its normal approvals.",
+      posts_on: false,
+    };
+    const preview = {
+      id: "22222222-2222-4222-8222-222222222222",
+      files: [
+        { path: "/h/.codex/config.toml", lines: ["adds Konfab's entry"] },
+      ],
+      notes: ["Restart Codex afterwards to use it."],
+    };
+    answer = (url) =>
+      url.endsWith("/preview")
+        ? [200, preview]
+        : [
+            200,
+            { ...view, said: ["Codex: written. Restart Codex to use it."] },
+          ];
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Connectors" }));
+    expect(document.body.textContent).toContain("Not set up.");
+    expect(screen.getByRole("button", { name: "New token…" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Set up…" }));
+    const region = screen.getByRole("region", { name: "What changes" });
+    expect(region.textContent).toContain("adds Konfab's entry");
+    expect(writes()).toEqual([{ operation: { kind: "setup", app: "codex" } }]);
+    // Nothing else can start while a preview is open.
+    expect(screen.getByRole("button", { name: "Undo…" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await userEvent.click(
+      within(region).getByRole("button", { name: "Cancel" }),
+    );
+    expect(writes()).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Set up…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(writes().at(-1)).toEqual({ id: preview.id });
+    expect(document.body.textContent).toContain("Restart Codex to use it.");
+  });
+
   it("says beside its field what is wrong, and saves nothing", async () => {
     await open("phone");
     const minutes = screen.getByLabelText("phone_notices.away_minutes");

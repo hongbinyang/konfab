@@ -5,6 +5,7 @@ import type { LiveSettings } from "../live-settings.js";
 import { agree, isAgreed, lookAtOwn } from "../rejoin/own-command.js";
 import { lookAtCommand } from "../rejoin/codex.js";
 import { GithubTokenError, type GithubToken } from "../github/token-store.js";
+import { APPS, type Connectors } from "../connectors/manage.js";
 import { parse } from "yaml";
 import {
   changeSettings,
@@ -33,6 +34,8 @@ export type SettingsAccess = {
   live: LiveSettings;
   /** The Codex command may be another one now. */
   recheck: () => void;
+  /** The apps' connectors, where they can be changed from here. */
+  connectors?: Connectors;
   /** The GitHub token for the skill search, where there is one. */
   github?: GithubToken;
   /** Test seam: what starts codesign. */
@@ -116,6 +119,8 @@ export function settingsRoutes(
           };
         }),
       ].map(shownOf),
+      /** Never a token or a file's contents. */
+      connectors: access.connectors?.view() ?? null,
       /** Never the token: where it comes from, and what is left. */
       github: access.github?.view() ?? null,
       /** Keys in the file that nothing reads any more. */
@@ -202,6 +207,77 @@ export function settingsRoutes(
         .strict()
         .parse(request.body);
       return save({ drop: body.keys }, body.hash);
+    },
+  );
+
+  // Other programs' files: a preview of exactly what changes, then that and
+  // nothing else, after the lead's yes.
+  const connectors = () => {
+    if (!access.connectors)
+      throw new KonfabError("not_available", 409, "Not available here");
+    return access.connectors;
+  };
+  const appId = z.enum(APPS as [string, ...string[]]);
+  const operation = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("setup"), app: appId }).strict(),
+    z.object({ kind: z.literal("token"), app: appId }).strict(),
+    z.object({ kind: z.literal("undo"), app: appId }).strict(),
+    z.object({ kind: z.literal("posts"), on: z.boolean() }).strict(),
+  ]);
+  const connectorStep = async <T>(step: () => T | Promise<T>) => {
+    try {
+      return await step();
+    } catch (error) {
+      if (error instanceof KonfabError) throw error;
+      // Paths only: no message here carries a file's contents or a token.
+      throw new KonfabError(
+        "connector",
+        409,
+        error instanceof Error ? error.message : "That didn't work.",
+      );
+    }
+  };
+  app.post(
+    "/api/settings/connectors/preview",
+    { onRequest: fromPage, bodyLimit: 4 * 1024 },
+    async (request) => {
+      const body = z.object({ operation }).strict().parse(request.body);
+      return connectorStep(() =>
+        connectors().preview(
+          body.operation as Parameters<Connectors["preview"]>[0],
+        ),
+      );
+    },
+  );
+  app.post(
+    "/api/settings/connectors/apply",
+    { onRequest: fromPage, bodyLimit: 4 * 1024 },
+    async (request) => {
+      const { id } = z
+        .object({ id: z.string().uuid() })
+        .strict()
+        .parse(request.body);
+      const said = await connectorStep(() => connectors().apply(id));
+      return { ...view(), said };
+    },
+  );
+
+  // An app in config.yaml: made at the start, and joined by its connector.
+  app.post(
+    "/api/settings/apps",
+    { onRequest: fromPage, bodyLimit: 1024 },
+    async (request) => {
+      const body = z
+        .object({ app: appId, add: z.boolean(), hash: z.string().length(64) })
+        .strict()
+        .parse(request.body);
+      const name = body.app === "codex" ? "Codex" : "Claude";
+      // The whole list, so that an app that the defaults would bring back
+      // stays away.
+      const agents: Record<string, unknown> = { ...live.saved.agents };
+      if (body.add) agents[body.app] ??= { display_name: name };
+      else delete agents[body.app];
+      return save({ set: { agents: agents as Value } }, body.hash);
     },
   );
 

@@ -23,6 +23,7 @@ import {
   recover,
 } from "./setup-connectors.js";
 import { snapshot } from "./safe-config-files.js";
+import { withLock } from "../server/settings-file.js";
 import { runTelegramSetup } from "./telegram-setup.js";
 import { setupGithubToken } from "../server/github-token.js";
 import {
@@ -221,43 +222,46 @@ if (args.includes("--telegram")) {
           );
         } else console.log("All agents already have tokens; no changes made.");
       } else {
-        const roomPostsState = join(home, "client-settings.json");
-        const ownedText = ownsRoomPosts(paths.codex, roomPostsState)
-          ? snapshot(paths.codex).contents
-          : null;
-        let codexWrite: { before: string | null; after: string } | undefined;
-        const backups = installConnectors({
-          onWrite: (path, before, after) => {
-            if (path === paths.codex) codexWrite = { before, after };
-          },
-          paths,
-          service,
-          db,
-          bridge,
-          node: nodePath,
-          url,
-          tokens,
-          changed,
-        });
-        console.log(
-          "User-level connector setup complete. Reload the desktop clients to use changes.",
-        );
-        for (const id of skipped)
+        // The page changes these files too; one writer at a time.
+        await withLock(home, () => {
+          const roomPostsState = join(home, "client-settings.json");
+          const ownedText = ownsRoomPosts(paths.codex, roomPostsState)
+            ? snapshot(paths.codex).contents
+            : null;
+          let codexWrite: { before: string | null; after: string } | undefined;
+          const backups = installConnectors({
+            onWrite: (path, before, after) => {
+              if (path === paths.codex) codexWrite = { before, after };
+            },
+            paths,
+            service,
+            db,
+            bridge,
+            node: nodePath,
+            url,
+            tokens,
+            changed,
+          });
           console.log(
-            `${id === "codex" ? "Codex" : "Claude Code"} not found (no ${id === "codex" ? dirname(paths.codex) : paths.claude}); its connector was not written. Start the app once and run setup again, or use \`npm run setup -- --manual\` for the entry to add by hand.`,
+            "User-level connector setup complete. Reload the desktop clients to use changes.",
           );
-        for (const backup of backups) console.log(`Secret backup: ${backup}`);
-        console.log(
-          "Existing project connector entries are unchanged; migrate a known project only after verifying the user-level connection.",
-        );
-        if (ownedText !== null)
-          keepOwnershipAfterSetup(
-            paths.codex,
-            roomPostsState,
-            ownedText,
-            codexWrite,
+          for (const id of skipped)
+            console.log(
+              `${id === "codex" ? "Codex" : "Claude Code"} not found (no ${id === "codex" ? dirname(paths.codex) : paths.claude}); its connector was not written. Start the app once and run setup again, or use \`npm run setup -- --manual\` for the entry to add by hand.`,
+            );
+          for (const backup of backups) console.log(`Secret backup: ${backup}`);
+          console.log(
+            "Existing project connector entries are unchanged; migrate a known project only after verifying the user-level connection.",
           );
-        roomPostsStep(paths.codex, roomPostsState);
+          if (ownedText !== null)
+            keepOwnershipAfterSetup(
+              paths.codex,
+              roomPostsState,
+              ownedText,
+              codexWrite,
+            );
+          roomPostsStep(paths.codex, roomPostsState);
+        });
       }
     }
   } catch (error) {

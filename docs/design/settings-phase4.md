@@ -1,6 +1,6 @@
 # Settings, phase 4: connectors, Codex posts and start at login
 
-**Status:** a plan for review (revised after the first review); nothing is built. It finishes [Settings](settings.md): after it, every setting and setup action of today is in the page and on the command line, with the exceptions listed under **Left out**, which are for the lead to decide.
+**Status:** reviewed. Built: the connectors of both apps (state, preview, apply, undo), Codex posts without asking, and adding or removing an app in `config.yaml`. Waiting: start at login, for the trial with the lead. The lead agreed to all six recommendations below (2026-11-26).
 
 These three change **other programs' files**: Codex's `config.toml`, Claude Code's `.claude.json`, and a macOS LaunchAgent. So every change in the page is shown first, exactly, and done only after a yes; it is checked against the file as it was shown; and it can be undone while nothing else has changed that file.
 
@@ -123,6 +123,19 @@ The **first setup and sign-in** stay in the terminal by nature: the page can't b
 - Codex posts: the cases of `room-posts` today, through the page.
 - Start at login: a stand-in for `launchctl` with loaded and not loaded jobs; the real behaviour only from the trial above.
 - Agents, other origins, a request with a path: refused.
+
+## For later
+
+Documented so that they can be picked up; none is built.
+
+| Item                                        | State                            | What it needs                                                                                                    |
+| ------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Start at login in the page                  | designed above                   | the launchd trial with the lead (a throwaway job; Konfab's own untouched), then build it to what the trial shows |
+| Moving an old project connector in the page | the lead chose command line only | nothing, unless asked again                                                                                      |
+| Start at login on Linux                     | the lead chose later             | a systemd user unit, in both ways, with its own trial                                                            |
+| A room's own settings on the command line   | the lead chose to skip (phase 3) | a command line that goes through the running server                                                              |
+| Claude Code posting without asking          | its rule isn't verified          | a trial of Claude Code's per-tool approval for Konfab                                                            |
+| Real end-to-end tries                       | stand-ins only                   | a real Telegram bot, a real GitHub token, Linux x86-64                                                           |
 
 ## Questions for the lead
 

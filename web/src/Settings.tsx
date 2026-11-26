@@ -45,6 +45,26 @@ type View = {
   platform: string;
   settings: Setting[];
   command_to_agree: boolean;
+  /** Absent from older servers. Never a token or a file's contents. */
+  connectors?: {
+    apps: {
+      id: "codex" | "claude";
+      name: string;
+      in_config: boolean;
+      state:
+        | "connected"
+        | "other_address"
+        | "token_unknown"
+        | "not_set_up"
+        | "app_not_found"
+        | "manual";
+      path: string;
+      can_undo: boolean;
+      undo_note: string | null;
+    }[];
+    posts: string;
+    posts_on: boolean | null;
+  } | null;
   /** Absent from older servers. Never the token. */
   github?: {
     source: "environment" | "stored" | "earlier" | "none";
@@ -74,6 +94,12 @@ const SECTIONS = [
     name: "Agents",
     about:
       "How agents take turns, wait and report, for all rooms. A room's own check-in, set in its Edit, comes first.",
+  },
+  {
+    id: "connectors",
+    name: "Connectors",
+    about:
+      "How Codex and Claude Code reach Konfab. Each change is shown first, exactly; restart the app afterwards.",
   },
   {
     id: "approvals",
@@ -350,6 +376,17 @@ export function Settings({
           {saved}
         </p>
         {section === "phone" && <PhoneSetup />}
+        {section === "connectors" && view.connectors && (
+          <ConnectorsPart
+            view={view}
+            off={off}
+            onSaved={(next, what) => {
+              saves.current += 1;
+              setView(next);
+              setSaved(what);
+            }}
+          />
+        )}
         {section === "github" && view.github && (
           <GithubToken
             github={view.github}
@@ -666,6 +703,228 @@ function Row({
             </button>
           )}
       </div>
+    </div>
+  );
+}
+
+const STATES = {
+  connected: "Connected.",
+  other_address:
+    "Set up for another address or Node; Repair points it at this Konfab.",
+  token_unknown:
+    "Its token isn't this Konfab's (another folder, or an old token). Repair gives it a new one.",
+  not_set_up: "Not set up.",
+  app_not_found: "Not found here. Start the app once, then set it up.",
+  manual:
+    "Setup is manual: `npm run setup` writes the entries to ~/.konfab/app-setup.md.",
+} as const;
+
+type Operation =
+  | { kind: "setup" | "token" | "undo"; app: "codex" | "claude" }
+  | { kind: "posts"; on: boolean };
+type ConnectorPreview = {
+  id: string;
+  files: { path: string; lines: string[] }[];
+  notes: string[];
+};
+
+/** Other programs' files: shown first, exactly, and changed only on Apply. */
+function ConnectorsPart({
+  view,
+  off,
+  onSaved,
+}: {
+  view: View;
+  off: boolean;
+  onSaved: (view: View, what: string) => void;
+}) {
+  const connectors = view.connectors!;
+  const [preview, setPreview] = useState<ConnectorPreview | null>(null);
+  const [problem, setProblem] = useState("");
+  const [said, setSaid] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const run = async <T,>(step: () => Promise<T>) => {
+    setBusy(true);
+    setProblem("");
+    try {
+      return await step();
+    } catch (caught) {
+      setProblem(
+        caught instanceof Error ? caught.message : "That didn't work.",
+      );
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const show = (operation: Operation) =>
+    void run(async () => {
+      setSaid([]);
+      setPreview(
+        await request<ConnectorPreview>("/api/settings/connectors/preview", {
+          method: "POST",
+          body: { operation },
+        }),
+      );
+    });
+  const apply = () =>
+    void run(async () => {
+      const done = await request<View & { said: string[] }>(
+        "/api/settings/connectors/apply",
+        { method: "POST", body: { id: preview!.id } },
+      );
+      setPreview(null);
+      setSaid(done.said);
+      onSaved(done, done.said.join(" "));
+    }).then((done) => {
+      // Refused: the preview is old; it is shown again from the start.
+      if (done === null) setPreview(null);
+    });
+  const inConfig = (app: "codex" | "claude", add: boolean, name: string) => {
+    if (
+      !add &&
+      !window.confirm(
+        `Remove ${name} from Konfab? Konfab then doesn't make its agent at the start; its agents' history stays, and its connector stays in the app until you remove it there.`,
+      )
+    )
+      return;
+    void run(async () =>
+      onSaved(
+        await request<View>("/api/settings/apps", {
+          method: "POST",
+          body: { app, add, hash: view.hash },
+        }),
+        `${add ? "Added" : "Removed"}: ${name}.`,
+      ),
+    );
+  };
+  const lock = off || busy || preview !== null;
+  return (
+    <div className="connectors">
+      {connectors.apps.map((app) => (
+        <div key={app.id} className="setting connector">
+          <div className="setting-text">
+            <span className="name">{app.name}</span>
+            <p className="muted">
+              {app.in_config
+                ? STATES[app.state]
+                : "Not in Konfab: no agent is made for it."}{" "}
+              <code>{app.path}</code>
+            </p>
+            {app.undo_note && <p className="muted">{app.undo_note}</p>}
+          </div>
+          <div className="setting-control connector-actions">
+            {app.in_config &&
+              app.state !== "manual" &&
+              app.state !== "app_not_found" && (
+                <>
+                  {app.state !== "connected" && (
+                    <button
+                      type="button"
+                      disabled={lock}
+                      onClick={() => show({ kind: "setup", app: app.id })}
+                    >
+                      {app.state === "not_set_up" ? "Set up…" : "Repair…"}
+                    </button>
+                  )}
+                  {app.state === "connected" && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={lock}
+                      onClick={() => show({ kind: "token", app: app.id })}
+                    >
+                      New token…
+                    </button>
+                  )}
+                  {app.can_undo && (
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={lock}
+                      onClick={() => show({ kind: "undo", app: app.id })}
+                    >
+                      Undo…
+                    </button>
+                  )}
+                </>
+              )}
+            <button
+              type="button"
+              className="link"
+              disabled={lock}
+              onClick={() => inConfig(app.id, !app.in_config, app.name)}
+            >
+              {app.in_config ? "Remove from Konfab" : "Add to Konfab"}
+            </button>
+          </div>
+        </div>
+      ))}
+      <div className="setting">
+        <div className="setting-text">
+          <span className="name">Codex posts without asking</span>
+          <p className="muted">{connectors.posts}</p>
+        </div>
+        <div className="setting-control">
+          {connectors.posts_on !== null && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={lock}
+              onClick={() => show({ kind: "posts", on: !connectors.posts_on })}
+            >
+              {connectors.posts_on ? "Ask again…" : "Allow…"}
+            </button>
+          )}
+        </div>
+      </div>
+      {preview && (
+        <div
+          className="connector-preview"
+          role="region"
+          aria-label="What changes"
+        >
+          <h3>What changes</h3>
+          {preview.files.map((file) => (
+            <div key={file.path}>
+              <code>{file.path}</code>
+              <ul>
+                {file.lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {preview.notes.map((note) => (
+            <p key={note} className="muted">
+              {note}
+            </p>
+          ))}
+          <p className="muted">
+            A copy of each file is kept beside it. Nothing changes until you
+            apply.
+          </p>
+          <div className="phone-buttons">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setPreview(null)}
+            >
+              Cancel
+            </button>
+            <button type="button" disabled={busy || off} onClick={apply}>
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
+      {said.length > 0 && <p role="status">{said.join(" ")}</p>}
+      {problem && (
+        <p className="attachment-error" role="alert">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }
