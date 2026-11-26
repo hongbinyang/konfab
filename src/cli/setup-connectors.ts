@@ -83,6 +83,8 @@ export function installConnectors(options: {
   changed: string[];
   /** Told about each config file this call replaced, with its exact contents. */
   onWrite?: (path: string, before: string | null, after: string) => void;
+  /** Test seam: right before each file is replaced. */
+  between?: (path: string) => void;
 }): string[] {
   const { paths, service, db, tokens } = options;
   recover(paths.journal, service, {
@@ -123,10 +125,15 @@ export function installConnectors(options: {
     flag: "wx",
   });
   const backups: string[] = [];
+  // Only these are put back on a failure: a file that refused its write is
+  // someone else's now, and stays as they left it.
+  const written: Write[] = [];
   try {
     db.transaction(() => {
       for (const write of changedWrites) {
+        options.between?.(write.before.path);
         const backup = replaceConfig(write.before, write.after);
+        written.push(write);
         if (backup) backups.push(backup);
       }
       for (const id of options.changed)
@@ -134,7 +141,7 @@ export function installConnectors(options: {
     })();
   } catch (error) {
     try {
-      for (const write of [...changedWrites].reverse())
+      for (const write of [...written].reverse())
         restoreConfig(write.before, write.after);
       unlinkSync(paths.journal);
     } catch {
