@@ -59,7 +59,7 @@ The lead chose this (B): the Keychain on macOS, and on Linux, which has no Keych
 
 - **Where:** `<Konfab folder>/tokens/<item>`, one file per setup. The folder is made `0700`, each file `0600`. Nothing else is in the folder, and Konfab never copies it (the settings' earlier copies are only of `config.yaml`).
 - **Never replaced:** a file is made new (`O_CREAT|O_EXCL`), so one that exists is refused, as an item without "replace" is in the Keychain.
-- **Nothing private is followed elsewhere:** the folder must be a real folder, not a link; a file is opened with `O_NOFOLLOW`. Both must belong to this user and be open to nobody else. Otherwise the answer is _unknown_, so nothing is used, stored or deleted.
+- **Nothing private is followed elsewhere:** the folder must be a real folder, not a link; a file is opened with `O_NOFOLLOW` and without waiting (`O_NONBLOCK`), so a pipe or socket put there can't hold up the server; it must then be a plain file. Both must belong to this user and be open to nobody else. Otherwise the answer is _unknown_, so nothing is used, stored or deleted.
 - **Not there** is only a missing folder or file; every other failure is unknown, as with macOS's code 44.
 - **The terminal asks** without showing what is typed (no system program does this on Linux). What isn't a token is refused before anything is written.
 - **What it doesn't do:** the file is plain text on disk, and in backups of the home folder. Programs that run as the lead can read it, as they can ask macOS for the Keychain item. The guide says so.

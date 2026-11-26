@@ -10,8 +10,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   status,
@@ -20,6 +22,20 @@ import {
 } from "../../src/cli/telegram-setup.js";
 import { readNotes } from "../../src/server/telegram/places.js";
 import { Keychain, newItem } from "../../src/server/telegram/token.js";
+
+const TOKEN_MODULE = pathToFileURL(
+  join(import.meta.dirname, "../../src/server/telegram/token.ts"),
+).href;
+/** Lets a plain Node process load the sources, whose imports say ".js". */
+const TS_IMPORTS = `import { register } from "node:module";
+register("data:text/javascript," + encodeURIComponent(\`
+export async function resolve(specifier, context, next) {
+  try { return await next(specifier, context); }
+  catch (error) {
+    if (!specifier.endsWith(".js")) throw error;
+    return next(specifier.slice(0, -3) + ".ts", context);
+  }
+}\`));`;
 
 // Made up.
 const TOKEN = "1234567890:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQr";
@@ -139,6 +155,52 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
       expect(await files().storeByHand(newItem())).toBe(false);
       expect(await files().remove(item)).toBe("unknown");
       expect(existsSync(path)).toBe(true);
+    });
+
+    it("reads no pipe or other special file, and isn't held up by one", () => {
+      const item = newItem();
+      mkdirSync(folder, { mode: 0o700 });
+      const path = join(folder, item);
+      // In a process of its own: a read that waits would hold up this one.
+      const read = (prepare: string) =>
+        spawnSync(
+          process.execPath,
+          [
+            "--experimental-transform-types",
+            "--no-warnings",
+            "--import",
+            `data:text/javascript,${encodeURIComponent(TS_IMPORTS)}`,
+            "--input-type=module",
+            "-e",
+            `${prepare}
+            const { Keychain } = await import(${JSON.stringify(TOKEN_MODULE)});
+            const store = new Keychain({}, "linux", undefined, { home: ${JSON.stringify(home)} });
+            const started = Date.now();
+            const read = await store.read({ slot: "own", item: ${JSON.stringify(item)} });
+            const removed = await store.remove(${JSON.stringify(item)});
+            console.log(JSON.stringify({ read, removed, ms: Date.now() - started }));`,
+          ],
+          { encoding: "utf8", timeout: 10_000 },
+        );
+      const pipe = spawnSync("/usr/bin/mkfifo", ["-m", "600", path]);
+      expect(pipe.status).toBe(0);
+      const socket = `const net = await import("node:net");
+        const server = net.createServer().listen(${JSON.stringify(join(folder, "s"))});
+        await new Promise((done) => server.once("listening", done));
+        (await import("node:fs")).renameSync(${JSON.stringify(join(folder, "s"))}, ${JSON.stringify(path)});
+        server.unref();`;
+      for (const prepare of ["", socket]) {
+        const ran = read(prepare);
+        expect(ran.signal, ran.stderr).toBeNull();
+        const answer = JSON.parse(ran.stdout.trim());
+        expect(answer).toMatchObject({
+          read: { state: "unknown" },
+          removed: "deleted",
+        });
+        expect(answer.ms).toBeLessThan(2000);
+        expect(ran.stdout + ran.stderr).not.toContain(TOKEN);
+        expect(existsSync(path)).toBe(false);
+      }
     });
 
     it("doesn't follow a folder that is a link", async () => {

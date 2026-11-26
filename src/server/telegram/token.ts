@@ -133,9 +133,10 @@ class TokenFiles {
     try {
       const folder = this.checkedFolder();
       if (!folder) return { state: "none" };
+      // Without waiting: a pipe could otherwise hold up the whole server.
       file = openSync(
         join(folder, item),
-        constants.O_RDONLY | constants.O_NOFOLLOW,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
       );
       const info = fstatSync(file);
       if (
