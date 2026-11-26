@@ -10,10 +10,11 @@ import { Modal } from "./Modal";
 import { PhoneSetup } from "./PhoneSetup";
 import { request, RequestError } from "./api";
 
-type Value = string | number | boolean | null | number[];
+type Approval = { recipient: string; data: string };
+type Value = string | number | boolean | null | number[] | Approval[];
 type Setting = {
   key: string;
-  section: "phone" | "rejoin" | "agents" | "advanced";
+  section: "phone" | "rejoin" | "agents" | "approvals" | "advanced";
   name: string;
   help: string;
   control:
@@ -29,6 +30,7 @@ type Setting = {
     | { type: "command" }
     | { type: "name" }
     | { type: "minutes"; max: number; most: number }
+    | { type: "approvals" }
     | { type: "text" };
   effect: "now" | "next_join" | "restart" | "next_setup" | "never";
   effect_text: string;
@@ -62,6 +64,12 @@ const SECTIONS = [
     name: "Agents",
     about:
       "How agents take turns, wait and report, for all rooms. A room's own check-in, set in its Edit, comes first.",
+  },
+  {
+    id: "approvals",
+    name: "Pre-approvals",
+    about:
+      "What agents may send to whom without asking you, in every room. Each use is still logged. Everything else still asks.",
   },
   {
     id: "advanced",
@@ -269,7 +277,13 @@ export function Settings({
   };
   const off = view.problem !== null;
   const rows = view.settings.filter(
-    (setting) => setting.section === section && setting.page !== "later",
+    (setting) =>
+      setting.section === section &&
+      setting.page !== "later" &&
+      setting.control.type !== "approvals",
+  );
+  const approvals = view.settings.find(
+    (setting) => setting.control.type === "approvals",
   );
   const here = SECTIONS.find((item) => item.id === section)!;
   /** Changed elsewhere since the lead began to type; they decide. */
@@ -320,6 +334,17 @@ export function Settings({
           {saved}
         </p>
         {section === "phone" && <PhoneSetup />}
+        {section === "approvals" && approvals && (
+          <Approvals
+            list={(approvals.saved ?? []) as Approval[]}
+            off={off}
+            onSaved={(next, what) => {
+              saves.current += 1;
+              setView(next);
+              setSaved(what);
+            }}
+          />
+        )}
         {rows.map((setting) => (
           <Row
             key={setting.key}
@@ -568,6 +593,125 @@ function Row({
             </button>
           )}
       </div>
+    </div>
+  );
+}
+
+/** One entry at a time: an Add after its question, a Remove at once. */
+function Approvals({
+  list,
+  off,
+  onSaved,
+}: {
+  list: Approval[];
+  off: boolean;
+  onSaved: (view: View, what: string) => void;
+}) {
+  const [recipient, setRecipient] = useState("");
+  const [data, setData] = useState("");
+  const [problem, setProblem] = useState("");
+  const [busy, setBusy] = useState(false);
+  const send = async (approval: Approval, add: boolean) => {
+    setBusy(true);
+    setProblem("");
+    const post = (confirmed: boolean) =>
+      request<View>("/api/settings/pre-approvals", {
+        method: "POST",
+        body: { ...approval, add, confirmed },
+      });
+    try {
+      let next: View;
+      try {
+        next = await post(false);
+      } catch (caught) {
+        if (
+          !(caught instanceof RequestError) ||
+          caught.code !== "settings_confirm"
+        )
+          throw caught;
+        if (!window.confirm(caught.message)) return false;
+        next = await post(true);
+      }
+      onSaved(
+        next,
+        `${add ? "Added" : "Removed"}: ${approval.data} to ${approval.recipient}.`,
+      );
+      return true;
+    } catch (caught) {
+      setProblem(
+        caught instanceof Error ? `Not saved: ${caught.message}` : "Not saved.",
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="approvals">
+      {list.length === 0 ? (
+        <p className="muted">None. Agents ask you each time.</p>
+      ) : (
+        <ul>
+          {list.map((one) => (
+            <li key={`${one.recipient}\n${one.data}`}>
+              <span>
+                <code>{one.data}</code> to <code>{one.recipient}</code>
+              </span>
+              <button
+                type="button"
+                className="link"
+                disabled={off || busy}
+                aria-label={`Remove ${one.data} to ${one.recipient}`}
+                onClick={() => void send(one, false)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="approvals-add"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void send({ recipient, data }, true).then((done) => {
+            if (done) {
+              setRecipient("");
+              setData("");
+            }
+          });
+        }}
+      >
+        <label>
+          Kind of data
+          <input
+            value={data}
+            placeholder="code_push"
+            maxLength={200}
+            onChange={(event) => setData(event.target.value)}
+          />
+        </label>
+        <label>
+          Recipient
+          <input
+            value={recipient}
+            placeholder="github.com/OWNER/REPO"
+            maxLength={200}
+            onChange={(event) => setRecipient(event.target.value)}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={off || busy || !recipient.trim() || !data.trim()}
+        >
+          Add…
+        </button>
+      </form>
+      {problem && (
+        <p className="attachment-error" role="alert">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

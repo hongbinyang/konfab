@@ -1917,6 +1917,38 @@ input.switch[type="checkbox"]:disabled {
   font-size: 13px;
 }
 
+.approvals ul {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approvals li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.approvals-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.approvals-add label {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
 .phone-paste {
   display: flex;
   flex-wrap: wrap;

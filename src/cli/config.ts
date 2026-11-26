@@ -11,6 +11,9 @@ import {
   SettingsError,
 } from "../server/settings-file.js";
 import {
+  approvalChange,
+  approvalProblem,
+  approvalQuestion,
   defaultOf,
   EFFECT,
   questionFor,
@@ -28,6 +31,8 @@ const USAGE = `Usage:
   npm run config -- get <setting>
   npm run config -- set <setting> <value>
   npm run config -- reset <setting>
+  npm run config -- approve <recipient> <data>      agents may send it without asking
+  npm run config -- unapprove <recipient> <data>
   --yes                                  says yes to a question, without a terminal`;
 const COMMAND = "rejoin.codex_command";
 
@@ -106,6 +111,8 @@ export async function runConfig(
         say(`\nNot in use: ${note.problem}`);
       return 0;
     }
+    if (action === "approve" || action === "unapprove")
+      return await approve(deps, action === "approve", yes, key, rest);
     const setting = key === undefined ? null : settingFor(key);
     if (!["get", "set", "reset"].includes(action) || key === undefined) {
       say(USAGE);
@@ -124,6 +131,11 @@ export async function runConfig(
     }
     if (action === "set" ? rest.length !== 1 : rest.length !== 0) {
       say(USAGE);
+      return 2;
+    }
+    // Each entry has its own question.
+    if (action === "set" && setting.control.type === "approvals") {
+      say("Use `approve` and `unapprove`, one entry at a time.");
       return 2;
     }
     const before = read();
@@ -202,6 +214,48 @@ export async function runConfig(
     if (error.code === "invalid" && helpOf(key)) say(helpOf(key)!);
     return 1;
   }
+}
+
+/** One entry, on the list as it is then; adding it only after the question. */
+async function approve(
+  deps: ConfigDeps,
+  add: boolean,
+  yes: boolean,
+  recipient: string | undefined,
+  rest: string[],
+): Promise<number> {
+  const { say } = deps;
+  if (recipient === undefined || rest.length !== 1) {
+    say(USAGE);
+    return 2;
+  }
+  const approval = { recipient, data: rest[0]! };
+  const problem = approvalProblem(approval);
+  if (problem) {
+    say(`Not changed: ${problem}.`);
+    return 1;
+  }
+  if (add && !yes) {
+    say(approvalQuestion(approval).replace(/ Allow it\?$/, ""));
+    if (!deps.ask) {
+      say("Not changed: this needs your yes in a terminal, or --yes.");
+      return 1;
+    }
+    if (!/^y(es)?$/i.test((await deps.ask("Allow it? [y/N] ")).trim())) {
+      say("Not changed.");
+      return 1;
+    }
+  }
+  const done = await changeSettings(deps.home, approvalChange(approval, add));
+  say(
+    done.changed
+      ? `${add ? "Added" : "Removed"}: ${approval.data.trim()} to ${approval.recipient.trim()}.`
+      : add
+        ? "It was there already."
+        : "It wasn't there.",
+  );
+  say(await inUseText(deps, settingFor("pre_approvals")!, done.hash));
+  return 0;
 }
 
 function helpOf(key: string | undefined): string | null {

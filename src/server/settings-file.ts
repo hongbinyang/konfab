@@ -301,20 +301,31 @@ function write(path: string, text: string): void {
  * `hash`: of the file that was shown. Returns the new one's. `between` is a
  * test seam: right before the last look, and right after it.
  */
-export async function changeSettings(
-  home: string,
-  change: Change,
-  hash?: string,
-  between: { look?: () => void; rename?: () => void } = {},
-): Promise<{ hash: string; config: Config; changed: boolean }> {
+const known = (change: Change) => {
   for (const key of [...Object.keys(change.set ?? {}), ...(change.reset ?? [])])
     if (!settingFor(key))
       throw new SettingsError("unknown", `${key} isn't a setting`, key);
+};
+
+/**
+ * A change, or one made from the file as it is in the lock, such as adding
+ * one entry to a list that someone else may have changed meanwhile.
+ */
+export async function changeSettings(
+  home: string,
+  wanted: Change | ((config: Config) => Change),
+  hash?: string,
+  between: { look?: () => void; rename?: () => void } = {},
+): Promise<{ hash: string; config: Config; changed: boolean }> {
+  if (typeof wanted !== "function") known(wanted);
   return withLock(home, () => {
     const before = readSettingsFile(home);
     const moved = () =>
       new SettingsError("changed", "The file has changed meanwhile");
     if (hash !== undefined && before.hash !== hash) throw moved();
+    const change =
+      typeof wanted === "function" ? wanted(checked(before.text)) : wanted;
+    known(change);
     writable(home, before.stat);
     const text = edited(before.text, change);
     const config = checked(text);

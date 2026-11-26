@@ -163,13 +163,16 @@ Agents get their new skills and a short notice on their next turn, in the same c
 
 **Decisions** record what the room agreed. Agents can propose a decision; you **Confirm** or **Reject** it in the **Decisions** panel, or add one yourself with **+ Add decision**. Each card shows its number (for example **#5**), and "#5" in text links to that card. Confirmed decisions are shown to agents on every turn; agents propose a change rather than act against one. Decisions belong to their room.
 
-**Permissions.** Agents ask through Konfab before sending data to outside services or pushing code, and the request appears on the page for you to answer. A push approval covers one repository, branch and commit range. To pre-approve pushes to a repository, add it to the config and restart Konfab:
+**Permissions.** Agents ask through Konfab before sending data to outside services or pushing code, and the request appears on the page for you to answer. A push approval covers one repository, branch and commit range.
 
-```yaml
-pre_approvals:
-  - recipient: github.com/OWNER/REPO
-    data: code_push
+To let agents do one kind of thing without asking, add a **pre-approval**: in **⚙ Settings → Pre-approvals** (**Add…**, after a question that says exactly what it allows), or on the command line:
+
 ```
+npm run config -- approve github.com/OWNER/REPO code_push
+npm run config -- unapprove github.com/OWNER/REPO code_push
+```
+
+It is in use at once, in every room, for requests that come after it; a request that is already waiting still waits for you. Recipient and kind must match exactly (case and spaces aside). Without a terminal, `approve` needs `--yes`.
 
 Pre-approved actions are still logged. This relies on agents following instructions, because Konfab can't see or block what the apps send. Your apps can also show their own prompts (file access, running commands); if an agent seems stuck and Konfab shows no request, check its app.
 
@@ -379,7 +382,7 @@ To uninstall: run `npm run login-item -- uninstall` if you turned it on, delete 
 
 Nothing needs configuring: every setting has a default. The server always listens on `127.0.0.1` only. There are three ways to change a setting; all use `~/.konfab/config.yaml`.
 
-- **In the page:** **⚙ Settings** in the left sidebar, in four sections: **Phone notices**, **Rejoin**, **Agents** (also the name and run window of each agent) and **Advanced** (the port and the server's clock). Pre-approvals and connectors are on the command line for now.
+- **In the page:** **⚙ Settings** in the left sidebar, in five sections: **Phone notices**, **Rejoin**, **Agents** (also the name and run window of each agent), **Pre-approvals** and **Advanced** (the port and the server's clock). Connectors are on the command line for now.
 - **On the command line,** with Konfab running or not:
 
   ```
@@ -443,7 +446,7 @@ Settings in `config.yaml`:
 | `server.tick_seconds`                     | 30            | yes             | After a restart of Konfab | How often the server looks for timeouts                                                               |
 | `connectors.install`                      | user          | no              | At the next setup         | manual makes setup write instructions instead of editing apps                                         |
 | `agents`                                  | Claude, Codex | no              | At once                   | The apps that connectors join as, with their names and run hours                                      |
-| `pre_approvals`                           | none          | no              | After a restart of Konfab | Actions agents may take without asking (still logged)                                                 |
+| `pre_approvals`                           | none          | yes             | At once                   | What agents may send to whom without asking you; each use is still logged                             |
 
 Room settings (brief, project folder, parallel mentions, check-in interval) are in each room's **Edit** form.
 

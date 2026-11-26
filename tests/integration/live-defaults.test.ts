@@ -63,7 +63,9 @@ agents:
       max_attachment_mb: 10,
     });
     expect(next.server).toEqual(file("").server);
-    expect(next.pre_approvals).toEqual([]);
+    expect(next.pre_approvals).toEqual([
+      { recipient: "github.com/a/b", data: "code_push" },
+    ]);
     expect(next.agents.claude).toMatchObject({
       display_name: "Claude A",
       run_hours: 2,
@@ -110,6 +112,40 @@ agents:
     expect(runtime.service.roomState("plain").agents[0]).toMatchObject({
       display_name: "Claudia",
     });
+  });
+
+  it("uses a new pre-approval for new requests only, and a removal at once", () => {
+    const session = runtime.service.join("claude", "plain").session_id;
+    const ask = () =>
+      runtime.service.requestPermission("claude", session, {
+        recipient: "github.com/a/b",
+        data_description: "Commits",
+        reason: "Push",
+        data_type: "code_push",
+        push_scope: {
+          repository: "github.com/a/b",
+          branch: "x",
+          base: "a".repeat(40),
+          head: "b".repeat(40),
+        },
+      });
+    const waiting = ask();
+    expect(waiting.state).toBe("pending");
+    change(
+      "pre_approvals:\n  - recipient: github.com/a/b\n    data: code_push\n",
+    );
+    expect(ask()).toMatchObject({
+      state: "approved",
+      decided_by: "pre_approval",
+    });
+    // The one that waited isn't approved after the fact.
+    expect(
+      runtime.service
+        .listPermissions("pending")
+        .some((one) => one.id === waiting.id),
+    ).toBe(true);
+    change("pre_approvals: []\n");
+    expect(ask().state).toBe("pending");
   });
 
   it("shows the new streak limit in a room", () => {

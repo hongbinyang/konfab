@@ -282,6 +282,64 @@ describe("the Settings page", () => {
     ]);
   });
 
+  it("adds a pre-approval after the server's question, and removes one at once", async () => {
+    view.settings.push(
+      row("pre_approvals", {
+        section: "approvals",
+        control: { type: "approvals" },
+        saved: [{ recipient: "github.com/a/b", data: "code_push" }],
+        in_use: [],
+        default: [],
+      }),
+    );
+    const question =
+      "From now on, agents may send file_upload to github.com/c/d without asking you, in every room and in every future request, until you remove it. Each use is still logged. Allow it?";
+    answer = () => {
+      const last = calls.at(-1)!.body as { add: boolean; confirmed: boolean };
+      return last.add && !last.confirmed
+        ? [409, { code: "settings_confirm", message: question }]
+        : [200, view];
+    };
+    await open();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Pre-approvals" }),
+    );
+    expect(screen.getByText("code_push")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Remove code_push to github.com/a/b",
+      }),
+    );
+    expect(writes()).toEqual([
+      {
+        recipient: "github.com/a/b",
+        data: "code_push",
+        add: false,
+        confirmed: false,
+      },
+    ]);
+    await userEvent.type(screen.getByLabelText("Kind of data"), "file_upload");
+    await userEvent.type(screen.getByLabelText("Recipient"), "github.com/c/d");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("button", { name: "Add…" }));
+    expect(confirm).toHaveBeenCalledWith(question);
+    expect(writes()).toHaveLength(2);
+    expect((screen.getByLabelText("Recipient") as HTMLInputElement).value).toBe(
+      "github.com/c/d",
+    );
+    confirm.mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Add…" }));
+    expect(writes().at(-1)).toEqual({
+      recipient: "github.com/c/d",
+      data: "file_upload",
+      add: true,
+      confirmed: true,
+    });
+    expect((screen.getByLabelText("Recipient") as HTMLInputElement).value).toBe(
+      "",
+    );
+  });
+
   it("says beside its field what is wrong, and saves nothing", async () => {
     await open("phone");
     const minutes = screen.getByLabelText("phone_notices.away_minutes");

@@ -17,7 +17,7 @@ import {
   KonfabService,
 } from "../../src/server/domain/service.js";
 import { LiveSettings } from "../../src/server/live-settings.js";
-import { readSettingsFile } from "../../src/server/settings-file.js";
+import { checked, readSettingsFile } from "../../src/server/settings-file.js";
 
 const PORT = 18797;
 const HOST = `127.0.0.1:${PORT}`;
@@ -217,6 +217,47 @@ describe("the settings routes", () => {
     expect(of(await view(), "agents.claude.run_hours")).toMatchObject({
       saved: null,
     });
+  });
+
+  it("adds a pre-approval only after its question, one at a time", async () => {
+    const add = (body: object) =>
+      call("POST", "/api/settings/pre-approvals", {
+        recipient: "github.com/a/b",
+        data: "code_push",
+        add: true,
+        ...body,
+      });
+    const asked = await add({});
+    expect(asked.statusCode).toBe(409);
+    expect(asked.json().message).toContain("in every future request");
+    expect(text()).not.toContain("pre_approvals");
+    // Never around the question, and never by an agent or another page.
+    expect((await patch({ set: { pre_approvals: [] } })).json().code).toBe(
+      "invalid_request",
+    );
+    expect((await add({ confirmed: true })).statusCode).toBe(200);
+    expect(checked(text()).pre_approvals).toEqual([
+      { recipient: "github.com/a/b", data: "code_push" },
+    ]);
+    const agent = await call(
+      "POST",
+      "/api/settings/pre-approvals",
+      { recipient: "x", data: "y", add: true, confirmed: true },
+      { cookie: "", authorization: `Bearer ${token}` },
+    );
+    expect(agent.statusCode).toBe(401);
+    const other = await call(
+      "POST",
+      "/api/settings/pre-approvals",
+      { recipient: "x", data: "y", add: true, confirmed: true },
+      { origin: "http://evil.example" },
+    );
+    expect(other.statusCode).toBe(403);
+    expect((await add({ recipient: "  ", confirmed: true })).statusCode).toBe(
+      400,
+    );
+    expect((await add({ add: false })).statusCode).toBe(200);
+    expect(checked(text()).pre_approvals).toEqual([]);
   });
 
   it("says what is wrong with a broken file, and saves nothing over it", async () => {

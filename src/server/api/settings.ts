@@ -10,6 +10,9 @@ import {
   type Change,
 } from "../settings-file.js";
 import {
+  approvalChange,
+  approvalProblem,
+  approvalQuestion,
   defaultOf,
   EFFECT,
   questionFor,
@@ -55,9 +58,13 @@ export function settingsRoutes(
   deps: { origins: Set<string>; changed: (keys: string[]) => void },
 ): void {
   const { home, live } = access;
+  // The command and pre-approvals have steps of their own.
   const fixed = new Set(
     SETTINGS.filter(
-      ({ key, page }) => (page === "edit" || page === "ask") && key !== COMMAND,
+      ({ key, page, control }) =>
+        (page === "edit" || page === "ask") &&
+        key !== COMMAND &&
+        control.type !== "approvals",
     ).map((setting) => setting.key),
   );
   /** An agent's own name and run hours, of the agents in the file. */
@@ -110,15 +117,19 @@ export function settingsRoutes(
     };
   };
 
-  const save = async (change: Change, hash: string) => {
+  const save = async (
+    change: Change | Parameters<typeof changeSettings>[1],
+    hash: string | undefined,
+  ) => {
     try {
       const done = await changeSettings(home, change, hash);
       live.look(true);
       if (done.changed)
-        deps.changed([
-          ...Object.keys(change.set ?? {}),
-          ...(change.reset ?? []),
-        ]);
+        deps.changed(
+          typeof change === "function"
+            ? ["pre_approvals"]
+            : [...Object.keys(change.set ?? {}), ...(change.reset ?? [])],
+        );
     } catch (error) {
       if (!(error instanceof SettingsError)) throw error;
       live.look(true);
@@ -158,6 +169,34 @@ export function settingsRoutes(
         { set: withName(set as Record<string, Value>, live.saved), reset },
         hash,
       );
+    },
+  );
+
+  // One entry at a time, on the list as it is then; an Add only after its
+  // question was answered.
+  app.post(
+    "/api/settings/pre-approvals",
+    { onRequest: fromPage, bodyLimit: 4 * 1024 },
+    async (request) => {
+      const body = z
+        .object({
+          recipient: z.string().max(1000),
+          data: z.string().max(1000),
+          add: z.boolean(),
+          confirmed: z.boolean().default(false),
+        })
+        .strict()
+        .parse(request.body);
+      const approval = { recipient: body.recipient, data: body.data };
+      const problem = approvalProblem(approval);
+      if (problem) throw new KonfabError("settings_invalid", 400, problem);
+      if (body.add && !body.confirmed)
+        throw new KonfabError(
+          "settings_confirm",
+          409,
+          approvalQuestion(approval),
+        );
+      return save(approvalChange(approval, body.add), undefined);
     },
   );
 

@@ -23,6 +23,8 @@ export type Control =
   | { type: "command" }
   /** A short name. */
   | { type: "name" }
+  /** Pre-approvals, added and removed one at a time, each after its question. */
+  | { type: "approvals" }
   /** Minutes, such as "30, 10, 5". */
   | { type: "minutes"; max: number; most: number }
   /** Only on the command line, as YAML. */
@@ -30,7 +32,7 @@ export type Control =
 
 export type Setting = {
   key: string;
-  section: "phone" | "rejoin" | "agents" | "advanced";
+  section: "phone" | "rejoin" | "agents" | "approvals" | "advanced";
   name: string;
   help: string;
   control: Control;
@@ -277,12 +279,12 @@ export const SETTINGS: Setting[] = [
   },
   {
     key: "pre_approvals",
-    section: "advanced",
+    section: "approvals",
     name: "Pre-approvals",
-    help: "Actions agents may take without asking (still logged)",
-    control: text,
-    effect: "restart",
-    page: "later",
+    help: "What agents may send to whom without asking you; each use is still logged",
+    control: { type: "approvals" },
+    effect: "now",
+    page: "edit",
   },
   {
     key: "defaults.hours",
@@ -361,6 +363,57 @@ export function withName(
   }
   return { ...more, ...set };
 }
+
+export type Approval = { recipient: string; data: string };
+
+/** As requests are matched against it. */
+const plain = (text: string) => text.trim().toLowerCase();
+export const sameApproval = (one: Approval, other: Approval) =>
+  plain(one.recipient) === plain(other.recipient) &&
+  plain(one.data) === plain(other.data);
+
+/** The same on both paths; a reason if it isn't one. */
+export function approvalProblem(approval: Approval): string | null {
+  for (const [what, text] of [
+    ["recipient", approval.recipient],
+    ["kind of data", approval.data],
+  ] as const) {
+    if (!text.trim()) return `The ${what} is empty`;
+    if (text.length > 200) return `The ${what} is longer than 200 characters`;
+    if ([...text].some((char) => char < " " || char === "\u007f"))
+      return `The ${what} has a line break or another control character`;
+  }
+  return null;
+}
+
+/** Says exactly what is matched, and for how long. */
+export const approvalQuestion = ({ recipient, data }: Approval): string =>
+  `From now on, agents may send ${data.trim()} to ${recipient.trim()} without asking you, in every room and in every future request, until you remove it. Each use is still logged. Allow it?`;
+
+/**
+ * Adds or removes one entry, on the list as it is in the file then. Other
+ * entries stay as they are.
+ */
+export const approvalChange =
+  (approval: Approval, add: boolean) =>
+  (config: Config): { set: Record<string, Value> } => {
+    const list = config.pre_approvals;
+    const there = list.some((one) => sameApproval(one, approval));
+    if (add === there) return { set: {} };
+    return {
+      set: {
+        pre_approvals: add
+          ? [
+              ...list,
+              {
+                recipient: approval.recipient.trim(),
+                data: approval.data.trim(),
+              },
+            ]
+          : list.filter((one) => !sameApproval(one, approval)),
+      },
+    };
+  };
 
 /** Whether a running server takes it on by itself. */
 export const isLive = (setting: Pick<Setting, "effect">): boolean =>

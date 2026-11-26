@@ -33,6 +33,7 @@ import {
   tidySettingsFiles,
 } from "../../src/server/settings-file.js";
 import {
+  approvalChange,
   defaultOf,
   EFFECT,
   SETTINGS,
@@ -692,15 +693,10 @@ describe("npm run config", () => {
     await run("set", "defaults.run_warnings_minutes", "[20, 5]");
     await run("set", "agents.claude.display_name", "Claude");
     await run("set", "agents.claude.run_hours", "8");
-    await run(
-      "set",
-      "pre_approvals",
-      "[{recipient: github.com/a/b, data: code_push}]",
-    );
+
     const config = checked(text());
     expect(config.defaults.run_warnings_minutes).toEqual([20, 5]);
     expect(config.agents.claude?.run_hours).toBe(8);
-    expect(config.pre_approvals).toHaveLength(1);
     expect((await run("set", "agents.nobody.run_hours", "8"))[0]).toBe(1);
   });
 
@@ -741,6 +737,94 @@ describe("npm run config", () => {
       0,
     );
     expect((await run("set", "server.port", "8787"))[0]).toBe(0);
+  });
+
+  it("adds a pre-approval only after its question, and removes one without", async () => {
+    deps.ask = async (question) => {
+      asked.push(question);
+      return "n";
+    };
+    const [code, ...lines] = await run(
+      "approve",
+      "github.com/a/b",
+      "code_push",
+    );
+    expect(code).toBe(1);
+    expect(lines.join(" ")).toContain(
+      "agents may send code_push to github.com/a/b without asking you, in every room and in every future request, until you remove it",
+    );
+    expect(checked(text()).pre_approvals).toEqual([]);
+    deps.ask = null;
+    expect((await run("approve", "github.com/a/b", "code_push"))[0]).toBe(1);
+    expect(
+      (await run("approve", "github.com/a/b", "code_push", "--yes"))[0],
+    ).toBe(0);
+    expect(
+      await run("approve", " GitHub.com/a/b ", "CODE_PUSH", "--yes"),
+    ).toEqual([0, "It was there already.", expect.any(String)]);
+    expect(
+      (await run("approve", "github.com/c/d", "code_push", "--yes"))[0],
+    ).toBe(0);
+    expect((await run("unapprove", "github.com/a/b", "code_push"))[0]).toBe(0);
+    expect(checked(text()).pre_approvals).toEqual([
+      { recipient: "github.com/c/d", data: "code_push" },
+    ]);
+    expect((await run("unapprove", "github.com/a/b", "code_push"))[1]).toBe(
+      "It wasn't there.",
+    );
+    // Not as a whole list, which would skip the question.
+    expect(
+      (await run("set", "pre_approvals", "[{recipient: x, data: y}]"))[0],
+    ).toBe(2);
+    for (const [recipient, data] of [
+      [" ", "x"],
+      ["x", "a\nb"],
+      ["x".repeat(201), "y"],
+    ])
+      expect((await run("approve", recipient!, data!, "--yes"))[0]).toBe(1);
+    expect(said.join(" ")).toContain("longer than 200 characters");
+    await run("approve", " ", "x", "--yes");
+    expect(said.join(" ")).toContain("The recipient is empty");
+  });
+
+  it("keeps both of two pre-approvals that are added at the same moment", async () => {
+    await Promise.all(
+      ["a", "b", "c"].map((name) =>
+        changeSettings(
+          home,
+          approvalChange(
+            { recipient: `github.com/x/${name}`, data: "code_push" },
+            true,
+          ),
+        ),
+      ),
+    );
+    expect(
+      checked(text())
+        .pre_approvals.map((one) => one.recipient)
+        .sort(),
+    ).toEqual(["github.com/x/a", "github.com/x/b", "github.com/x/c"]);
+    await Promise.all([
+      changeSettings(
+        home,
+        approvalChange(
+          { recipient: "github.com/x/a", data: "code_push" },
+          false,
+        ),
+      ),
+      changeSettings(
+        home,
+        approvalChange(
+          { recipient: "github.com/x/d", data: "code_push" },
+          true,
+        ),
+      ),
+    ]);
+    expect(
+      checked(text())
+        .pre_approvals.map((one) => one.recipient)
+        .sort(),
+    ).toEqual(["github.com/x/b", "github.com/x/c", "github.com/x/d"]);
   });
 
   it("uses another command only after a yes, in a terminal", async () => {
