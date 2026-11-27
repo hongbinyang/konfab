@@ -65,6 +65,13 @@ type View = {
     posts: string;
     posts_on: boolean | null;
   } | null;
+  /** Absent from older servers. */
+  login_item?: {
+    available: boolean;
+    file: "none" | "current" | "earlier";
+    loaded: boolean;
+    path: string;
+  } | null;
   /** Absent from older servers. Never the token. */
   github?: {
     source: "environment" | "stored" | "earlier" | "none";
@@ -398,6 +405,17 @@ export function Settings({
             }}
           />
         )}
+        {section === "advanced" && view.login_item && (
+          <LoginItemRow
+            item={view.login_item}
+            off={off}
+            onSaved={(next, what) => {
+              saves.current += 1;
+              setView(next);
+              setSaved(what);
+            }}
+          />
+        )}
         {section === "advanced" && (view.unused?.length ?? 0) > 0 && (
           <p className="settings-unused">
             Not read by this version, in your file:{" "}
@@ -703,6 +721,105 @@ function Row({
             </button>
           )}
       </div>
+    </div>
+  );
+}
+
+/** For the next login only; the running Konfab stays unless the lead says. */
+function LoginItemRow({
+  item,
+  off,
+  onSaved,
+}: {
+  item: NonNullable<View["login_item"]>;
+  off: boolean;
+  onSaved: (view: View, what: string) => void;
+}) {
+  const [problem, setProblem] = useState("");
+  const [busy, setBusy] = useState(false);
+  const send = (body: { on: boolean; unload?: boolean }, what: string) => {
+    setBusy(true);
+    setProblem("");
+    void request<View>("/api/settings/login-item", { method: "POST", body })
+      .then(
+        (next) => onSaved(next, what),
+        (caught: unknown) =>
+          setProblem(caught instanceof Error ? caught.message : "Not saved."),
+      )
+      .finally(() => setBusy(false));
+  };
+  const on = item.file !== "none";
+  const state = !item.available
+    ? "Not available here; start Konfab with your own service manager."
+    : item.file === "current"
+      ? "On: Konfab starts when you log in."
+      : item.file === "earlier"
+        ? "On, set up by an earlier version: Turn on writes this version's."
+        : "Off.";
+  return (
+    <div className="setting">
+      <div className="setting-text">
+        <span className="name">Start at login</span>
+        <p className="muted">
+          {state}
+          {item.loaded &&
+            " It is loaded in macOS now, and stays so until you log out."}
+        </p>
+        {problem && (
+          <p className="attachment-error" role="alert">
+            {problem}
+          </p>
+        )}
+      </div>
+      {item.available && (
+        <div className="setting-control">
+          {item.file !== "current" && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={off || busy}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Konfab then starts when you log in, with this folder and this Node. It isn't started now, because it is already running. Turn it on?",
+                  )
+                )
+                  send({ on: true }, "Start at login: on.");
+              }}
+            >
+              Turn on…
+            </button>
+          )}
+          {on && (
+            <button
+              type="button"
+              className="link"
+              disabled={off || busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Konfab then doesn't start at the next login. It keeps running now until you quit it. Turn it off?",
+                  )
+                )
+                  return;
+                const unload =
+                  item.loaded &&
+                  window.confirm(
+                    "Also unload it now? That ends the Konfab that macOS started, and this page with it. Cancel keeps it running until you quit or log out.",
+                  );
+                send(
+                  { on: false, unload },
+                  unload
+                    ? "Start at login: off. Konfab ends now."
+                    : "Start at login: off.",
+                );
+              }}
+            >
+              Turn off…
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

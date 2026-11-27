@@ -468,6 +468,38 @@ describe("the Settings page", () => {
     expect(document.body.textContent).toContain("Restart Codex to use it.");
   });
 
+  it("turns start at login on and off, and unloads only when asked", async () => {
+    view.login_item = {
+      available: true,
+      file: "current",
+      loaded: true,
+      path: "/h/x.plist",
+    };
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(document.body.textContent).toContain(
+      "On: Konfab starts when you log in.",
+    );
+    const confirm = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    await userEvent.click(screen.getByRole("button", { name: "Turn off…" }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(writes()).toEqual([{ on: false, unload: false }]);
+    cleanup();
+    view.login_item = {
+      available: false,
+      file: "none",
+      loaded: false,
+      path: "/h/x.plist",
+    };
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(document.body.textContent).toContain("Not available here");
+    expect(screen.queryByRole("button", { name: "Turn on…" })).toBeNull();
+  });
+
   it("says beside its field what is wrong, and saves nothing", async () => {
     await open("phone");
     const minutes = screen.getByLabelText("phone_notices.away_minutes");

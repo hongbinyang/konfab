@@ -23,6 +23,7 @@ import {
   connectorPaths,
   Connectors,
 } from "../../src/server/connectors/manage.js";
+import { LoginItem } from "../../src/server/connectors/login-item.js";
 import { FakeKeychain } from "../unit/fake-keychain.js";
 
 // Made up; GitHub is a stand-in.
@@ -41,6 +42,7 @@ describe("the settings routes", () => {
   let cookie: string;
   let token: string;
   let keychain: FakeKeychain;
+  let launchctl: string[][];
   let applied: number[];
   let rechecks: number;
 
@@ -78,6 +80,7 @@ describe("the settings routes", () => {
     applied = [];
     rechecks = 0;
     keychain = new FakeKeychain(GITHUB_TOKEN);
+    launchctl = [];
     db = openDatabase(":memory:");
     service = new KonfabService(db, {
       waitTimeoutSeconds: 1,
@@ -104,6 +107,16 @@ describe("the settings routes", () => {
         home,
         live,
         recheck: () => (rechecks += 1),
+        loginItem: new LoginItem({
+          platform: "darwin",
+          home,
+          uid: 501,
+          plist: () => "<plist/>",
+          launchctl: (args) => {
+            launchctl.push(args);
+            return { code: 113 };
+          },
+        }),
         connectors: new Connectors({
           home,
           paths: connectorPaths(home, {
@@ -456,6 +469,35 @@ describe("the settings routes", () => {
       id: next.id,
     });
     expect([late.statusCode, late.json().code]).toEqual([409, "connector"]);
+  });
+
+  it("turns start at login on for the next login, and unloads only after answering", async () => {
+    const post = (body: object) =>
+      call("POST", "/api/settings/login-item", body);
+    expect((await view()).login_item).toMatchObject({
+      file: "none",
+      loaded: false,
+    });
+    expect((await post({ on: true })).json().login_item).toMatchObject({
+      file: "current",
+    });
+    expect(launchctl.some(([verb]) => verb !== "print")).toBe(false);
+    const off = await post({ on: false, unload: true });
+    expect(off.statusCode).toBe(200);
+    // The answer is sent first; the unload comes after it.
+    expect(launchctl.some(([verb]) => verb === "bootout")).toBe(false);
+    await new Promise((done) => setTimeout(done, 700));
+    expect(launchctl.filter(([verb]) => verb === "bootout")).toHaveLength(1);
+    expect(
+      (
+        await call(
+          "POST",
+          "/api/settings/login-item",
+          { on: true },
+          { origin: "http://evil.example" },
+        )
+      ).statusCode,
+    ).toBe(403);
   });
 
   it("adds and removes an app in config.yaml", async () => {

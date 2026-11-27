@@ -58,7 +58,6 @@ Design notes for each feature are in [docs/design](design/).
 - **Smaller page bundle:** load the skill picker and Team on demand.
 - **Delete from the sidebar:** a ⋯ menu on archived rooms, since the delete button inside the room is easy to miss.
 - **Settings, still to come** (details in [settings, phase 4](design/settings-phase4.md#for-later)):
-  - **Start at login in the page:** designed; needs a short launchd trial with the lead (a throwaway job) first. Today: `npm run login-item -- install` / `uninstall`.
   - **Start at login on Linux:** not built; start Konfab with your own service manager.
   - **Moving an old project connector in the page:** the lead chose command line only (`npm run setup -- --migrate <folder>`).
   - **A room's own settings on the command line:** skipped for now; they are in the room's **Edit**.

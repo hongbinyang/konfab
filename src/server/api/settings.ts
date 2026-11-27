@@ -6,6 +6,7 @@ import { agree, isAgreed, lookAtOwn } from "../rejoin/own-command.js";
 import { lookAtCommand } from "../rejoin/codex.js";
 import { GithubTokenError, type GithubToken } from "../github/token-store.js";
 import { APPS, type Connectors } from "../connectors/manage.js";
+import { LoginItemError, type LoginItem } from "../connectors/login-item.js";
 import { parse } from "yaml";
 import {
   changeSettings,
@@ -34,6 +35,8 @@ export type SettingsAccess = {
   live: LiveSettings;
   /** The Codex command may be another one now. */
   recheck: () => void;
+  /** Start at login (macOS). */
+  loginItem?: LoginItem;
   /** The apps' connectors, where they can be changed from here. */
   connectors?: Connectors;
   /** The GitHub token for the skill search, where there is one. */
@@ -121,6 +124,7 @@ export function settingsRoutes(
       ].map(shownOf),
       /** Never a token or a file's contents. */
       connectors: access.connectors?.view() ?? null,
+      login_item: access.loginItem?.view() ?? null,
       /** Never the token: where it comes from, and what is left. */
       github: access.github?.view() ?? null,
       /** Keys in the file that nothing reads any more. */
@@ -259,6 +263,35 @@ export function settingsRoutes(
         .parse(request.body);
       const said = await connectorStep(() => connectors().apply(id));
       return { ...view(), said };
+    },
+  );
+
+  // For the next login only; this Konfab is stopped only by the lead's
+  // explicit choice to unload, after the answer is sent.
+  app.post(
+    "/api/settings/login-item",
+    { onRequest: fromPage, bodyLimit: 1024 },
+    async (request) => {
+      const body = z
+        .object({ on: z.boolean(), unload: z.boolean().default(false) })
+        .strict()
+        .parse(request.body);
+      const item = access.loginItem;
+      if (!item)
+        throw new KonfabError("not_available", 409, "Not available here");
+      try {
+        if (body.on) item.turnOn();
+        else item.turnOff(false);
+      } catch (error) {
+        throw new KonfabError(
+          "login_item",
+          409,
+          error instanceof LoginItemError ? error.message : "That didn't work.",
+        );
+      }
+      if (!body.on && body.unload)
+        setTimeout(() => item.turnOff(true), 500).unref();
+      return view();
     },
   );
 

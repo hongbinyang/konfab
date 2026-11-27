@@ -22,6 +22,7 @@ import { Watchers } from "./rejoin/watchers.js";
 import { createRuntime } from "./runtime.js";
 import { GithubToken, githubAccepts } from "./github/token-store.js";
 import { connectorPaths, Connectors, stableNode } from "./connectors/manage.js";
+import { LoginItem, plistFor } from "./connectors/login-item.js";
 
 const home = konfabHome();
 ensureHome(home);
@@ -210,6 +211,12 @@ const app = await buildApp({
     live,
     recheck: () => void checkRejoin(),
     github: githubToken,
+    loginItem: new LoginItem({
+      plist: plistFor({
+        runner: resolve(import.meta.dirname, "../cli/login-run.js"),
+        workingDirectory: resolve(import.meta.dirname, "../.."),
+      }),
+    }),
     connectors: new Connectors({
       home,
       paths: connectorPaths(home, process.env),
