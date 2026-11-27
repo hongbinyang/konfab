@@ -128,14 +128,14 @@ The **first setup and sign-in** stay in the terminal by nature: the page can't b
 
 Documented so that they can be picked up; none is built.
 
-| Item                                        | State                                                                         | What it needs                                                                                                    |
-| ------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Start at login in the page                  | designed above                                                                | the launchd trial with the lead (a throwaway job; Konfab's own untouched), then build it to what the trial shows |
-| Moving an old project connector in the page | the lead chose command line only                                              | nothing, unless asked again                                                                                      |
-| Start at login on Linux                     | the lead chose later                                                          | a systemd user unit, in both ways, with its own trial                                                            |
-| A room's own settings on the command line   | the lead chose to skip (phase 3)                                              | a command line that goes through the running server                                                              |
-| Claude Code posting without asking          | its rule isn't verified                                                       | a trial of Claude Code's per-tool approval for Konfab                                                            |
-| Real end-to-end tries                       | stand-ins only, but phone notices, tried with the lead's own bot (2026-11-26) | a real GitHub token, Linux x86-64                                                                                |
+| Item                                        | State                                                                         | What it needs                                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Start at login in the page                  | built (on main), after the launchd trial with the lead (2026-11-26)           | the next login itself, which the trial couldn't show (it needs a log-out) |
+| Moving an old project connector in the page | the lead chose command line only                                              | nothing, unless asked again                                               |
+| Start at login on Linux                     | the lead chose later                                                          | a systemd user unit, in both ways, with its own trial                     |
+| A room's own settings on the command line   | the lead chose to skip (phase 3)                                              | a command line that goes through the running server                       |
+| Claude Code posting without asking          | its rule isn't verified                                                       | a trial of Claude Code's per-tool approval for Konfab                     |
+| Real end-to-end tries                       | stand-ins only, but phone notices, tried with the lead's own bot (2026-11-26) | a real GitHub token, Linux x86-64                                         |
 
 ## Questions for the lead
 
