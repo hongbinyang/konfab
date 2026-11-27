@@ -1,6 +1,6 @@
 # Phone notices with the message text
 
-**Status:** built, after review. The lead chose option A, **on by default** (2026-11-26): a notice carries a short excerpt of what needs them, so that they can read it on the phone while away from the Mac.
+**Status:** on main (`f411e33`); tried for real by the lead on 2026-11-27 (a test mention arrived on their iPhone with its excerpt). The lead chose option A, **on by default** (2026-11-26): a notice carries a short excerpt of what needs them, so that they can read it on the phone while away from the Mac.
 
 ## Which messages, and when
 

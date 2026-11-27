@@ -47,6 +47,7 @@ Design notes for each feature are in [docs/design](design/).
 
 - **GitHub token:** the lead's stored token was last reported as rejected. Give Konfab a new one in **⚙ Settings → GitHub token** (or `npm run setup -- --github-token`); it is used at once. Then **Check GitHub status**.
 - **Tried for real (2026-11-26):** phone notices with the lead's own Telegram bot, set up in the page: the token pasted and kept in the Keychain, the chat found by its code, the test message, and a real notice ("a room needs you") for a mention while the lead was away.
+- **Tried for real (2026-11-27):** a notice with the message text (on by default): the lead's iPhone showed the room, the agent and the excerpt of a test mention, emoji included. Konfab sent it about a minute after the mention (with "Away after" at 1 minute), and Telegram stamped it then; the phone showed it later, which was outside Konfab.
 - **Not tried for real yet:** a real GitHub token through the page, Linux on x86-64 (Debian arm64 was tried in a container).
 - **Parallel lead mentions:** measured in real use: a waiting agent's turn starts within milliseconds; a busy agent acknowledged a mention about 3 minutes later via its status. Next possible steps: reply-to links in the timeline, and deciding whether to turn the setting on by default.
 - **Project folder:** set the room's project folder (room **Edit**) so project skills and the suggested lock key work.
