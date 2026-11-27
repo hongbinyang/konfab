@@ -26,14 +26,14 @@ Run all commands inside the `konfab` conda environment.
 
 ## 3. Test levels
 
-| Level           | Location                           | What it proves                                                                                    | Status                                                               |
-| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock | In place                                                             |
-| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                   | In place                                                             |
-| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart             | In place                                                             |
-| **Component**   | `tests/web/`                       | Page components and form state with jsdom and Testing Library                                     | In place; grow with each UI change                                   |
-| **Browser**     | `tests/e2e/` (Playwright)          | Main page flows in Chromium, light and dark, against a built server in a throwaway home           | In place for the Add agent flow; visual layout still checked by hand |
-| **End to end**  | [User guide](user-guide.md) checks | Real desktop apps: connection, wait limits, allowance use, and agent behavior                     | Partial; repeat for affected clients and record results              |
+| Level           | Location                           | What it proves                                                                                                        | Status                                                               |
+| --------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Unit**        | `tests/unit/`                      | Scheduling, rooms, hours, permissions, sign-in, config, and database upgrades, using a fake clock                     | In place                                                             |
+| **Integration** | `tests/integration/`               | API, security rules, live updates, and bridge tools against a real local server                                       | In place                                                             |
+| **Smoke**       | `tests/smoke/`                     | The built app starts and its main paths work across real processes, including restart                                 | In place                                                             |
+| **Component**   | `tests/web/`                       | Page components and form state with jsdom and Testing Library                                                         | In place; grow with each UI change                                   |
+| **Browser**     | `tests/e2e/` (Playwright)          | Main page flows in Chromium, light and dark, against a built server in a throwaway home, one per worker (4 at a time) | In place for the Add agent flow; visual layout still checked by hand |
+| **End to end**  | [User guide](user-guide.md) checks | Real desktop apps: connection, wait limits, allowance use, and agent behavior                                         | Partial; repeat for affected clients and record results              |
 
 Automated tests use scripted agents instead of real models. They prove that Konfab behaves correctly, but not how real apps or models behave.
 
@@ -41,6 +41,7 @@ Automated tests use scripted agents instead of real models. They prove that Konf
 
 - Tests use temporary data through `KONFAB_HOME` and never touch `~/.konfab`.
 - Smoke tests choose a free port and clean up their processes and temp folders.
+- Browser tests run in 4 workers, each with its own server, home and port; tests that wait for the watcher's real timers run at the same time, each with its own stand-in. Times before and after: [faster tests](design/faster-tests.md).
 - Tests never use real tokens, real repos, or model allowance.
 - Tests involving time use a fake clock wherever possible.
 
