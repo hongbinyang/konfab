@@ -251,7 +251,7 @@ export class TelegramNotices {
       this.deps.options.room_names
         ? ` (${names
             .slice(0, 5)
-            .map((name) => name.slice(0, 64))
+            .map((name) => hidden(name, secrets).slice(0, 64))
             .join(", ")}${names.length > 5 ? ", …" : ""})`
         : ""
     }`;
@@ -381,10 +381,12 @@ export function cut(text: string, most: number): string {
 }
 
 /** Best effort only: what looks like a token, and the tokens in use. */
+// A token ends where its characters end, also after "_" or "-".
 const TOKEN_FORMS = [
-  /\b\d{5,20}:[A-Za-z0-9_-]{30,64}\b/g,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/g,
-  /\bkfb_[A-Za-z0-9_-]{8,}/g,
+  /\b\d{5,20}:[A-Za-z0-9_-]{30,64}(?![A-Za-z0-9_-])/g,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})(?![A-Za-z0-9_-])/g,
+  // Konfab's own: agents', sign-in, session and watcher tokens.
+  /\bkf[blsw]_[A-Za-z0-9_-]{8,}/g,
 ];
 export function hidden(text: string, secrets: string[]): string {
   let out = text;
@@ -425,7 +427,7 @@ export function noticeText(
       const body = hidden(found.body, secrets).replace(/\s+/g, " ").trim();
       shown.push({
         need,
-        line: `${cut(found.sender, 40)}: ${cut(body, EXCERPT_CHARS)}`,
+        line: `${cut(hidden(found.sender, secrets), 40)}: ${cut(body, EXCERPT_CHARS)}`,
       });
     } else if (
       !shown.some(
@@ -442,7 +444,9 @@ export function noticeText(
     rooms.set(need.room_id, room);
   }
   const blocks = [...rooms.values()].map((room) =>
-    [`Konfab · ${cut(room.name, 64)}`, ...room.lines].join("\n"),
+    [`Konfab · ${cut(hidden(room.name, secrets), 64)}`, ...room.lines].join(
+      "\n",
+    ),
   );
   const tail = (count: number) =>
     count ? `+${count} more, not sent here; open Konfab to read them.` : "";

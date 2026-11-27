@@ -896,6 +896,45 @@ describe("phone notices", () => {
       ).toBe(true);
     });
 
+    it("hides tokens in every field, of every form and ending, also at the cut", () => {
+      const endings = [
+        "1234567890:" + "A".repeat(33) + "_",
+        "1234567890:" + "B".repeat(33) + "-",
+      ];
+      const konfab = ["kfb_", "kfl_", "kfs_", "kfw_"].map(
+        (p) => `${p}${"c".repeat(20)}`,
+      );
+      const need = (body: string, room = "r") => ({
+        kind: "message" as const,
+        id: 1,
+        room_id: 1,
+        room,
+        created_at: 1,
+      });
+      const text = noticeText(
+        [need("x", `room ${konfab[0]}`)],
+        () => ({
+          sender: `agent ${konfab[1]}`,
+          body: `${endings.join(" ")} ${konfab.join(" ")} end`,
+        }),
+        [],
+      );
+      for (const secret of [...endings, ...konfab])
+        expect(text).not.toContain(secret);
+      expect(text).toContain(
+        "[hidden] [hidden] [hidden] [hidden] [hidden] [hidden] end",
+      );
+      // A token right at the 300-character cut: hidden before cutting, so no
+      // part of it remains.
+      const atCut = noticeText(
+        [need("x")],
+        () => ({ sender: "S", body: `${"z".repeat(290)} ${endings[0]}` }),
+        [],
+      );
+      expect(atCut).not.toContain("AAAA");
+      expect(atCut).toContain("[hidden]");
+    });
+
     it("stays within its budget, names and count included", () => {
       const needs = Array.from({ length: 40 }, (_, n) => ({
         kind: (n % 2 ? "permission" : "event") as "permission" | "event",
