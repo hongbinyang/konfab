@@ -1,8 +1,8 @@
 # Faster tests
 
-**Status:** plan, for review. The lead asked (2026-11-27) for quicker tests: drop deprecated and redundant ones, cover more with less, and change how they run, with the time measured before and after.
+**Status:** #1, #2 and #4 built; #3 waits for the lead; #5 found nothing to remove. The lead asked (2026-11-27) for quicker tests: drop deprecated and redundant ones, cover more with less, and change how they run, with the time measured before and after.
 
-## Where the time goes today
+## Where the time went (one run, before)
 
 `npm run check:full` on main `84c6184`, this Mac (12 cores), parts run one after another:
 
@@ -40,3 +40,26 @@ Not changed: the watcher's and server's real timings, the test content of smoke 
 Same Mac, nothing else heavy running, after `npm run build`; each part timed alone as today, **3 runs, the median**; before on main `84c6184`, after on the branch head. Per file and per test from Vitest's and Playwright's JSON reports. The table before and after goes into the review and this document.
 
 **Expected:** about 244 s → **~90 s** with #1, #2, #4; ~80 s with #3 as well.
+
+## Result
+
+Main `84c6184` against branch `test/faster`, same Mac, each part in `check:full`'s order, median of 3 runs; "cold" without the lint and format caches, "warm" with them.
+
+| Part                    |  Before |                  After |
+| ----------------------- | ------: | ---------------------: |
+| Types                   |   4.2 s |                  4.2 s |
+| Lint                    |   2.6 s | 2.6 s cold, 0.6 s warm |
+| Format                  |   3.5 s | 3.5 s cold, 0.3 s warm |
+| Unit, integration, page |  12.4 s |                 12.4 s |
+| Build and smoke         | 117.5 s |                 33.3 s |
+| Browser                 | 100.9 s |                 34.3 s |
+| **All**                 |   241 s |   90 s cold, 85 s warm |
+| `npm run check:full`    |   249 s |   90 s cold, 85 s warm |
+
+The same tests run: 1206, 105 and 80.
+
+**Caches:** both are keyed on content. A change of the Prettier or ESLint config was seen at once (tried); ESLint's key holds its version, Node's and the whole config with each plugin's name and version, Prettier's its version and options.
+
+**Removals (#5):** none. Nothing is skipped or deprecated. Without `phase1.test.ts` 23 statements and 34 branches go uncovered, without `service.test.ts` 53 and 65, without `old-bridge.test.ts` 9 statements: each tests something no other test reaches.
+
+**Reliability:** browser tests in 4 workers: 29 full runs, and one with every test 5 times (400 passed). Two runs failed once each, both in the series of three run right after the smoke tests; their output wasn't kept, and the 20 runs since (8 of them in the same order, with logs) passed. No process or folder was left behind.
