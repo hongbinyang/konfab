@@ -22,7 +22,13 @@ import { Watchers } from "./rejoin/watchers.js";
 import { createRuntime } from "./runtime.js";
 import { GithubToken, githubAccepts } from "./github/token-store.js";
 import { connectorPaths, Connectors, stableNode } from "./connectors/manage.js";
-import { LoginItem, plistFor } from "./connectors/login-item.js";
+import { earlierShapes, LoginItem, plistFor } from "./connectors/login-item.js";
+
+/** What start at login runs: this folder's runner. */
+const loginPaths = {
+  runner: resolve(import.meta.dirname, "../cli/login-run.js"),
+  workingDirectory: resolve(import.meta.dirname, "../.."),
+};
 
 const home = konfabHome();
 ensureHome(home);
@@ -212,10 +218,8 @@ const app = await buildApp({
     recheck: () => void checkRejoin(),
     github: githubToken,
     loginItem: new LoginItem({
-      plist: plistFor({
-        runner: resolve(import.meta.dirname, "../cli/login-run.js"),
-        workingDirectory: resolve(import.meta.dirname, "../.."),
-      }),
+      plist: plistFor(loginPaths),
+      earlier: earlierShapes(loginPaths),
     }),
     connectors: new Connectors({
       home,

@@ -10,10 +10,47 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LoginItem } from "../../src/server/connectors/login-item.js";
+import { loginItemPlist } from "../../src/cli/login-item-plist.js";
+import {
+  earlierShapes,
+  LoginItem,
+} from "../../src/server/connectors/login-item.js";
 
-const EARLIER = `<plist><dict><key>Label</key><string>com.konfab.server</string>
-<key>ProgramArguments</key><array><string>/usr/bin/node</string><string>/Users/me/konfab/dist/server/index.js</string></array></dict></plist>`;
+const WD = "/Users/me/konfab";
+const RUNNER = `${WD}/dist/cli/login-run.js`;
+/** As the version before the runner wrote it. */
+const before = (
+  folder: string,
+  node = "/usr/local/bin/node",
+  log = "/Users/me/.konfab/logs/konfab.log",
+) => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.konfab.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${node}</string>
+    <string>${folder}/dist/server/index.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${folder}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${log}</string>
+  <key>StandardErrorPath</key>
+  <string>${log}</string>
+</dict>
+</plist>
+`;
+const EARLIER = before(WD);
 
 describe("start at login from the page", () => {
   let home: string;
@@ -25,7 +62,13 @@ describe("start at login from the page", () => {
       platform,
       home,
       uid: 501,
-      plist: () => "<plist>this version</plist>",
+      plist: () =>
+        loginItemPlist({
+          nodePath: "/opt/node",
+          runnerPath: RUNNER,
+          workingDirectory: WD,
+        }),
+      earlier: earlierShapes({ runner: RUNNER, workingDirectory: WD }),
       launchctl: (args) => {
         calls.push(args);
         if (args[0] === "bootout") {
@@ -57,7 +100,9 @@ describe("start at login from the page", () => {
       stamp: "none",
     });
     item.turnOn(seen.stamp);
-    expect(readFileSync(item.path, "utf8")).toBe("<plist>this version</plist>");
+    expect(readFileSync(item.path, "utf8")).toContain(
+      "<string>/opt/node</string>",
+    );
     expect(statSync(item.path).mode & 0o777).toBe(0o600);
     expect(item.view().file).toBe("current");
     expect(calls.every(([verb]) => verb === "print")).toBe(true);
@@ -69,6 +114,31 @@ describe("start at login from the page", () => {
     expect(item.view().file).toBe("earlier");
     item.turnOn(item.view().stamp);
     expect(item.view().file).toBe("current");
+    // This version's with another Node (after a Node update): Konfab's too.
+    put(
+      item,
+      loginItemPlist({
+        nodePath: "/usr/bin/node",
+        runnerPath: RUNNER,
+        workingDirectory: WD,
+      }),
+    );
+    expect(item.view().file).toBe("earlier");
+    // The label and the word, but not exactly a shape Konfab wrote here.
+    for (const other of [
+      "<plist><string>com.konfab.server</string><!-- konfab --></plist>",
+      before("/Users/me/other-konfab"),
+      EARLIER.replace("<true/>", "<false/>"),
+      EARLIER.replace(
+        "<key>StandardErrorPath</key>\n  <string>/Users/me/.konfab/logs/konfab.log</string>",
+        "<key>StandardErrorPath</key>\n  <string>/tmp/other.log</string>",
+      ),
+      `${EARLIER}<!-- added -->`,
+      `<!-- added -->${EARLIER}`,
+    ]) {
+      put(item, other);
+      expect(item.view().file, other.slice(-40)).toBe("unknown");
+    }
     put(
       item,
       "<plist><string>com.konfab.server</string><string>/opt/other/run</string></plist>",

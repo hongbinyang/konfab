@@ -62,6 +62,8 @@ export class LoginItem {
       launchctl?: Launchctl;
       /** What the file says: this Node, this runner, this folder. */
       plist: () => string;
+      /** Exactly the files that earlier versions of this Konfab wrote. */
+      earlier?: RegExp[];
     },
   ) {
     this.path = join(
@@ -97,8 +99,9 @@ export class LoginItem {
     if (stamp === "none" || stamp === "link") return stamp;
     const text = readFileSync(this.path, "utf8");
     if (text === this.deps.plist()) return "current";
-    return text.includes(`<string>${LOGIN_ITEM_LABEL}</string>`) &&
-      /konfab/i.test(text.replace(LOGIN_ITEM_LABEL, ""))
+    // Only a file of exactly a known shape, for this Konfab folder; anything
+    // else, also with the same label, isn't Konfab's to change.
+    return (this.deps.earlier ?? []).some((shape) => shape.test(text))
       ? "earlier"
       : "unknown";
   }
@@ -201,6 +204,66 @@ export class LoginItem {
   }
 }
 export class LoginItemError extends Error {}
+
+const xml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const ANY_PATH = "(/[^<]*)";
+
+/**
+ * The files that this Konfab folder's earlier versions wrote: with
+ * `dist/server/index.js` and a log file (before the runner), and this
+ * version's with another Node (after a Node update). Exact, but for the Node
+ * and log paths.
+ */
+export function earlierShapes(paths: {
+  runner: string;
+  workingDirectory: string;
+}): RegExp[] {
+  const node = "\u0000NODE\u0000";
+  const log = "\u0000LOG\u0000";
+  const current = loginItemPlist({
+    nodePath: node,
+    runnerPath: paths.runner,
+    workingDirectory: paths.workingDirectory,
+  });
+  const before = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LOGIN_ITEM_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${node}</string>
+    <string>${xml(join(paths.workingDirectory, "dist/server/index.js"))}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${xml(paths.workingDirectory)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${log}</string>
+  <key>StandardErrorPath</key>
+  <string>${log}</string>
+</dict>
+</plist>
+`;
+  return [current, before].map(
+    (text) =>
+      new RegExp(
+        `^${literal(text).replaceAll(node, ANY_PATH).replace(log, ANY_PATH).replace(log, "\\2")}$`,
+      ),
+  );
+}
 
 /** As `npm run login-item -- install` writes it. */
 export const plistFor =
