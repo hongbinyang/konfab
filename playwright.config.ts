@@ -12,6 +12,11 @@ export default defineConfig({
   use: { trace: "retain-on-failure" },
   projects: [
     { name: "light", use: { browserName: "chromium", colorScheme: "light" } },
-    { name: "dark", use: { browserName: "chromium", colorScheme: "dark" } },
+    {
+      name: "dark",
+      // Only what looks different in the dark theme (see THEMED).
+      grep: /@themed/,
+      use: { browserName: "chromium", colorScheme: "dark" },
+    },
   ],
 });

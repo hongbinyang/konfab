@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { expect, test, type Page } from "./fixtures.js";
+import { expect, test, type Page, THEMED } from "./fixtures.js";
 
 function loginUrl(): string {
   const env = JSON.parse(process.env.KONFAB_E2E_ENV ?? "{}") as Record<
@@ -858,14 +858,15 @@ test("every format can be left", async ({ page }, info) => {
   }
 });
 
-test("the focus ring is around the whole box and crosses none of its buttons", async ({
-  page,
-}, testInfo) => {
-  await open(page, testInfo.project.name);
-  type Rect = { top: number; left: number; right: number; bottom: number };
-  /** The ring of an element as drawn, and the buttons in the box. */
-  const rings = (selector: string) =>
-    page.evaluate(`(() => {
+test(
+  "the focus ring is around the whole box and crosses none of its buttons",
+  THEMED,
+  async ({ page }, testInfo) => {
+    await open(page, testInfo.project.name);
+    type Rect = { top: number; left: number; right: number; bottom: number };
+    /** The ring of an element as drawn, and the buttons in the box. */
+    const rings = (selector: string) =>
+      page.evaluate(`(() => {
       const rect = (element) => {
         const { top, left, right, bottom } = element.getBoundingClientRect();
         return { top, left, right, bottom };
@@ -881,64 +882,65 @@ test("the focus ring is around the whole box and crosses none of its buttons", a
         buttons: [...document.querySelectorAll(".message-editor button")].filter((b) => b.offsetParent).map(rect),
       };
     })()`) as Promise<{
-      style: string;
-      width: number;
-      ring: Rect;
-      buttons: Rect[];
-    }>;
-  const shot = async (what: string) => {
-    if (process.env.KONFAB_SHOTS)
-      await page.locator(".composer").screenshot({
-        path: `${process.env.KONFAB_SHOTS}/focus-${what}-${testInfo.project.name}.png`,
-      });
-  };
-  for (const [what, size] of [
-    ["rich", 1280],
-    ["rich-narrow", 375],
-    ["tools", 1280],
-    ["tools-narrow", 375],
-  ] as const) {
-    await page.setViewportSize({ width: size, height: 800 });
-    if (what === "tools") {
-      await page.getByRole("button", { name: "Formatting menu" }).click();
-      await box(page).click();
+        style: string;
+        width: number;
+        ring: Rect;
+        buttons: Rect[];
+      }>;
+    const shot = async (what: string) => {
+      if (process.env.KONFAB_SHOTS)
+        await page.locator(".composer").screenshot({
+          path: `${process.env.KONFAB_SHOTS}/focus-${what}-${testInfo.project.name}.png`,
+        });
+    };
+    for (const [what, size] of [
+      ["rich", 1280],
+      ["rich-narrow", 375],
+      ["tools", 1280],
+      ["tools-narrow", 375],
+    ] as const) {
+      await page.setViewportSize({ width: size, height: 800 });
+      if (what === "tools") {
+        await page.getByRole("button", { name: "Formatting menu" }).click();
+        await box(page).click();
+      }
+      await shot(what);
+      expect((await rings(".message-editor-text")).style).toBe("none");
+      const { style, width, ring, buttons } = await rings(".message-editor");
+      expect(style).toBe("solid");
+      expect(width).toBe(2);
+      expect(buttons.length).toBeGreaterThan(2);
+      for (const button of buttons) {
+        expect(button.left).toBeGreaterThan(ring.left + width);
+        expect(button.right).toBeLessThan(ring.right - width);
+        expect(button.top).toBeGreaterThan(ring.top + width);
+        expect(button.bottom).toBeLessThan(ring.bottom - width);
+      }
     }
-    await shot(what);
-    expect((await rings(".message-editor-text")).style).toBe("none");
-    const { style, width, ring, buttons } = await rings(".message-editor");
-    expect(style).toBe("solid");
-    expect(width).toBe(2);
-    expect(buttons.length).toBeGreaterThan(2);
-    for (const button of buttons) {
-      expect(button.left).toBeGreaterThan(ring.left + width);
-      expect(button.right).toBeLessThan(ring.right - width);
-      expect(button.top).toBeGreaterThan(ring.top + width);
-      expect(button.bottom).toBeLessThan(ring.bottom - width);
-    }
-  }
-  await page.setViewportSize({ width: 1280, height: 800 });
-  // A button in it has its own ring, and only that.
-  await page.keyboard.press("Tab");
-  await expect(
-    page.locator(".message-editor button:focus-visible"),
-  ).toHaveCount(1);
-  expect((await rings(".message-editor")).style).toBe("none");
-  expect((await rings(".message-editor button:focus-visible")).style).toBe(
-    "solid",
-  );
+    await page.setViewportSize({ width: 1280, height: 800 });
+    // A button in it has its own ring, and only that.
+    await page.keyboard.press("Tab");
+    await expect(
+      page.locator(".message-editor button:focus-visible"),
+    ).toHaveCount(1);
+    expect((await rings(".message-editor")).style).toBe("none");
+    expect((await rings(".message-editor button:focus-visible")).style).toBe(
+      "solid",
+    );
 
-  await page.getByRole("button", { name: "Plain text" }).click();
-  await box(page).click();
-  await shot("plain");
-  const plain = await rings("textarea#message");
-  expect(plain.style).toBe("solid");
-  for (const button of plain.buttons)
-    expect(button.top).toBeGreaterThan(plain.ring.bottom);
+    await page.getByRole("button", { name: "Plain text" }).click();
+    await box(page).click();
+    await shot("plain");
+    const plain = await rings("textarea#message");
+    expect(plain.style).toBe("solid");
+    for (const button of plain.buttons)
+      expect(button.top).toBeGreaterThan(plain.ring.bottom);
 
-  await page.setViewportSize({ width: 375, height: 800 });
-  await shot("narrow");
-  const narrow = await rings("textarea#message");
-  for (const button of narrow.buttons)
-    expect(button.top).toBeGreaterThan(narrow.ring.bottom);
-  await page.evaluate("localStorage.clear()");
-});
+    await page.setViewportSize({ width: 375, height: 800 });
+    await shot("narrow");
+    const narrow = await rings("textarea#message");
+    for (const button of narrow.buttons)
+      expect(button.top).toBeGreaterThan(narrow.ring.bottom);
+    await page.evaluate("localStorage.clear()");
+  },
+);

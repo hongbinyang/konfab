@@ -1,6 +1,6 @@
 # Faster tests
 
-**Status:** #1, #2 and #4 built; #3 waits for the lead; #5 found nothing to remove. The lead asked (2026-11-27) for quicker tests: drop deprecated and redundant ones, cover more with less, and change how they run, with the time measured before and after.
+**Status:** #1 to #4 built (the lead chose #3 on 2026-11-27); #5 found nothing to remove. The lead asked (2026-11-27) for quicker tests: drop deprecated and redundant ones, cover more with less, and change how they run, with the time measured before and after.
 
 ## Where the time went (one run, before)
 
@@ -42,6 +42,10 @@ Same Mac, nothing else heavy running, after `npm run build`; each part timed alo
 **Expected:** about 244 s → **~90 s** with #1, #2, #4; ~80 s with #3 as well.
 
 ## Result
+
+**With #3** (the lead's choice): the 40 browser tests run in light, and the 4 whose look depends on the theme (tagged `@themed`: the focus ring, and the tests that take screenshots for review) in dark as well: 44 runs instead of 80. Browser 24 s (median of 3); a real `npm run check:full` **80 s cold, 75 s warm**, against 249 s before.
+
+The measurements below are before #3.
 
 Main `84c6184` against branch `test/faster`, same Mac, each part in `check:full`'s order, median of 3 runs; "cold" without the lint and format caches, "warm" with them.
 

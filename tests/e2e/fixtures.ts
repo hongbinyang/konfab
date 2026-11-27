@@ -23,3 +23,9 @@ export const test = base.extend<object, { konfab: void }>({
     { scope: "worker", auto: true },
   ],
 });
+
+/**
+ * Tests whose look depends on the theme (a focus ring, the screenshots for
+ * review); only these run in the dark theme as well.
+ */
+export const THEMED = { tag: "@themed" };
