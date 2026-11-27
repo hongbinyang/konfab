@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 
 const env = () =>
   JSON.parse(process.env.KONFAB_E2E_ENV ?? "{}") as Record<string, string>;

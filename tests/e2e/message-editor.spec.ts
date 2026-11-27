@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures.js";
 
 function loginUrl(): string {
   const env = JSON.parse(process.env.KONFAB_E2E_ENV ?? "{}") as Record<

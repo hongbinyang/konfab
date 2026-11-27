@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 
 function loginUrl(): string {
   const env = JSON.parse(process.env.KONFAB_E2E_ENV ?? "{}") as Record<

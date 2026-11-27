@@ -6,9 +6,9 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "tests/e2e",
   timeout: 30_000,
-  workers: 1,
+  // Each worker has its own server (tests/e2e/fixtures.ts).
+  workers: 4,
   reporter: "list",
-  globalSetup: "./tests/e2e/global-setup.ts",
   use: { trace: "retain-on-failure" },
   projects: [
     { name: "light", use: { browserName: "chromium", colorScheme: "light" } },

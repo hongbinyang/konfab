@@ -14,47 +14,25 @@ import {
 import { createServer, type RequestListener, type Server } from "node:http";
 import { createServer as createProbe, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  below,
+  ended,
+  pause,
+  ROOT,
+  SCRIPT,
+  startCommand as startIn,
+  TICKET,
+  type Started,
+} from "./watch-helpers.js";
 
-const ROOT = resolve(import.meta.dirname, "../..");
-const SCRIPT = join(ROOT, "dist/cli/watch.js");
-const TICKET = `kfw_${"a".repeat(27)}`;
 const HERE = "019a0000-0000-4000-8000-000000000001";
-const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
-
-type Started = {
-  child: ChildProcess;
-  out: () => string;
-  ended: Promise<number | null>;
-};
 const running: ChildProcess[] = [];
-/** As an app starts a background command: by a shell that stays above it. */
-const startCommand = (command: string): Started => {
-  const child = spawn("/bin/sh", ["-c", `${command}; exit $?`], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  running.push(child);
-  let out = "";
-  child.stdout.on("data", (chunk) => (out += chunk));
-  child.stderr.on("data", (chunk) => (out += chunk));
-  return {
-    child,
-    out: () => out,
-    ended: new Promise((done) => child.once("close", (code) => done(code))),
-  };
-};
-const below = (pid: number): number =>
-  Number(
-    spawnSync("/usr/bin/pgrep", ["-P", String(pid)], {
-      encoding: "utf8",
-    }).stdout.trim(),
-  );
-const ended = async (started: Started, ms: number) =>
-  Promise.race([started.ended, pause(ms).then(() => "running" as const)]);
+const startCommand = (command: string): Started => startIn(command, running);
 
 // Only macOS is offered.
 describe.runIf(process.platform === "darwin")("the watcher command", () => {
@@ -235,37 +213,6 @@ describe.runIf(process.platform === "darwin")("the watcher command", () => {
     },
   );
 
-  it.each([
-    ["nobody there", () => void server.close()],
-    [
-      "endless",
-      () =>
-        void (answer = (_request, response) => {
-          response.writeHead(200);
-          const timer = setInterval(() => response.write("x".repeat(500)), 5);
-          response.on("close", () => clearInterval(timer));
-        }),
-    ],
-    [
-      "broken off",
-      () => void (answer = (_request, response) => void response.destroy()),
-    ],
-    [
-      "not JSON",
-      () => void (answer = (_request, response) => void response.end("<html>")),
-    ],
-  ] as [string, () => void][])(
-    "ends after ten seconds when there is no answer at its start: %s",
-    async (_name, prepare) => {
-      prepare();
-      const started = watch(ticketFile());
-      expect(await ended(started, 3000)).toBe("running");
-      expect(await ended(started, 25_000)).toBe(1);
-      expect(started.out()).toContain("didn't accept it");
-    },
-    40_000,
-  );
-
   it("goes on silently when Konfab stops and comes back", async () => {
     answer = json({ status: "wait" });
     let round = 0;
@@ -331,22 +278,6 @@ describe.runIf(process.platform === "darwin")("the watcher command", () => {
       expect(started.out()).toContain("without a ticket");
     }
   });
-
-  it("ends silently when a process above it is gone", async () => {
-    const started = watch(ticketFile());
-    await pause(1500);
-    expect(calls).toHaveLength(1);
-    const inner = below(started.child.pid!);
-    expect(inner).toBeGreaterThan(1);
-    started.child.kill("SIGKILL");
-    const there = () =>
-      spawnSync("/bin/ps", ["-o", "pid=", "-p", String(inner)], {
-        encoding: "utf8",
-      }).stdout.trim() !== "";
-    expect(there()).toBe(true);
-    await expect.poll(there, { timeout: 45_000, interval: 1000 }).toBe(false);
-    expect(started.out()).toBe("");
-  }, 60_000);
 });
 
 describe.runIf(process.platform === "darwin")(

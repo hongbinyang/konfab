@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 import { startKonfab, type KonfabServer } from "./konfab-server.js";
 
 // Made up. Telegram is a stand-in on this computer, and an isolated server
