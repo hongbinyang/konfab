@@ -15,13 +15,17 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { newCode, setupTelegram } from "../../src/cli/telegram-setup.js";
 import { buildApp } from "../../src/server/api/app.js";
+import { parseConfig } from "../../src/server/config.js";
 import { openDatabase, type Db } from "../../src/server/db/index.js";
 import { KonfabService } from "../../src/server/domain/service.js";
 import {
   TelegramClient,
   TelegramError,
 } from "../../src/server/telegram/client.js";
-import { TelegramNotices } from "../../src/server/telegram/notices.js";
+import {
+  noticeText,
+  TelegramNotices,
+} from "../../src/server/telegram/notices.js";
 import {
   readSettings,
   settingsPath,
@@ -658,6 +662,7 @@ describe("setting up phone notices", () => {
             quiet_from: null,
             quiet_to: null,
             room_names: false,
+            message_text: false,
             room_every_minutes: 1,
             max_per_day: 100,
           },
@@ -764,6 +769,7 @@ describe("phone notices", () => {
         quiet_from: null,
         quiet_to: null,
         room_names: false,
+        message_text: false,
         room_every_minutes: 10,
         max_per_day: 20,
         ...options,
@@ -828,6 +834,179 @@ describe("phone notices", () => {
     expect(JSON.stringify(telegram.calls)).not.toContain("secret");
     expect(JSON.stringify(telegram.calls)).not.toContain("private-room");
     expect(JSON.stringify(telegram.calls)).not.toContain("claude");
+  });
+
+  describe("with the message text", () => {
+    const withText = () => {
+      notices = make({ message_text: true });
+    };
+
+    it("quotes the message, its agent and room, in one notice", async () => {
+      withText();
+      mention("@lead the branch   is ready\n\nfor review");
+      await later(10);
+      await later(1);
+      expect(telegram.sent()).toEqual([
+        "Konfab · private-room\nClaude: @lead the branch is ready for review",
+      ]);
+      // Sent once; retries and restarts are as without the text.
+      await later(30);
+      notices = make({ message_text: true });
+      await later(30);
+      expect(telegram.sent()).toHaveLength(1);
+    });
+
+    it("shows at most three excerpts, newest first, and says the rest aren't sent later", () => {
+      const needs = [1, 2, 3, 4, 5].map((n) => ({
+        kind: "message" as const,
+        id: n,
+        room_id: n % 2,
+        room: n % 2 ? "odd" : "even",
+        created_at: n,
+      }));
+      const text = noticeText(
+        needs,
+        (id) => ({ sender: "Claude", body: `number ${id}` }),
+        [],
+      );
+      expect(text).toBe(
+        "Konfab · odd\nClaude: number 5\nClaude: number 3\n\nKonfab · even\nClaude: number 4\n\n+2 more, not sent here; open Konfab to read them.",
+      );
+    });
+
+    it("hides the secrets in use, whatever their form, and is on by default", () => {
+      const need = {
+        kind: "message" as const,
+        id: 1,
+        room_id: 1,
+        room: "r",
+        created_at: 1,
+      };
+      expect(
+        noticeText(
+          [need],
+          () => ({ sender: "S", body: "key Zq9-secret-Zq9 end" }),
+          ["Zq9-secret-Zq9"],
+        ),
+      ).toBe("Konfab · r\nS: key [hidden] end");
+      expect(parseConfig("").phone_notices.message_text).toBe(true);
+      expect(
+        parseConfig("phone_notices:\n  away_minutes: 5\n").phone_notices
+          .message_text,
+      ).toBe(true);
+    });
+
+    it("stays within its budget, names and count included", () => {
+      const needs = Array.from({ length: 40 }, (_, n) => ({
+        kind: (n % 2 ? "permission" : "event") as "permission" | "event",
+        id: n,
+        room_id: n,
+        room: `room-${"x".repeat(200)}-${n}`,
+        created_at: n,
+      }));
+      needs.push({
+        kind: "message" as never,
+        id: 99,
+        room_id: 99,
+        room: "m",
+        created_at: 100,
+      });
+      const text = noticeText(
+        needs,
+        () => ({ sender: "S".repeat(500), body: "y".repeat(5000) }),
+        [],
+      );
+      expect(text.length).toBeLessThanOrEqual(3500);
+      expect(text).toMatch(/\+\d+ more, not sent here/);
+      expect(text.startsWith("Konfab · m\n")).toBe(true);
+    });
+
+    it("cuts at 300 whole characters, and never splits one", async () => {
+      withText();
+      const family = "👨‍👩‍👧";
+      mention(`@lead ${"a".repeat(290)}${family}${family}tail`);
+      await later(11);
+      const line = String(telegram.sent()[0]).split("\n")[1]!;
+      const quoted = line.slice("Claude: ".length);
+      const parts = [
+        ...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+          quoted,
+        ),
+      ];
+      expect(parts).toHaveLength(300);
+      expect(quoted.endsWith("…")).toBe(true);
+      expect(quoted).not.toContain("tail");
+      // No half of the family emoji.
+      expect(quoted.replaceAll(family, "")).not.toMatch(/\u200d/);
+    });
+
+    it("hides what looks like a token, and the bot's own", async () => {
+      withText();
+      mention(
+        `@lead ${TOKEN} ghp_${"a".repeat(36)} github_pat_${"b".repeat(40)} kfb_abcdefghijkl done`,
+      );
+      await later(11);
+      const [sent] = telegram.sent();
+      expect(sent).toContain("[hidden] [hidden] [hidden] [hidden] done");
+      expect(JSON.stringify(telegram.calls)).not.toContain(TOKEN.split(":")[1]);
+      expect(sent).not.toMatch(/ghp_|github_pat_|kfb_/);
+    });
+
+    it("keeps permission requests and stopped rooms as generic as before", async () => {
+      withText();
+      service.requestPermission("claude", claude, {
+        recipient: "example.com",
+        data_description: "secret plans",
+        reason: "secret reason",
+      });
+      await later(11);
+      const [sent] = telegram.sent();
+      expect(sent).toBe(
+        "Konfab · private-room\na permission request is waiting.",
+      );
+    });
+
+    it("doesn't tell what was read or answered while the token was read", async () => {
+      let go!: () => void;
+      notices = new TelegramNotices({
+        db,
+        home,
+        options: {
+          away_minutes: 10,
+          quiet_from: null,
+          quiet_to: null,
+          room_names: false,
+          message_text: true,
+          room_every_minutes: 10,
+          max_per_day: 20,
+        },
+        token: () =>
+          new Promise<TokenRead>((done) => {
+            go = () => done({ state: "found", token: TOKEN } as TokenRead);
+          }),
+        client: () => client(300),
+        now: () => now,
+      });
+      mention("@lead answer me");
+      for (let i = 0; i < 11; i += 1) {
+        now += MINUTE;
+        service.poll("claude", claude, true);
+      }
+      const pass = notices.tick();
+      await new Promise((done) => setTimeout(done, 10));
+      // The lead answers in the room meanwhile.
+      service.postUserMessage("private-room", "done");
+      go();
+      await pass;
+      expect(telegram.sent()).toEqual([]);
+    });
+
+    it("is off as today, word for word", async () => {
+      notices = make({ message_text: false });
+      mention("@lead hidden text");
+      await later(11);
+      expect(telegram.sent()).toEqual(["Konfab: a room needs you."]);
+    });
   });
 
   it("waits while the lead is active, and not for a page that is only left open", async () => {
@@ -1034,6 +1213,7 @@ describe("phone notices", () => {
           quiet_from: null,
           quiet_to: null,
           room_names: false,
+          message_text: false,
           room_every_minutes: 1,
           max_per_day: 20,
         },
@@ -1067,6 +1247,7 @@ describe("phone notices", () => {
         quiet_from: null,
         quiet_to: null,
         room_names: false,
+        message_text: false,
         room_every_minutes: 10,
         max_per_day: 20,
       },

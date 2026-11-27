@@ -176,6 +176,8 @@ const notices = new TelegramNotices({
   home,
   options: noticeOptions,
   token: (place) => keychain.read(place),
+  // Hidden if a message quotes it.
+  secrets: () => (githubToken.token ? [githubToken.token] : []),
   warn: (message) => app.log.warn(message),
 });
 

@@ -15,13 +15,15 @@ export type NoticeOptions = {
   quiet_from: string | null;
   quiet_to: string | null;
   room_names: boolean;
+  /** Short excerpts of the messages that need the lead. */
+  message_text: boolean;
   room_every_minutes: number;
   max_per_day: number;
 };
 
-type Kind = "message" | "permission" | "event" | "report";
+export type Kind = "message" | "permission" | "event" | "report";
 /** Something that still needs the lead. */
-type Need = {
+export type Need = {
   kind: Kind;
   id: number;
   room_id: number;
@@ -42,9 +44,9 @@ export type NoticesView = {
 };
 
 /**
- * Short notices to the lead's phone while the lead is away. Never message
- * text: only that something needs them. Sending is apart from everything
- * else, so rooms never wait for it.
+ * Short notices to the lead's phone while the lead is away: that something
+ * needs them, and, unless that is turned off, short excerpts of the messages.
+ * Sending is apart from everything else, so rooms never wait for it.
  */
 export class TelegramNotices {
   private lastActivity: number;
@@ -58,6 +60,8 @@ export class TelegramNotices {
   constructor(
     private readonly deps: {
       db: Db;
+      /** Secrets in use, hidden if a message quotes them. */
+      secrets?: () => string[];
       home: string;
       options: NoticeOptions;
       token: (place: { slot: TokenSlot; item?: string }) => Promise<TokenRead>;
@@ -171,15 +175,25 @@ export class TelegramNotices {
     // Chat, bot and token of one setup, which is still the one and on.
     if (settingsStamp(this.deps.home) !== stamp) return;
     const { token } = read;
+    // Read, answered or gone while the token was read: not told any more.
+    const still = new Set(
+      this.needs(state).map((need) => `${need.kind}:${need.id}`),
+    );
+    const current = needs.filter((need) =>
+      still.has(`${need.kind}:${need.id}`),
+    );
+    if (!current.length) return;
+    // Made now, and kept nowhere.
+    const text = this.text(current, [token, ...(this.deps.secrets?.() ?? [])]);
     const before = state;
-    const after = this.marked(state, needs, now);
+    const after = this.marked(state, current, now);
     // Recorded first: a crash can lose a notice, but never repeat it.
     writeState(this.deps.home, after);
     try {
       const client = (
         this.deps.client ?? ((value) => new TelegramClient(value))
       )(token);
-      await client.send(settings.chat_id, this.text(needs));
+      await client.send(settings.chat_id, text);
       this.problem = null;
       this.tries = 0;
     } catch (error) {
@@ -203,13 +217,26 @@ export class TelegramNotices {
     }
   }
 
+  /** A message's sender and text, read only to make a notice. */
+  private message(id: number): { sender: string; body: string } | null {
+    const row = this.deps.db
+      .prepare(
+        `SELECT m.body, COALESCE(a.display_name, m.sender_id) AS sender
+         FROM messages m LEFT JOIN agents a ON a.id = m.sender_id WHERE m.id = ?`,
+      )
+      .get(id) as { body: string; sender: string } | undefined;
+    return row ? { sender: row.sender, body: row.body } : null;
+  }
+
   private fail(message: string): void {
     if (this.problem === message) return;
     this.problem = message;
     this.deps.warn?.(`Phone notices: ${message}`);
   }
 
-  private text(needs: Need[]): string {
+  private text(needs: Need[], secrets: string[]): string {
+    if (this.deps.options.message_text)
+      return noticeText(needs, (id) => this.message(id), secrets);
     const kinds = new Set(needs.map((need) => need.kind));
     const what =
       kinds.size > 1
@@ -334,4 +361,105 @@ export class TelegramNotices {
 function localDay(now: number): string {
   const date = new Date(now);
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+/** At most this many excerpts, of at most this many characters each. */
+export const EXCERPTS = 3;
+export const EXCERPT_CHARS = 300;
+/** The whole notice stays well under Telegram's 4096. */
+export const NOTICE_CHARS = 3500;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+/** Cut at a whole character as people see it, never inside one. */
+export function cut(text: string, most: number): string {
+  const parts = [...graphemes.segment(text)].map((part) => part.segment);
+  if (parts.length <= most) return text;
+  return `${parts
+    .slice(0, most - 1)
+    .join("")
+    .trimEnd()}…`;
+}
+
+/** Best effort only: what looks like a token, and the tokens in use. */
+const TOKEN_FORMS = [
+  /\b\d{5,20}:[A-Za-z0-9_-]{30,64}\b/g,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/g,
+  /\bkfb_[A-Za-z0-9_-]{8,}/g,
+];
+export function hidden(text: string, secrets: string[]): string {
+  let out = text;
+  for (const secret of secrets)
+    if (secret.length >= 8) out = out.split(secret).join("[hidden]");
+  for (const form of TOKEN_FORMS) out = out.replace(form, "[hidden]");
+  return out;
+}
+
+const GENERIC: Record<Kind, string> = {
+  message: "a message needs you.",
+  permission: "a permission request is waiting.",
+  event: "a room has stopped.",
+  report: "a room has stopped.",
+};
+
+/**
+ * One notice for everything found: grouped by room, the newest excerpts
+ * first, then how many more there are, which aren't sent later.
+ */
+export function noticeText(
+  needs: Need[],
+  message: (id: number) => { sender: string; body: string } | null,
+  secrets: string[],
+): string {
+  const ordered = [...needs].sort((a, b) => b.created_at - a.created_at);
+  const shown: { need: Need; line: string }[] = [];
+  let excerpts = 0;
+  let more = 0;
+  for (const need of ordered) {
+    if (need.kind === "message") {
+      const found = excerpts < EXCERPTS ? message(need.id) : null;
+      if (!found) {
+        more += 1;
+        continue;
+      }
+      excerpts += 1;
+      const body = hidden(found.body, secrets).replace(/\s+/g, " ").trim();
+      shown.push({
+        need,
+        line: `${cut(found.sender, 40)}: ${cut(body, EXCERPT_CHARS)}`,
+      });
+    } else if (
+      !shown.some(
+        (one) =>
+          one.need.room_id === need.room_id && one.need.kind === need.kind,
+      )
+    )
+      shown.push({ need, line: GENERIC[need.kind] });
+  }
+  const rooms = new Map<number, { name: string; lines: string[] }>();
+  for (const { need, line } of shown) {
+    const room = rooms.get(need.room_id) ?? { name: need.room, lines: [] };
+    room.lines.push(line);
+    rooms.set(need.room_id, room);
+  }
+  const blocks = [...rooms.values()].map((room) =>
+    [`Konfab · ${cut(room.name, 64)}`, ...room.lines].join("\n"),
+  );
+  const tail = (count: number) =>
+    count ? `+${count} more, not sent here; open Konfab to read them.` : "";
+  // The whole notice within its budget, names and count included.
+  let text = "";
+  let dropped = 0;
+  for (const [index, block] of blocks.entries()) {
+    const next = text ? `${text}\n\n${block}` : block;
+    const rest = blocks.length - index - 1;
+    if ((next + tail(more + rest)).length + 2 > NOTICE_CHARS) {
+      dropped = blocks.length - index;
+      break;
+    }
+    text = next;
+  }
+  const end = tail(more + dropped);
+  return [text || "Konfab: a room needs you.", end]
+    .filter(Boolean)
+    .join("\n\n");
 }

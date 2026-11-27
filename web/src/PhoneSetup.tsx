@@ -134,8 +134,9 @@ function Start({
     <Card title="Set up phone notices" step={0}>
       <p>
         Konfab can tell your own Telegram chat that a room needs you while you
-        are away. Notices never contain message text, files or agent names.
-        Telegram carries them, so it sees them and when they are sent.
+        are away. Notices include short excerpts of the messages that need you,
+        with their room and agent; you can turn that off in Settings. Telegram
+        carries them, so it sees them and when they are sent.
       </p>
       <p>
         First make a bot only for Konfab: in Telegram, write{" "}

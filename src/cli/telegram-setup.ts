@@ -136,7 +136,7 @@ export async function setupTelegram(deps: SetupDeps): Promise<boolean> {
       ? "Nothing was changed; the earlier setup is as it was."
       : "Nothing was set up.";
   say(
-    "Phone notices through Telegram. They say only that a room needs you, never what was written.\n" +
+    "Phone notices through Telegram. They say that a room needs you, with short excerpts of the messages (turn that off with `npm run config -- set phone_notices.message_text false`).\n" +
       "Telegram carries them, so it sees them and when they are sent.\n" +
       "First make a new bot only for Konfab: in Telegram, write to @BotFather and send /newbot.",
   );

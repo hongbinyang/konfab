@@ -114,7 +114,7 @@ Press the same keys again to remove a format (for a link, choose **Remove link**
 
 ### Notices on your phone (Telegram)
 
-Off unless you set it up. While you are away from the Konfab page, Konfab can send short notices to your own Telegram chat: an agent mentioned @lead, a permission request is waiting, or a room has stopped. They never contain message text, files, links or agent names. Telegram carries them, so it sees them and when they are sent.
+Off unless you set it up. While you are away from the Konfab page, Konfab can send short notices to your own Telegram chat: an agent mentioned @lead, a permission request is waiting, or a room has stopped. By default they quote up to 300 characters of each message that needs you (at most three, then how many more there are, which aren't sent later), with its room and agent; permission requests and stopped rooms stay without details, and files are never sent. Konfab hides what looks like a token, but can't recognize every secret or personal detail. Telegram carries the notices, so it sees and keeps them; bots aren't end-to-end encrypted. Turn the text off with **Include the text** in ⚙ Settings → Phone notices (turning it on again asks first). A setup made before this version gets the text too.
 
 In Telegram, write to **@BotFather**, send `/newbot`, and make a bot **only for Konfab**. Then set it up in the page or in the terminal; it is the same setup.
 
@@ -412,38 +412,39 @@ Environment variables (all optional):
 
 Settings in `config.yaml`:
 
-| Setting                                   | Default       | In the page     | In use                    | What it does                                                                                          |
-| ----------------------------------------- | ------------- | --------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `phone_notices.away_minutes`              | 10            | yes             | At once                   | Minutes without activity before phone notices are sent                                                |
-| `phone_notices.quiet_from`                | none          | yes             | At once                   | Start of quiet hours, such as 22:00; nothing is sent in them (needs both times)                       |
-| `phone_notices.quiet_to`                  | none          | yes             | At once                   | End of quiet hours, such as 07:30                                                                     |
-| `phone_notices.room_names`                | false         | yes             | At once                   | Whether phone notices name the room, which Telegram then sees                                         |
-| `phone_notices.room_every_minutes`        | 10            | yes             | At once                   | Minutes between two notices about the same room                                                       |
-| `phone_notices.max_per_day`               | 20            | yes             | At once                   | Phone notices per day                                                                                 |
-| `rejoin.enabled`                          | true          | yes             | At once                   | Whether agents can be asked to rejoin; off closes requests that are open                              |
-| `rejoin.claude_watcher`                   | false         | yes             | From the next join        | Asks Claude agents, when they join, to start one small background command that wakes them             |
-| `rejoin.open_apps`                        | true          | yes             | At once                   | Lets a button bring Codex or Claude to the front (macOS)                                              |
-| `rejoin.wanted_minutes`                   | 10            | yes             | At once                   | How long a request to rejoin stays wanted                                                             |
-| `rejoin.allow_untested_version`           | false         | with a question | At once                   | Use a Codex version this hasn't been tried with                                                       |
-| `rejoin.codex_command`                    | none          | with a question | At once                   | Absolute path of the Codex command, instead of the app's own copy; its signature isn't required       |
-| `defaults.run_hours`                      | 5             | yes             | From the next join        | Usable hours per agent session; an agent's own comes first                                            |
-| `defaults.run_warnings_minutes`           | 30, 10, 5     | yes             | At once                   | Minutes before the end of a run window when a warning appears                                         |
-| `defaults.max_consecutive_agent_messages` | 50            | yes             | At once                   | Agent messages in a row before the room waits for you                                                 |
-| `defaults.parallel_lead_mentions`         | false         | yes             | At once                   | Parallel answers to your mentions in new rooms                                                        |
-| `defaults.max_parallel_lead_turns`        | 3             | yes             | At once                   | Parallel turns per room                                                                               |
-| `defaults.checkin_minutes`                | 2             | yes             | At once                   | Busy-agent check-in interval (1, 2, 5 or 10); a room's own comes first                                |
-| `defaults.wait_timeout_seconds`           | 50            | yes             | At once                   | How long a waiting agent's call lasts; longer uses less allowance. Agents are told at their next join |
-| `defaults.turn_timeout_minutes`           | 30            | yes             | At once                   | When a silent turn is flagged and recovered                                                           |
-| `defaults.auto_continue_delay_seconds`    | 180           | yes             | At once                   | Delay before automatic continuation                                                                   |
-| `defaults.max_message_chars`              | 20000         | yes             | At once                   | Characters in a message                                                                               |
-| `defaults.max_decision_chars`             | 4000          | yes             | At once                   | Characters in a decision                                                                              |
-| `defaults.max_attachment_mb`              | 10            | yes             | After a restart of Konfab | Largest attachment                                                                                    |
-| `multi_agent.max_per_app`                 | 4             | yes             | At once                   | Agents per desktop app                                                                                |
-| `server.port`                             | 8787          | with a question | After a restart of Konfab | Port for the page and the connectors; run setup again after a change                                  |
-| `server.tick_seconds`                     | 30            | yes             | After a restart of Konfab | How often the server looks for timeouts                                                               |
-| `connectors.install`                      | user          | no              | At the next setup         | manual makes setup write instructions instead of editing apps                                         |
-| `agents`                                  | Claude, Codex | no              | At once                   | The apps that connectors join as, with their names and run hours                                      |
-| `pre_approvals`                           | none          | yes             | At once                   | What agents may send to whom without asking you; each use is still logged                             |
+| Setting                                   | Default       | In the page     | In use                    | What it does                                                                                                         |
+| ----------------------------------------- | ------------- | --------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `phone_notices.away_minutes`              | 10            | yes             | At once                   | Minutes without activity before phone notices are sent                                                               |
+| `phone_notices.quiet_from`                | none          | yes             | At once                   | Start of quiet hours, such as 22:00; nothing is sent in them (needs both times)                                      |
+| `phone_notices.quiet_to`                  | none          | yes             | At once                   | End of quiet hours, such as 07:30                                                                                    |
+| `phone_notices.message_text`              | true          | yes             | At once                   | Phone notices quote up to 300 characters of each message that needs you, with its room and agent; Telegram sees them |
+| `phone_notices.room_names`                | false         | yes             | At once                   | Whether phone notices name the room, which Telegram then sees                                                        |
+| `phone_notices.room_every_minutes`        | 10            | yes             | At once                   | Minutes between two notices about the same room                                                                      |
+| `phone_notices.max_per_day`               | 20            | yes             | At once                   | Phone notices per day                                                                                                |
+| `rejoin.enabled`                          | true          | yes             | At once                   | Whether agents can be asked to rejoin; off closes requests that are open                                             |
+| `rejoin.claude_watcher`                   | false         | yes             | From the next join        | Asks Claude agents, when they join, to start one small background command that wakes them                            |
+| `rejoin.open_apps`                        | true          | yes             | At once                   | Lets a button bring Codex or Claude to the front (macOS)                                                             |
+| `rejoin.wanted_minutes`                   | 10            | yes             | At once                   | How long a request to rejoin stays wanted                                                                            |
+| `rejoin.allow_untested_version`           | false         | with a question | At once                   | Use a Codex version this hasn't been tried with                                                                      |
+| `rejoin.codex_command`                    | none          | with a question | At once                   | Absolute path of the Codex command, instead of the app's own copy; its signature isn't required                      |
+| `defaults.run_hours`                      | 5             | yes             | From the next join        | Usable hours per agent session; an agent's own comes first                                                           |
+| `defaults.run_warnings_minutes`           | 30, 10, 5     | yes             | At once                   | Minutes before the end of a run window when a warning appears                                                        |
+| `defaults.max_consecutive_agent_messages` | 50            | yes             | At once                   | Agent messages in a row before the room waits for you                                                                |
+| `defaults.parallel_lead_mentions`         | false         | yes             | At once                   | Parallel answers to your mentions in new rooms                                                                       |
+| `defaults.max_parallel_lead_turns`        | 3             | yes             | At once                   | Parallel turns per room                                                                                              |
+| `defaults.checkin_minutes`                | 2             | yes             | At once                   | Busy-agent check-in interval (1, 2, 5 or 10); a room's own comes first                                               |
+| `defaults.wait_timeout_seconds`           | 50            | yes             | At once                   | How long a waiting agent's call lasts; longer uses less allowance. Agents are told at their next join                |
+| `defaults.turn_timeout_minutes`           | 30            | yes             | At once                   | When a silent turn is flagged and recovered                                                                          |
+| `defaults.auto_continue_delay_seconds`    | 180           | yes             | At once                   | Delay before automatic continuation                                                                                  |
+| `defaults.max_message_chars`              | 20000         | yes             | At once                   | Characters in a message                                                                                              |
+| `defaults.max_decision_chars`             | 4000          | yes             | At once                   | Characters in a decision                                                                                             |
+| `defaults.max_attachment_mb`              | 10            | yes             | After a restart of Konfab | Largest attachment                                                                                                   |
+| `multi_agent.max_per_app`                 | 4             | yes             | At once                   | Agents per desktop app                                                                                               |
+| `server.port`                             | 8787          | with a question | After a restart of Konfab | Port for the page and the connectors; run setup again after a change                                                 |
+| `server.tick_seconds`                     | 30            | yes             | After a restart of Konfab | How often the server looks for timeouts                                                                              |
+| `connectors.install`                      | user          | no              | At the next setup         | manual makes setup write instructions instead of editing apps                                                        |
+| `agents`                                  | Claude, Codex | no              | At once                   | The apps that connectors join as, with their names and run hours                                                     |
+| `pre_approvals`                           | none          | yes             | At once                   | What agents may send to whom without asking you; each use is still logged                                            |
 
 Room settings (brief, project folder, parallel mentions, check-in interval) are in each room's **Edit** form.
 

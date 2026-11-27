@@ -1,6 +1,6 @@
 # Phone notices with the message text
 
-**Status:** a plan for review; nothing is built. The lead chose option A, **on by default** (2026-11-26): a notice carries a short excerpt of what needs them, so that they can read it on the phone while away from the Mac.
+**Status:** built, after review. The lead chose option A, **on by default** (2026-11-26): a notice carries a short excerpt of what needs them, so that they can read it on the phone while away from the Mac.
 
 ## Which messages, and when
 

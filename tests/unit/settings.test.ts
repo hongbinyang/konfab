@@ -733,6 +733,24 @@ describe("npm run config", () => {
     expect(valueAt(checked(text()), key)).toBe(Number(value));
   });
 
+  it("asks before phone notices quote messages again, and not to stop it", async () => {
+    deps.ask = null;
+    expect((await run("set", "phone_notices.message_text", "false"))[0]).toBe(
+      0,
+    );
+    const [code, ...lines] = await run(
+      "set",
+      "phone_notices.message_text",
+      "true",
+    );
+    expect(code).toBe(1);
+    expect(lines.join(" ")).toMatch(/can't recognize every secret/);
+    expect(
+      (await run("set", "phone_notices.message_text", "true", "--yes"))[0],
+    ).toBe(0);
+    expect(checked(text()).phone_notices.message_text).toBe(true);
+  });
+
   it("asks nothing for a longer silent-turn limit, or the same port", async () => {
     deps.ask = null;
     expect((await run("set", "defaults.turn_timeout_minutes", "60"))[0]).toBe(

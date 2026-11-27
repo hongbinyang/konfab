@@ -103,6 +103,12 @@ export const SETTINGS: Setting[] = [
       { type: "time" },
     ],
     [
+      "message_text",
+      "Include the text",
+      "Phone notices quote up to 300 characters of each message that needs you, with its room and agent; Telegram sees them",
+      on,
+    ],
+    [
       "room_names",
       "Name the room",
       "Whether phone notices name the room, which Telegram then sees",
@@ -455,6 +461,8 @@ export function questionFor(
     next < saved
   )
     return `A silent turn that is already longer than ${next} minutes is ended at the next look. Shorten it?`;
+  if (key === "phone_notices.message_text" && next === true && saved !== true)
+    return "Notices then include up to 300 characters of each message that needs you, with its room and agent names. Telegram carries and keeps them; bots aren't end-to-end encrypted. Konfab hides what looks like a token, but can't recognize every secret or personal detail. Turn it on?";
   if (key === "server.port" && next !== saved)
     return `Used after the next restart of Konfab. The page is then at http://127.0.0.1:${shown(next)}, and both apps need \`npm run setup\` once; until then their agents can't reach Konfab. Change it?`;
   return null;

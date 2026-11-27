@@ -72,6 +72,7 @@ const configSchema = z.object({
       quiet_from: clock.nullable().default(null),
       quiet_to: clock.nullable().default(null),
       room_names: z.boolean().default(false),
+      message_text: z.boolean().default(true),
       room_every_minutes: z.number().int().min(1).max(1440).default(10),
       max_per_day: z.number().int().min(1).max(200).default(20),
     })
@@ -80,6 +81,7 @@ const configSchema = z.object({
       quiet_from: null,
       quiet_to: null,
       room_names: false,
+      message_text: true,
       room_every_minutes: 10,
       max_per_day: 20,
     }),

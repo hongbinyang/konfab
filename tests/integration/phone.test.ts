@@ -138,6 +138,7 @@ describe("phone notices over the page's routes", () => {
           quiet_from: null,
           quiet_to: null,
           room_names: false,
+          message_text: false,
           room_every_minutes: 10,
           max_per_day: 20,
         },
