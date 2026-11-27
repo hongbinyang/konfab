@@ -474,6 +474,8 @@ describe("the Settings page", () => {
       file: "current",
       loaded: true,
       path: "/h/x.plist",
+      stamp: "s1",
+      last_unload: null,
     };
     await open();
     await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
@@ -486,13 +488,15 @@ describe("the Settings page", () => {
       .mockReturnValueOnce(false);
     await userEvent.click(screen.getByRole("button", { name: "Turn off…" }));
     expect(confirm).toHaveBeenCalledTimes(2);
-    expect(writes()).toEqual([{ on: false, unload: false }]);
+    expect(writes()).toEqual([{ on: false, unload: false, stamp: "s1" }]);
     cleanup();
     view.login_item = {
       available: false,
       file: "none",
       loaded: false,
       path: "/h/x.plist",
+      stamp: "none",
+      last_unload: null,
     };
     await open();
     await userEvent.click(screen.getByRole("button", { name: "Advanced" }));

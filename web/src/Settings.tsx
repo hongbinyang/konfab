@@ -68,9 +68,11 @@ type View = {
   /** Absent from older servers. */
   login_item?: {
     available: boolean;
-    file: "none" | "current" | "earlier";
+    file: "none" | "current" | "earlier" | "unknown" | "link";
     loaded: boolean;
     path: string;
+    stamp: string;
+    last_unload: { ok: boolean; said: string } | null;
   } | null;
   /** Absent from older servers. Never the token. */
   github?: {
@@ -737,7 +739,10 @@ function LoginItemRow({
 }) {
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
-  const send = (body: { on: boolean; unload?: boolean }, what: string) => {
+  const send = (
+    body: { on: boolean; unload?: boolean; stamp: string },
+    what: string,
+  ) => {
     setBusy(true);
     setProblem("");
     void request<View>("/api/settings/login-item", { method: "POST", body })
@@ -755,7 +760,10 @@ function LoginItemRow({
       ? "On: Konfab starts when you log in."
       : item.file === "earlier"
         ? "On, set up by an earlier version: Turn on writes this version's."
-        : "Off.";
+        : item.file === "unknown" || item.file === "link"
+          ? `${item.path} isn't one that Konfab wrote, so Konfab leaves it alone.`
+          : "Off.";
+  const mine = item.file !== "unknown" && item.file !== "link";
   return (
     <div className="setting">
       <div className="setting-text">
@@ -765,13 +773,18 @@ function LoginItemRow({
           {item.loaded &&
             " It is loaded in macOS now, and stays so until you log out."}
         </p>
+        {item.last_unload && (
+          <p className={item.last_unload.ok ? "muted" : "attachment-error"}>
+            Last unload: {item.last_unload.said}
+          </p>
+        )}
         {problem && (
           <p className="attachment-error" role="alert">
             {problem}
           </p>
         )}
       </div>
-      {item.available && (
+      {item.available && mine && (
         <div className="setting-control">
           {item.file !== "current" && (
             <button
@@ -784,7 +797,7 @@ function LoginItemRow({
                     "Konfab then starts when you log in, with this folder and this Node. It isn't started now, because it is already running. Turn it on?",
                   )
                 )
-                  send({ on: true }, "Start at login: on.");
+                  send({ on: true, stamp: item.stamp }, "Start at login: on.");
               }}
             >
               Turn on…
@@ -808,7 +821,7 @@ function LoginItemRow({
                     "Also unload it now? That ends the Konfab that macOS started, and this page with it. Cancel keeps it running until you quit or log out.",
                   );
                 send(
-                  { on: false, unload },
+                  { on: false, unload, stamp: item.stamp },
                   unload
                     ? "Start at login: off. Konfab ends now."
                     : "Start at login: off.",

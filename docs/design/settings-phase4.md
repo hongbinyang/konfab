@@ -1,6 +1,6 @@
 # Settings, phase 4: connectors, Codex posts and start at login
 
-**Status:** built. The connectors of both apps, Codex posts without asking, adding or removing an app, and start at login, after the launchd trial with the lead on 2026-11-27 (results below). The lead agreed to all six recommendations (2026-11-26).
+**Status:** built. The connectors of both apps, Codex posts without asking, adding or removing an app, and start at login, after the launchd trial with the lead on 2026-11-26 (results below). The lead agreed to all six recommendations (2026-11-26).
 
 These three change **other programs' files**: Codex's `config.toml`, Claude Code's `.claude.json`, and a macOS LaunchAgent. So every change in the page is shown first, exactly, and done only after a yes; it is checked against the file as it was shown; and it can be undone while nothing else has changed that file.
 
@@ -91,7 +91,7 @@ The LaunchAgent has `RunAtLoad` and `KeepAlive` with `SuccessfulExit` false: lau
 | loaded (this server was started by launchd) | writes the file anew; the loaded job keeps its old definition until the next login          | removes the file. The loaded job stays loaded until logout: Konfab keeps running, and would be started again only after a crash. The question says so. It also offers `launchctl bootout` to unload it now, which **ends this server and the page** |
 | file of an earlier version                  | as turn on: replaced                                                                        | as turn off                                                                                                                                                                                                                                         |
 
-**The trial (2026-11-27, with the lead, a throwaway job running `/bin/sleep`):** a file alone wasn't loaded; a file changed while loaded left the loaded definition as it was; a file removed while loaded left the job loaded and running; after `kill -9` launchd started it again; `bootout` unloaded it and ended the process, which wasn't started again. The next login itself wasn't tried (it needs a log-out); it rests on launchd loading `~/Library/LaunchAgents` at login. Built accordingly: the page writes or removes only the file, and unloads only by the lead's own choice, after its answer is sent.
+**The trial (2026-11-26, with the lead, a throwaway job running `/bin/sleep`):** a file alone wasn't loaded; a file changed while loaded left the loaded definition as it was; a file removed while loaded left the job loaded and running; after `kill -9` launchd started it again; `bootout` unloaded it and ended the process, which wasn't started again. The next login itself wasn't tried (it needs a log-out); it rests on launchd loading `~/Library/LaunchAgents` at login. Built accordingly: the page writes or removes only the file, and unloads only by the lead's own choice, after its answer is sent.
 
 Other systems: "Not available here; start Konfab with your own service manager", as `npm run doctor` says.
 

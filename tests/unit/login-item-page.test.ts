@@ -12,10 +12,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LoginItem } from "../../src/server/connectors/login-item.js";
 
+const EARLIER = `<plist><dict><key>Label</key><string>com.konfab.server</string>
+<key>ProgramArguments</key><array><string>/usr/bin/node</string><string>/Users/me/konfab/dist/server/index.js</string></array></dict></plist>`;
+
 describe("start at login from the page", () => {
   let home: string;
   let calls: string[][];
   let loaded: boolean;
+  let bootout: { code: number | null } | "throws";
   const make = (platform: NodeJS.Platform = "darwin") =>
     new LoginItem({
       platform,
@@ -24,64 +28,126 @@ describe("start at login from the page", () => {
       plist: () => "<plist>this version</plist>",
       launchctl: (args) => {
         calls.push(args);
-        return { code: args[0] === "print" ? (loaded ? 0 : 113) : 0 };
+        if (args[0] === "bootout") {
+          if (bootout === "throws") throw new Error("spawn failed");
+          return bootout;
+        }
+        return { code: loaded ? 0 : 113 };
       },
     });
+  const put = (item: LoginItem, text: string) => {
+    mkdirSync(join(home, "Library/LaunchAgents"), { recursive: true });
+    writeFileSync(item.path, text);
+  };
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "konfab-login-"));
     calls = [];
     loaded = false;
+    bootout = { code: 0 };
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
   it("writes the file for the next login, and never loads or starts it now", () => {
     const item = make();
-    expect(item.view()).toMatchObject({
+    const seen = item.view();
+    expect(seen).toMatchObject({
       available: true,
       file: "none",
       loaded: false,
+      stamp: "none",
     });
-    item.turnOn();
+    item.turnOn(seen.stamp);
     expect(readFileSync(item.path, "utf8")).toBe("<plist>this version</plist>");
     expect(statSync(item.path).mode & 0o777).toBe(0o600);
     expect(item.view().file).toBe("current");
     expect(calls.every(([verb]) => verb === "print")).toBe(true);
   });
 
-  it("knows a file of an earlier version, and replaces it", () => {
+  it("knows Konfab's earlier file, and leaves one it doesn't know alone", () => {
     const item = make();
-    mkdirSync(join(home, "Library/LaunchAgents"), { recursive: true });
-    writeFileSync(item.path, "<plist>old</plist>");
+    put(item, EARLIER);
     expect(item.view().file).toBe("earlier");
-    item.turnOn();
+    item.turnOn(item.view().stamp);
     expect(item.view().file).toBe("current");
+    put(
+      item,
+      "<plist><string>com.konfab.server</string><string>/opt/other/run</string></plist>",
+    );
+    const seen = item.view();
+    expect(seen.file).toBe("unknown");
+    expect(() => item.turnOn(seen.stamp)).toThrow(/leaves it alone/);
+    expect(() => item.turnOff(seen.stamp)).toThrow(/leaves it alone/);
+    expect(readFileSync(item.path, "utf8")).toContain("/opt/other/run");
   });
 
-  it("turns off without stopping the running Konfab, unless unloading is chosen", () => {
+  it.each<[string, (item: LoginItem) => void]>([
+    ["changed", (item) => writeFileSync(item.path, `${EARLIER}\n`)],
+    [
+      "replaced",
+      (item) => {
+        rmSync(item.path);
+        writeFileSync(item.path, EARLIER);
+      },
+    ],
+    [
+      "made a link",
+      (item) => {
+        const elsewhere = join(home, "elsewhere.plist");
+        writeFileSync(elsewhere, EARLIER);
+        rmSync(item.path);
+        symlinkSync(elsewhere, item.path);
+      },
+    ],
+    ["removed", (item) => rmSync(item.path)],
+  ])(
+    "does nothing when the file was %s after the question",
+    (_name, change) => {
+      for (const turn of ["on", "off"] as const) {
+        const item = make();
+        put(item, EARLIER);
+        const { stamp } = item.view();
+        change(item);
+        const before = item.view().stamp;
+        expect(() =>
+          turn === "on" ? item.turnOn(stamp) : item.turnOff(stamp),
+        ).toThrow(/changed since/);
+        expect(item.view().stamp).toBe(before);
+        rmSync(item.path, { force: true });
+      }
+    },
+  );
+
+  it("turns off without stopping the running Konfab; unloading is its own step and never throws", () => {
     const item = make();
-    item.turnOn();
+    item.turnOn(item.view().stamp);
     loaded = true;
-    expect(item.view().loaded).toBe(true);
-    item.turnOff(false);
+    item.turnOff(item.view().stamp);
     expect(item.view().file).toBe("none");
     expect(calls.some(([verb]) => verb === "bootout")).toBe(false);
-    item.turnOff(true);
+    item.unload();
     expect(calls.filter(([verb]) => verb === "bootout")).toEqual([
       ["bootout", "gui/501/com.konfab.server"],
     ]);
+    expect(item.view().last_unload).toEqual({ ok: true, said: "Unloaded." });
+    for (const [given, said] of [
+      [{ code: 5 }, /refused.*code 5/],
+      [{ code: null }, /didn't answer in time/],
+      ["throws", /couldn't be unloaded/],
+    ] as const) {
+      bootout = given;
+      expect(() => item.unload()).not.toThrow();
+      expect(item.view().last_unload).toMatchObject({
+        ok: false,
+        said: expect.stringMatching(said),
+      });
+    }
   });
 
-  it("is only on macOS, and writes through no link", () => {
+  it("is only on macOS", () => {
     const other = make("linux");
     expect(other.view()).toMatchObject({ available: false });
-    expect(() => other.turnOn()).toThrow(/service manager/);
+    expect(() => other.turnOn("none")).toThrow(/service manager/);
+    expect(() => other.unload()).toThrow(/service manager/);
     expect(calls).toEqual([]);
-    const item = make();
-    mkdirSync(join(home, "Library/LaunchAgents"), { recursive: true });
-    const elsewhere = join(home, "elsewhere.plist");
-    writeFileSync(elsewhere, "mine");
-    symlinkSync(elsewhere, item.path);
-    expect(() => item.turnOn()).toThrow(/link/);
-    expect(readFileSync(elsewhere, "utf8")).toBe("mine");
   });
 });

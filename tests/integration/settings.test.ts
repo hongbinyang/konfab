@@ -478,22 +478,27 @@ describe("the settings routes", () => {
       file: "none",
       loaded: false,
     });
-    expect((await post({ on: true })).json().login_item).toMatchObject({
-      file: "current",
-    });
+    const stamp = async () => (await view()).login_item.stamp as string;
+    expect(
+      (await post({ on: true, stamp: await stamp() })).json().login_item,
+    ).toMatchObject({ file: "current" });
+    // Not the file that was shown: nothing is done.
+    expect((await post({ on: false, stamp: "none" })).statusCode).toBe(409);
     expect(launchctl.some(([verb]) => verb !== "print")).toBe(false);
-    const off = await post({ on: false, unload: true });
+    const off = await post({ on: false, unload: true, stamp: await stamp() });
     expect(off.statusCode).toBe(200);
     // The answer is sent first; the unload comes after it.
     expect(launchctl.some(([verb]) => verb === "bootout")).toBe(false);
     await new Promise((done) => setTimeout(done, 700));
     expect(launchctl.filter(([verb]) => verb === "bootout")).toHaveLength(1);
+    // A failed unload is shown, not thrown.
+    expect((await view()).login_item.last_unload).toMatchObject({ ok: false });
     expect(
       (
         await call(
           "POST",
           "/api/settings/login-item",
-          { on: true },
+          { on: true, stamp: "none" },
           { origin: "http://evil.example" },
         )
       ).statusCode,

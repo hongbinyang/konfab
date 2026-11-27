@@ -273,15 +273,19 @@ export function settingsRoutes(
     { onRequest: fromPage, bodyLimit: 1024 },
     async (request) => {
       const body = z
-        .object({ on: z.boolean(), unload: z.boolean().default(false) })
+        .object({
+          on: z.boolean(),
+          unload: z.boolean().default(false),
+          stamp: z.string().max(200),
+        })
         .strict()
         .parse(request.body);
       const item = access.loginItem;
       if (!item)
         throw new KonfabError("not_available", 409, "Not available here");
       try {
-        if (body.on) item.turnOn();
-        else item.turnOff(false);
+        if (body.on) item.turnOn(body.stamp);
+        else item.turnOff(body.stamp);
       } catch (error) {
         throw new KonfabError(
           "login_item",
@@ -289,8 +293,9 @@ export function settingsRoutes(
           error instanceof LoginItemError ? error.message : "That didn't work.",
         );
       }
-      if (!body.on && body.unload)
-        setTimeout(() => item.turnOff(true), 500).unref();
+      // After the answer: unloading can end this very server. It never
+      // throws; its outcome is shown the next time the page asks.
+      if (!body.on && body.unload) setTimeout(() => item.unload(), 500).unref();
       return view();
     },
   );
