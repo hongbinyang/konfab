@@ -510,7 +510,7 @@ Not yet verified: a real macOS login item.
 | PN8 | MUST | One way: after setup Konfab reads nothing from Telegram. Agents have no route to setup or sending. |
 | PN9 | MUST | Automated tests use a local stand-in and never contact Telegram. |
 
-Not yet verified: real Telegram delivery, the real Keychain prompt, Linux and Windows.
+Verified once with the lead's own bot (2026-11-26): set up in the page with the token in the Keychain, the test message, and a real notice for a mention while away. Not yet verified: Linux and Windows.
 
 ## 23. Asking agents to rejoin
 
